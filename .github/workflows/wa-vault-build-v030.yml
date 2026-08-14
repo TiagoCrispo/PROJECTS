@@ -19,6 +19,15 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Verify transport chunks
+        run: |
+          wc -c wa-vault-build/part-00.b64 wa-vault-build/part-01.b64 wa-vault-build/part-02.b64 wa-vault-build/part-03-0.b64 wa-vault-build/part-03-1.b64
+          echo '51fc16918a890004c047a5b7146eeff05a3e4088b7b61b7f4cf41c7090cd045f  wa-vault-build/part-00.b64' | sha256sum -c -
+          echo '0e0c78d0accaaab6a89ae8701e2fbb0b5e46788c90de477fb4735def34107737  wa-vault-build/part-01.b64' | sha256sum -c -
+          echo '3850aaf7deced0010dd88159583752d91d1bdcdd9ea0c40b3481b4c91c8476ff  wa-vault-build/part-02.b64' | sha256sum -c -
+          echo 'a58acaf6e2c63f80c3e5600af55314b7be9c2c0bdbaf2a1fda32335b1c1a2c02  wa-vault-build/part-03-0.b64' | sha256sum -c -
+          echo 'e2eb09215b522e8058f4d9a8594d64378f59e42cf7a528a879956cb1e4513ee2  wa-vault-build/part-03-1.b64' | sha256sum -c -
+
       - name: Decode project
         run: |
           mkdir -p wa-vault-build/project
@@ -29,6 +38,7 @@ jobs:
             wa-vault-build/part-03-0.b64 \
             wa-vault-build/part-03-1.b64 > /tmp/project.b64
           base64 -d /tmp/project.b64 > /tmp/project.tar.xz
+          xz -t /tmp/project.tar.xz
           tar -xJf /tmp/project.tar.xz -C wa-vault-build/project
 
       - uses: android-actions/setup-android@v3
@@ -49,16 +59,6 @@ jobs:
       - name: Build debug APK
         working-directory: wa-vault-build/project
         run: gradle :app:assembleDebug --stacktrace
-
-      - name: Preserve build metadata
-        if: always()
-        working-directory: wa-vault-build/project
-        run: |
-          mkdir -p build-metadata
-          cp verify_source.py build-metadata/verify_source.py
-          cp ARCHITECTURE.md build-metadata/ARCHITECTURE.md
-          cp TEST_MATRIX.md build-metadata/TEST_MATRIX.md
-          cp CHANGELOG.md build-metadata/CHANGELOG.md
 
       - uses: actions/upload-artifact@v4
         if: success()
