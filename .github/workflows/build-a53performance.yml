@@ -29,6 +29,11 @@ jobs:
           unzip -q A53Performance-source-fixed.zip -d build-src
           test -f build-src/A53Performance/settings.gradle.kts
 
+      - name: Apply source fixes
+        run: |
+          cp patches/ClassScreen.kt build-src/A53Performance/app/src/main/java/com/fer/a53performance/ui/screens/ClassScreen.kt
+          cp patches/ToolsScreen.kt build-src/A53Performance/app/src/main/java/com/fer/a53performance/ui/screens/ToolsScreen.kt
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
