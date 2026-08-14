@@ -12,27 +12,22 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Reconstruct and validate source
+      - name: Reconstruct and validate v1.1 source
         run: |
-          cat a53-source-00 a53-source-01 a53-source-02 a53-source-03 a53-source-04 a53-source-05 > a53-source.b64
-          test "$(wc -c < a53-source.b64)" -eq 48288
-          base64 -d a53-source.b64 > A53Performance-source-fixed.zip
-          test "$(wc -c < A53Performance-source-fixed.zip)" -eq 36214
-          unzip -t A53Performance-source-fixed.zip
+          cat v11f-00 v11f-01 v11f-02 v11f-03 v11f-04 v11f-05 v11f-06 v11f-07 > v11f.b64
+          test "$(wc -c < v11f.b64)" -eq 62020
+          base64 -d v11f.b64 > A53Performance-v1.1-source.zip
+          test "$(wc -c < A53Performance-v1.1-source.zip)" -eq 46515
+          echo "978e60067f751ed50978f8e7efd2e7ec06d57047a8c413dfe10c4fc36e2ce29e  A53Performance-v1.1-source.zip" | sha256sum -c -
+          unzip -t A53Performance-v1.1-source.zip
           rm -rf build-src
           mkdir build-src
-          unzip -q A53Performance-source-fixed.zip -d build-src
+          unzip -q A53Performance-v1.1-source.zip -d build-src
           test -f build-src/A53Performance/settings.gradle.kts
-
-      - name: Apply source fixes
-        run: |
-          cp patches/ClassScreen.kt build-src/A53Performance/app/src/main/java/com/fer/a53performance/ui/screens/ClassScreen.kt
-          cp patches/ToolsScreen.kt build-src/A53Performance/app/src/main/java/com/fer/a53performance/ui/screens/ToolsScreen.kt
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -49,18 +44,21 @@ jobs:
         working-directory: build-src/A53Performance
         run: gradle --no-daemon --stacktrace assembleDebug
 
-      - name: Prepare APK
+      - name: Prepare downloads
         run: |
           mkdir -p release
-          cp build-src/A53Performance/app/build/outputs/apk/debug/app-debug.apk release/A53Performance-v1.0-debug.apk
-          sha256sum release/A53Performance-v1.0-debug.apk | tee release/SHA256.txt
+          cp build-src/A53Performance/app/build/outputs/apk/debug/app-debug.apk release/A53Performance-v1.1-debug.apk
+          sha256sum release/A53Performance-v1.1-debug.apk | tee release/SHA256.txt
+          cd release
+          zip -q A53Performance-v1.1-APK.zip A53Performance-v1.1-debug.apk SHA256.txt
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: A53Performance-v1.0-APK
+          name: A53Performance-v1.1-APK
           path: |
-            release/A53Performance-v1.0-debug.apk
+            release/A53Performance-v1.1-debug.apk
             release/SHA256.txt
+            release/A53Performance-v1.1-APK.zip
           if-no-files-found: error
           retention-days: 30
