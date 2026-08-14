@@ -55,8 +55,7 @@ jobs:
           gradle-version: '8.13'
 
       - name: Verify source invariants
-        working-directory: wa-vault-build/project
-        run: python3 verify_source.py
+        run: python3 wa-vault-build/verify_source_ci.py wa-vault-build/project
 
       - name: Build debug APK
         working-directory: wa-vault-build/project
