@@ -56,6 +56,7 @@ jobs:
           CR=build-src/A53Performance/app/src/main/java/com/fer/a53performance/data/CleanerRepository.kt
           python3 -c "from pathlib import Path; p=Path('$CR'); s=p.read_text(); s=s.replace('val items = exact.map { file ->','val items = exact.sortedByDescending { it.lastModifiedSafe() }.map { file ->').replace('}.sortedByDescending { it.lastModifiedSafe() }','}').replace('cache[key]?.let { known -> inherited = known; break }','val known = cache[key]; if (known != null) { inherited = known; break }'); p.write_text(s)"
 
+          cat v131bin_00 v131bin_01 v131bin_02 v131bin_03 v131bin_04 > v131-overlay.tar.gz
           test "$(wc -c < v131-overlay.tar.gz)" -eq 18725
           echo "3f96cf2d5e2b48ad76b9728cab8fe78ad9810034673bdfedd3d8f71c8b0ddb25  v131-overlay.tar.gz" | sha256sum -c -
           tar -xzf v131-overlay.tar.gz -C build-src/A53Performance
