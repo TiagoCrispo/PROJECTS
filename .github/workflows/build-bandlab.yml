@@ -1,4 +1,4 @@
-name: Build BandLab APK
+name: Build BandLab v0.3 APK
 on:
   push:
     branches: [ agent/bandlab-apk-build ]
@@ -23,6 +23,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
+      - name: Apply v0.3 UI patch
+        run: |
+          base64 -d bandlab_v03_patch.py.gz.b64 | gzip -d > /tmp/patch_bandlab_v03.py
+          python /tmp/patch_bandlab_v03.py
       - name: Build APK
         working-directory: BandLabBuild
         run: gradle --no-daemon :app:assembleDebug
@@ -33,6 +37,6 @@ jobs:
           sha256sum BandLabBuild/app/build/outputs/apk/debug/app-debug.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: BandLab9Active-v0.2-test-apk
+          name: BandLab9Active-v0.3-test-apk
           path: BandLabBuild/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 1
