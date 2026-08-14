@@ -1,0 +1,67 @@
+name: Export A53 v1.3.2 Source
+
+on:
+  push:
+    branches: [a53performance-build]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct v1.3.2 source
+        run: |
+          cat v11f-00 v11f-01 v11f-02a v11f-02b v11f-02c v11f-02d v11f-03 v11f-04 v11f-05 v11f-06a v11f-06b0 v11f-06b1a v11f-06b1b v11f-07 > v11f.b64
+          base64 -d v11f.b64 > A53Performance-v1.1-source.zip
+          echo "978e60067f751ed50978f8e7efd2e7ec06d57047a8c413dfe10c4fc36e2ce29e  A53Performance-v1.1-source.zip" | sha256sum -c -
+          rm -rf build-src && mkdir build-src
+          unzip -q A53Performance-v1.1-source.zip -d build-src
+          sed -i 's/Settings.ACTION_MANAGE_STORAGE/Settings.ACTION_INTERNAL_STORAGE_SETTINGS/g' build-src/A53Performance/app/src/main/java/com/fer/a53performance/ui/screens/CleanerScreen.kt
+
+          cat v12ov_00 v12ov_01 v12ov_02 v12ov_03 > v12-overlay.b64
+          base64 -d v12-overlay.b64 > v12-overlay.tar.gz
+          echo "19b03389ff3d5501260d5c352ce583c7214a401a4a246bf188cf1216aec6940b  v12-overlay.tar.gz" | sha256sum -c -
+          tar -xzf v12-overlay.tar.gz -C build-src/A53Performance
+
+          SVC=build-src/A53Performance/app/src/main/java/com/fer/a53performance/shizuku/PrivilegedUserService.kt
+          sed -i \
+            -e 's/class PrivilegedUserService : IPrivilegedService.Stub() {/class PrivilegedUserService : IPrivilegedService.Stub {/' \
+            -e 's/^    constructor()$/    constructor() : super()/' \
+            -e 's/constructor(context: Context) : this()/constructor(context: Context) : super()/' \
+            "$SVC"
+          grep -q 'buildConfig = true' build-src/A53Performance/app/build.gradle.kts || sed -i '/aidl = true/a\        buildConfig = true' build-src/A53Performance/app/build.gradle.kts
+          python3 v121_patch.py
+          python3 v122_patch.py
+          python3 v123_patch.py
+
+          python3 -c "from pathlib import Path; p=bytearray(Path('v13ov_05').read_bytes()); assert len(p)==6000 and p[926]==112; p[926]=80; Path('v13ov_05.fixed').write_bytes(p); q=Path('v13ov_06').read_bytes(); assert len(q)==5192 and q[5146:5174]==b'fheXgenofn4Xl4Hp6H5+F5eB6eh+'; Path('v13ov_06.fixed').write_bytes(q[:5146]+q[5174:])"
+          cat v13ov_00 v13ov_01 v13ov_02 v13ov_03 v13ov_04 v13ov_05.fixed v13ov_06.fixed > v13-overlay.b64
+          base64 -d v13-overlay.b64 > v13-overlay.tar.gz
+          echo "757b12568441ea015e5c30abaf6389250f82618c7ace9259ae79256ad16772ba  v13-overlay.tar.gz" | sha256sum -c -
+          tar -xzf v13-overlay.tar.gz -C build-src/A53Performance
+
+          CR=build-src/A53Performance/app/src/main/java/com/fer/a53performance/data/CleanerRepository.kt
+          python3 -c "from pathlib import Path; p=Path('$CR'); s=p.read_text(); s=s.replace('val items = exact.map { file ->','val items = exact.sortedByDescending { it.lastModifiedSafe() }.map { file ->').replace('}.sortedByDescending { it.lastModifiedSafe() }','}').replace('cache[key]?.let { known -> inherited = known; break }','val known = cache[key]; if (known != null) { inherited = known; break }'); p.write_text(s)"
+
+          cat v131bin_00 v131bin_01 v131bin_02 v131bin_03 v131bin_04 > v131-overlay.tar.gz
+          echo "3f96cf2d5e2b48ad76b9728cab8fe78ad9810034673bdfedd3d8f71c8b0ddb25  v131-overlay.tar.gz" | sha256sum -c -
+          tar -xzf v131-overlay.tar.gz -C build-src/A53Performance
+
+          cat v132bin_00 v132bin_01 v132bin_02 v132bin_03 v132bin_04 v132bin_05 > v132-overlay.tar.gz
+          echo "53b33a7845bf08e057bc0107a889f774d182eaa620348e4fc9827ec9fd049f9f  v132-overlay.tar.gz" | sha256sum -c -
+          tar -xzf v132-overlay.tar.gz -C build-src/A53Performance
+
+          tar -czf A53Performance-v1.3.2-source.tar.gz -C build-src A53Performance
+
+      - name: Upload source
+        uses: actions/upload-artifact@v4
+        with:
+          name: A53Performance-v1.3.2-source
+          path: A53Performance-v1.3.2-source.tar.gz
+          retention-days: 2
