@@ -17,10 +17,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Reconstruct source archive
+      - name: Reconstruct and validate source
         run: |
-          cat a53-source.part00 a53-source.part01 > a53-source.b64
+          cat a53-source-00 a53-source-01 a53-source-02 a53-source-03 a53-source-04 a53-source-05 > a53-source.b64
+          test "$(wc -c < a53-source.b64)" -eq 48288
           base64 -d a53-source.b64 > A53Performance-source-fixed.zip
+          test "$(wc -c < A53Performance-source-fixed.zip)" -eq 36214
           unzip -t A53Performance-source-fixed.zip
           rm -rf build-src
           mkdir build-src
