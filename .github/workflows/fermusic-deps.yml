@@ -1,0 +1,28 @@
+name: FerMusic dependency fetch
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/fermusic-deps.yml'
+  workflow_dispatch:
+
+jobs:
+  fetch-deps:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch official Spotify Android App Remote and Gson
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p deps
+          curl -fL --retry 3 'https://raw.githubusercontent.com/spotify/android-sdk/master/app-remote-lib/spotify-app-remote-release-0.8.0.aar' -o deps/spotify-app-remote-release-0.8.0.aar
+          curl -fL --retry 3 'https://repo1.maven.org/maven2/com/google/code/gson/gson/2.10.1/gson-2.10.1.jar' -o deps/gson-2.10.1.jar
+          sha256sum deps/* | tee deps/SHA256SUMS.txt
+      - name: Upload dependencies
+        uses: actions/upload-artifact@v4
+        with:
+          name: fermusic-spotify-deps
+          path: deps/
+          if-no-files-found: error
+          retention-days: 1
