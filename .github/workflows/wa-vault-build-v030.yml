@@ -47,6 +47,19 @@ jobs:
           xz -t /tmp/project.tar.xz
           tar -xJf /tmp/project.tar.xz -C wa-vault-build/project
 
+      - name: Apply compile fixes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('wa-vault-build/project/app/src/main/java/com/fer/wavault/MainActivity.java')
+          s=p.read_text()
+          s=s.replace('this::startPermissionFlow','MainActivity.this::startPermissionFlow')
+          p.write_text(s)
+          m=Path('wa-vault-build/project/app/src/main/AndroidManifest.xml')
+          s=m.read_text().replace(' package="com.fer.wavault"','')
+          m.write_text(s)
+          PY
+
       - uses: android-actions/setup-android@v3
 
       - name: Install Android SDK 35
