@@ -19,10 +19,8 @@ jobs:
       - name: Reconstruct and validate v1.1 source
         run: |
           cat v11f-00 v11f-01 v11f-02a v11f-02b v11f-02c v11f-02d v11f-03 v11f-04 v11f-05 v11f-06a v11f-06b0 v11f-06b1a v11f-06b1b v11f-07 > v11f.b64
-          echo "assembled-bytes=$(wc -c < v11f.b64)"
           test "$(wc -c < v11f.b64)" -eq 62020
           base64 -d v11f.b64 > A53Performance-v1.1-source.zip
-          echo "zip-bytes=$(wc -c < A53Performance-v1.1-source.zip)"
           test "$(wc -c < A53Performance-v1.1-source.zip)" -eq 46515
           echo "978e60067f751ed50978f8e7efd2e7ec06d57047a8c413dfe10c4fc36e2ce29e  A53Performance-v1.1-source.zip" | sha256sum -c -
           unzip -t A53Performance-v1.1-source.zip
@@ -30,6 +28,7 @@ jobs:
           mkdir build-src
           unzip -q A53Performance-v1.1-source.zip -d build-src
           test -f build-src/A53Performance/settings.gradle.kts
+          sed -i 's/Settings.ACTION_MANAGE_STORAGE/Settings.ACTION_INTERNAL_STORAGE_SETTINGS/g' build-src/A53Performance/app/src/main/java/com/fer/a53performance/ui/screens/CleanerScreen.kt
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
