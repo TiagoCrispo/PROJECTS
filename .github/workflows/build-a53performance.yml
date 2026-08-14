@@ -18,7 +18,7 @@ jobs:
 
       - name: Reconstruct and validate v1.1 source
         run: |
-          cat v11f-00 v11f-01 v11f-02 v11f-03 v11f-04 v11f-05 v11f-06 v11f-07 > v11f.b64
+          cat v11f-00 v11f-01 v11f-02 v11f-03 v11f-04 v11f-05 v11f-06a v11f-06b v11f-07 > v11f.b64
           test "$(wc -c < v11f.b64)" -eq 62020
           base64 -d v11f.b64 > A53Performance-v1.1-source.zip
           test "$(wc -c < A53Performance-v1.1-source.zip)" -eq 46515
