@@ -1,0 +1,24 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'com.fer.bandlab'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'com.fer.bandlab'
+        minSdk 28
+        targetSdk 36
+        versionCode 3
+        versionName '0.2.0-test'
+    }
+
+    buildTypes {
+        debug { debuggable true }
+        release { minifyEnabled false }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
