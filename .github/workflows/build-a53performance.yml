@@ -42,6 +42,22 @@ jobs:
           path: ~/.android/debug.keystore
           key: a53performance-stable-debug-key-v1
 
+      - name: Create stable A53 signing key if missing
+        run: |
+          mkdir -p ~/.android
+          if [ ! -f ~/.android/debug.keystore ]; then
+            keytool -genkeypair \
+              -keystore ~/.android/debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -dname "CN=A53 Performance Debug,O=A53 Performance,C=AR" \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000
+          fi
+          echo "SIGNING_KEY_SHA256=$(sha256sum ~/.android/debug.keystore | awk '{print $1}')"
+
       - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -56,8 +72,9 @@ jobs:
           mkdir -p release
           cp build-src/A53Performance/app/build/outputs/apk/debug/app-debug.apk release/A53Performance-v1.1-stable.apk
           sha256sum release/A53Performance-v1.1-stable.apk | tee release/SHA256.txt
+          sha256sum ~/.android/debug.keystore | awk '{print $1 "  signing-key"}' > release/SIGNING_KEY_SHA256.txt
           cd release
-          zip -q A53Performance-v1.1-STABLE.zip A53Performance-v1.1-stable.apk SHA256.txt
+          zip -q A53Performance-v1.1-STABLE.zip A53Performance-v1.1-stable.apk SHA256.txt SIGNING_KEY_SHA256.txt
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -66,6 +83,7 @@ jobs:
           path: |
             release/A53Performance-v1.1-stable.apk
             release/SHA256.txt
+            release/SIGNING_KEY_SHA256.txt
             release/A53Performance-v1.1-STABLE.zip
           if-no-files-found: error
           retention-days: 30
