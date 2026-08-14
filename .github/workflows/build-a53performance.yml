@@ -58,6 +58,11 @@ jobs:
           echo "757b12568441ea015e5c30abaf6389250f82618c7ace9259ae79256ad16772ba  v13-overlay.tar.gz" | sha256sum -c -
           tar -xzf v13-overlay.tar.gz -C build-src/A53Performance
 
+          CR=build-src/A53Performance/app/src/main/java/com/fer/a53performance/data/CleanerRepository.kt
+          python3 -c "from pathlib import Path; p=Path('$CR'); s=p.read_text(); s=s.replace('val items = exact.map { file ->','val items = exact.sortedByDescending { it.lastModifiedSafe() }.map { file ->').replace('}.sortedByDescending { it.lastModifiedSafe() }','}').replace('cache[key]?.let { known -> inherited = known; break }','val known = cache[key]; if (known != null) { inherited = known; break }'); p.write_text(s)"
+          grep -q 'exact.sortedByDescending { it.lastModifiedSafe() }.map' "$CR"
+          grep -q 'val known = cache\[key\]; if (known != null)' "$CR"
+
           grep -q 'versionName = "1.3.0"' build-src/A53Performance/app/build.gradle.kts
           grep -q 'versionCode = 7' build-src/A53Performance/app/build.gradle.kts
           grep -q 'StorageScanService' build-src/A53Performance/app/src/main/AndroidManifest.xml
