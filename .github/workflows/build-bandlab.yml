@@ -15,13 +15,14 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.13'
+      - uses: android-actions/setup-android@v3
       - name: Android SDK 36
         run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
       - name: Build APK
         working-directory: BandLabBuild
         run: gradle --no-daemon :app:assembleDebug
