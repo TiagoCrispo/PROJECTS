@@ -21,8 +21,9 @@ jobs:
 
       - name: Verify transport chunks
         run: |
-          wc -c wa-vault-build/part-00.b64 wa-vault-build/part-01.b64 wa-vault-build/part-02.b64 wa-vault-build/part-03-0.b64 wa-vault-build/part-03-1.b64
-          echo '51fc16918a890004c047a5b7146eeff05a3e4088b7b61b7f4cf41c7090cd045f  wa-vault-build/part-00.b64' | sha256sum -c -
+          wc -c wa-vault-build/part-00-0.b64 wa-vault-build/part-00-1.b64 wa-vault-build/part-01.b64 wa-vault-build/part-02.b64 wa-vault-build/part-03-0.b64 wa-vault-build/part-03-1.b64
+          echo '1f2f63de628f46f6f20373b90df32ee6e894e56990b1a85cdaefbca4a7af1919  wa-vault-build/part-00-0.b64' | sha256sum -c -
+          echo 'a53c9225adca1d3008782e527159bc85aaea1184261772c49a5b6c0b3ea881e6  wa-vault-build/part-00-1.b64' | sha256sum -c -
           echo '0e0c78d0accaaab6a89ae8701e2fbb0b5e46788c90de477fb4735def34107737  wa-vault-build/part-01.b64' | sha256sum -c -
           echo '3850aaf7deced0010dd88159583752d91d1bdcdd9ea0c40b3481b4c91c8476ff  wa-vault-build/part-02.b64' | sha256sum -c -
           echo 'a58acaf6e2c63f80c3e5600af55314b7be9c2c0bdbaf2a1fda32335b1c1a2c02  wa-vault-build/part-03-0.b64' | sha256sum -c -
@@ -32,7 +33,8 @@ jobs:
         run: |
           mkdir -p wa-vault-build/project
           cat \
-            wa-vault-build/part-00.b64 \
+            wa-vault-build/part-00-0.b64 \
+            wa-vault-build/part-00-1.b64 \
             wa-vault-build/part-01.b64 \
             wa-vault-build/part-02.b64 \
             wa-vault-build/part-03-0.b64 \
