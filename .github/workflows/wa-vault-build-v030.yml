@@ -1,0 +1,71 @@
+name: WA Vault v0.3.0 build
+
+on:
+  push:
+    branches: [wa-vault-build-v030]
+    paths:
+      - 'wa-vault-build/**'
+      - '.github/workflows/wa-vault-build-v030.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Decode project
+        run: |
+          mkdir -p wa-vault-build/project
+          cat \
+            wa-vault-build/part-00.b64 \
+            wa-vault-build/part-01.b64 \
+            wa-vault-build/part-02.b64 \
+            wa-vault-build/part-03-0.b64 \
+            wa-vault-build/part-03-1.b64 > /tmp/project.b64
+          base64 -d /tmp/project.b64 > /tmp/project.tar.xz
+          tar -xJf /tmp/project.tar.xz -C wa-vault-build/project
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 35
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Verify source invariants
+        working-directory: wa-vault-build/project
+        run: python3 verify_source.py
+
+      - name: Build debug APK
+        working-directory: wa-vault-build/project
+        run: gradle :app:assembleDebug --stacktrace
+
+      - name: Preserve build metadata
+        if: always()
+        working-directory: wa-vault-build/project
+        run: |
+          mkdir -p build-metadata
+          cp verify_source.py build-metadata/verify_source.py
+          cp ARCHITECTURE.md build-metadata/ARCHITECTURE.md
+          cp TEST_MATRIX.md build-metadata/TEST_MATRIX.md
+          cp CHANGELOG.md build-metadata/CHANGELOG.md
+
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: WA-Vault-v0.3.0-debug
+          path: |
+            wa-vault-build/project/app/build/outputs/apk/debug/app-debug.apk
+            wa-vault-build/project/ARCHITECTURE.md
+            wa-vault-build/project/TEST_MATRIX.md
+            wa-vault-build/project/CHANGELOG.md
