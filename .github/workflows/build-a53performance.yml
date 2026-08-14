@@ -50,7 +50,8 @@ jobs:
           python3 v122_patch.py
           python3 v123_patch.py
 
-          cat v13ov_00 v13ov_01 v13ov_02 v13ov_03 v13ov_04 v13ov_05 v13ov_06 > v13-overlay.b64
+          python3 -c "from pathlib import Path; p=bytearray(Path('v13ov_05').read_bytes()); assert len(p)==6000 and p[926]==112; p[926]=80; Path('v13ov_05.fixed').write_bytes(p); q=Path('v13ov_06').read_bytes(); assert len(q)==5192 and q[5146:5174]==b'fheXgenofn4Xl4Hp6H5+F5eB6eh+'; Path('v13ov_06.fixed').write_bytes(q[:5146]+q[5174:])"
+          cat v13ov_00 v13ov_01 v13ov_02 v13ov_03 v13ov_04 v13ov_05.fixed v13ov_06.fixed > v13-overlay.b64
           test "$(wc -c < v13-overlay.b64)" -eq 41164
           base64 -d v13-overlay.b64 > v13-overlay.tar.gz
           test "$(wc -c < v13-overlay.tar.gz)" -eq 30871
