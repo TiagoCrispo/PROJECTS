@@ -70,7 +70,6 @@ jobs:
           grep -q 'versionCode = 9' build-src/A53Performance/app/build.gradle.kts
           grep -q 'CleanerResultStore' build-src/A53Performance/app/src/main/java/com/fer/a53performance/data/CleanerResultStore.kt
           grep -q 'StorageDeleteService' build-src/A53Performance/app/src/main/AndroidManifest.xml
-          grep -q 'Borrando.*\/.*' build-src/A53Performance/app/src/main/java/com/fer/a53performance/ui/screens/CleanerScreen.kt || true
           grep -q 'filteredFiles' build-src/A53Performance/app/src/main/java/com/fer/a53performance/ui/screens/CleanerScreen.kt
           if grep -q 'take(1_000)' build-src/A53Performance/app/src/main/java/com/fer/a53performance/ui/screens/CleanerScreen.kt; then exit 1; fi
           if grep -q 'ACCESS_NOTIFICATION_POLICY' build-src/A53Performance/app/src/main/AndroidManifest.xml; then exit 1; fi
@@ -125,3 +124,5 @@ jobs:
             release/A53Performance-v1.3.2-CLEANUP-UX-STABLE.zip
           if-no-files-found: error
           retention-days: 30
+
+# v1.3.2 build trigger
