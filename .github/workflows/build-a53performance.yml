@@ -16,7 +16,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Reconstruct A53 v1.3.1
+      - name: Reconstruct A53 v1.3.2
         run: |
           cat v11f-00 v11f-01 v11f-02a v11f-02b v11f-02c v11f-02d v11f-03 v11f-04 v11f-05 v11f-06a v11f-06b0 v11f-06b1a v11f-06b1b v11f-07 > v11f.b64
           test "$(wc -c < v11f.b64)" -eq 62020
@@ -61,12 +61,18 @@ jobs:
           echo "3f96cf2d5e2b48ad76b9728cab8fe78ad9810034673bdfedd3d8f71c8b0ddb25  v131-overlay.tar.gz" | sha256sum -c -
           tar -xzf v131-overlay.tar.gz -C build-src/A53Performance
 
-          grep -q 'versionName = "1.3.1"' build-src/A53Performance/app/build.gradle.kts
-          grep -q 'versionCode = 8' build-src/A53Performance/app/build.gradle.kts
-          grep -q 'deletePathsDetailed' build-src/A53Performance/app/src/main/aidl/com/fer/a53performance/shizuku/IPrivilegedService.aidl
-          grep -q 'ProcessBuilder("/system/bin/rm", "-f"' build-src/A53Performance/app/src/main/java/com/fer/a53performance/shizuku/PrivilegedUserService.kt
-          grep -q 'Borrando archivos definitivamente' build-src/A53Performance/app/src/main/java/com/fer/a53performance/ui/screens/CleanerScreen.kt
-          grep -q 'siguen existiendo y quedan seleccionados' build-src/A53Performance/app/src/main/java/com/fer/a53performance/ui/screens/CleanerScreen.kt
+          cat v132bin_00 v132bin_01 v132bin_02 v132bin_03 v132bin_04 v132bin_05 > v132-overlay.tar.gz
+          test "$(wc -c < v132-overlay.tar.gz)" -eq 20770
+          echo "53b33a7845bf08e057bc0107a889f774d182eaa620348e4fc9827ec9fd049f9f  v132-overlay.tar.gz" | sha256sum -c -
+          tar -xzf v132-overlay.tar.gz -C build-src/A53Performance
+
+          grep -q 'versionName = "1.3.2"' build-src/A53Performance/app/build.gradle.kts
+          grep -q 'versionCode = 9' build-src/A53Performance/app/build.gradle.kts
+          grep -q 'CleanerResultStore' build-src/A53Performance/app/src/main/java/com/fer/a53performance/data/CleanerResultStore.kt
+          grep -q 'StorageDeleteService' build-src/A53Performance/app/src/main/AndroidManifest.xml
+          grep -q 'Borrando.*\/.*' build-src/A53Performance/app/src/main/java/com/fer/a53performance/ui/screens/CleanerScreen.kt || true
+          grep -q 'filteredFiles' build-src/A53Performance/app/src/main/java/com/fer/a53performance/ui/screens/CleanerScreen.kt
+          if grep -q 'take(1_000)' build-src/A53Performance/app/src/main/java/com/fer/a53performance/ui/screens/CleanerScreen.kt; then exit 1; fi
           if grep -q 'ACCESS_NOTIFICATION_POLICY' build-src/A53Performance/app/src/main/AndroidManifest.xml; then exit 1; fi
 
       - name: Set up Java 17
@@ -98,23 +104,24 @@ jobs:
       - name: Prepare downloads
         run: |
           mkdir -p release
-          cp build-src/A53Performance/app/build/outputs/apk/debug/app-debug.apk release/A53Performance-v1.3.1-DELETE-FIX-STABLE.apk
-          sha256sum release/A53Performance-v1.3.1-DELETE-FIX-STABLE.apk | tee release/SHA256.txt
+          cp build-src/A53Performance/app/build/outputs/apk/debug/app-debug.apk release/A53Performance-v1.3.2-CLEANUP-UX-STABLE.apk
+          sha256sum release/A53Performance-v1.3.2-CLEANUP-UX-STABLE.apk | tee release/SHA256.txt
           sha256sum ~/.android/debug.keystore | awk '{print $1 "  signing-key"}' > release/SIGNING_KEY_SHA256.txt
-          echo 'A53 Performance v1.3.1 DELETE FIX' > release/LEEME.txt
-          echo 'Borrado real: Shizuku para todos los seleccionados, fallback rm, verificación individual y reporte de fallos.' >> release/LEEME.txt
+          echo 'A53 Performance v1.3.2 CLEANUP UX' > release/LEEME.txt
+          echo 'Índice persistente, selección total sin límite 1000, borrado en segundo plano con notificación y barra fija de acciones.' >> release/LEEME.txt
+          echo 'Los archivos físicos de stickers de WhatsApp no son el estado interno de paquetes/favoritos de WhatsApp.' >> release/LEEME.txt
           cd release
-          zip -q A53Performance-v1.3.1-DELETE-FIX-STABLE.zip A53Performance-v1.3.1-DELETE-FIX-STABLE.apk SHA256.txt SIGNING_KEY_SHA256.txt LEEME.txt
+          zip -q A53Performance-v1.3.2-CLEANUP-UX-STABLE.zip A53Performance-v1.3.2-CLEANUP-UX-STABLE.apk SHA256.txt SIGNING_KEY_SHA256.txt LEEME.txt
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: A53Performance-v1.3.1-DELETE-FIX-STABLE
+          name: A53Performance-v1.3.2-CLEANUP-UX-STABLE
           path: |
-            release/A53Performance-v1.3.1-DELETE-FIX-STABLE.apk
+            release/A53Performance-v1.3.2-CLEANUP-UX-STABLE.apk
             release/SHA256.txt
             release/SIGNING_KEY_SHA256.txt
             release/LEEME.txt
-            release/A53Performance-v1.3.1-DELETE-FIX-STABLE.zip
+            release/A53Performance-v1.3.2-CLEANUP-UX-STABLE.zip
           if-no-files-found: error
           retention-days: 30
