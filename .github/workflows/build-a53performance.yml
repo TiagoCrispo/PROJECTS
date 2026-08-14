@@ -11,12 +11,12 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Reconstruct and validate v1.1 source
+      - name: Reconstruct v1.1 base and apply v1.2 overlay
         run: |
           cat v11f-00 v11f-01 v11f-02a v11f-02b v11f-02c v11f-02d v11f-03 v11f-04 v11f-05 v11f-06a v11f-06b0 v11f-06b1a v11f-06b1b v11f-07 > v11f.b64
           test "$(wc -c < v11f.b64)" -eq 62020
@@ -30,6 +30,15 @@ jobs:
           test -f build-src/A53Performance/settings.gradle.kts
           sed -i 's/Settings.ACTION_MANAGE_STORAGE/Settings.ACTION_INTERNAL_STORAGE_SETTINGS/g' build-src/A53Performance/app/src/main/java/com/fer/a53performance/ui/screens/CleanerScreen.kt
 
+          cat v12ov_00 v12ov_01 v12ov_02 v12ov_03 > v12-overlay.b64
+          test "$(wc -c < v12-overlay.b64)" -eq 25320
+          base64 -d v12-overlay.b64 > v12-overlay.tar.gz
+          test "$(wc -c < v12-overlay.tar.gz)" -eq 18990
+          echo "19b03389ff3d5501260d5c352ce583c7214a401a4a246bf188cf1216aec6940b  v12-overlay.tar.gz" | sha256sum -c -
+          tar -xzf v12-overlay.tar.gz -C build-src/A53Performance
+          grep -q 'versionName = "1.2.0"' build-src/A53Performance/app/build.gradle.kts
+          grep -q 'dev.rikka.shizuku:api:13.1.5' build-src/A53Performance/app/build.gradle.kts
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
@@ -42,21 +51,11 @@ jobs:
           path: ~/.android/debug.keystore
           key: a53performance-stable-debug-key-v1
 
-      - name: Create stable A53 signing key if missing
+      - name: Verify stable signing key
         run: |
-          mkdir -p ~/.android
-          if [ ! -f ~/.android/debug.keystore ]; then
-            keytool -genkeypair \
-              -keystore ~/.android/debug.keystore \
-              -storepass android \
-              -alias androiddebugkey \
-              -keypass android \
-              -dname "CN=A53 Performance Debug,O=A53 Performance,C=AR" \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000
-          fi
+          test -f ~/.android/debug.keystore
           echo "SIGNING_KEY_SHA256=$(sha256sum ~/.android/debug.keystore | awk '{print $1}')"
+          echo "fb0a0e1354df4ff9029e7784db12ec1f436936295041c61f45d7ec0f4fe641e8  $HOME/.android/debug.keystore" | sha256sum -c -
 
       - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
@@ -70,20 +69,22 @@ jobs:
       - name: Prepare downloads
         run: |
           mkdir -p release
-          cp build-src/A53Performance/app/build/outputs/apk/debug/app-debug.apk release/A53Performance-v1.1-stable.apk
-          sha256sum release/A53Performance-v1.1-stable.apk | tee release/SHA256.txt
+          cp build-src/A53Performance/app/build/outputs/apk/debug/app-debug.apk release/A53Performance-v1.2-Shizuku-stable.apk
+          (cd build-src && zip -qr ../release/A53Performance-v1.2-source.zip A53Performance)
+          sha256sum release/A53Performance-v1.2-Shizuku-stable.apk | tee release/SHA256.txt
           sha256sum ~/.android/debug.keystore | awk '{print $1 "  signing-key"}' > release/SIGNING_KEY_SHA256.txt
           cd release
-          zip -q A53Performance-v1.1-STABLE.zip A53Performance-v1.1-stable.apk SHA256.txt SIGNING_KEY_SHA256.txt
+          zip -q A53Performance-v1.2-SHIZUKU-STABLE.zip A53Performance-v1.2-Shizuku-stable.apk SHA256.txt SIGNING_KEY_SHA256.txt A53Performance-v1.2-source.zip
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: A53Performance-v1.1-STABLE
+          name: A53Performance-v1.2-SHIZUKU-STABLE
           path: |
-            release/A53Performance-v1.1-stable.apk
+            release/A53Performance-v1.2-Shizuku-stable.apk
             release/SHA256.txt
             release/SIGNING_KEY_SHA256.txt
-            release/A53Performance-v1.1-STABLE.zip
+            release/A53Performance-v1.2-source.zip
+            release/A53Performance-v1.2-SHIZUKU-STABLE.zip
           if-no-files-found: error
           retention-days: 30
