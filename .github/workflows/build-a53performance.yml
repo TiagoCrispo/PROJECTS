@@ -57,7 +57,6 @@ jobs:
           echo "757b12568441ea015e5c30abaf6389250f82618c7ace9259ae79256ad16772ba  v13-overlay.tar.gz" | sha256sum -c -
           tar -xzf v13-overlay.tar.gz -C build-src/A53Performance
 
-          # Cosmetic accounting fix: after smart cache cleanup compare only the packages that were targeted.
           python3 - <<'PY'
           from pathlib import Path
           p = Path('build-src/A53Performance/app/src/main/java/com/fer/a53performance/ui/screens/CleanerScreen.kt')
@@ -124,18 +123,7 @@ jobs:
           cp build-src/A53Performance/app/build/outputs/apk/debug/app-debug.apk release/A53Performance-v1.3.0-ULTIMATE-STABLE.apk
           sha256sum release/A53Performance-v1.3.0-ULTIMATE-STABLE.apk | tee release/SHA256.txt
           sha256sum ~/.android/debug.keystore | awk '{print $1 "  signing-key"}' > release/SIGNING_KEY_SHA256.txt
-          cat > release/LEEME.txt <<'TXT'
-          A53 Performance v1.3.0 ULTIMATE
-
-          - Storage Inspector persistente en segundo plano con progreso.
-          - Basura segura, duplicados exactos, archivos grandes, WhatsApp, ocultos y apps.
-          - Limpieza por app usa pm clear --cache-only: no borra cuentas ni datos de usuario.
-          - Gaming: 120 Hz, ahorro desactivado, Game Mode PERFORMANCE cuando Android lo permite.
-          - Bateria maxima: 60 Hz, ahorro/adaptativo, Data Saver y standby restringido para apps de usuario.
-          - Protegidas en bateria: ChatGPT, Brave, Word/Microsoft 365, Spotify y WhatsApp.
-          - No molestar nunca es activado por A53 Performance.
-          - No se desactivan protecciones termicas.
-          TXT
+          printf '%s\n' 'A53 Performance v1.3.0 ULTIMATE' '' '- Escaneo persistente en segundo plano.' '- Basura segura, duplicados exactos, archivos grandes, WhatsApp, ocultos y apps.' '- Limpieza por app: pm clear --cache-only; no borra cuentas ni datos de usuario.' '- Gaming: 120 Hz, ahorro desactivado y Game Mode PERFORMANCE cuando Android lo permite.' '- Bateria maxima: 60 Hz, ahorro/adaptativo, Data Saver y standby restringido.' '- Protegidas: ChatGPT, Brave, Word/Microsoft 365, Spotify y WhatsApp.' '- No molestar nunca es activado.' '- No se desactivan protecciones termicas.' > release/LEEME.txt
           cd release
           zip -q A53Performance-v1.3.0-ULTIMATE-STABLE.zip A53Performance-v1.3.0-ULTIMATE-STABLE.apk SHA256.txt SIGNING_KEY_SHA256.txt LEEME.txt
 
