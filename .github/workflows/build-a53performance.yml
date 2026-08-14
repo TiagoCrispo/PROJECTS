@@ -16,7 +16,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Reconstruct v1.1 base and apply v1.2.1 overlay
+      - name: Reconstruct v1.1 base and apply v1.2.2 overlay
         run: |
           cat v11f-00 v11f-01 v11f-02a v11f-02b v11f-02c v11f-02d v11f-03 v11f-04 v11f-05 v11f-06a v11f-06b0 v11f-06b1a v11f-06b1b v11f-07 > v11f.b64
           test "$(wc -c < v11f.b64)" -eq 62020
@@ -48,14 +48,15 @@ jobs:
             sed -i '/aidl = true/a\        buildConfig = true' build-src/A53Performance/app/build.gradle.kts
 
           python3 v121_patch.py
+          python3 v122_patch.py
 
-          grep -q 'versionName = "1.2.1"' build-src/A53Performance/app/build.gradle.kts
-          grep -q 'versionCode = 4' build-src/A53Performance/app/build.gradle.kts
+          grep -q 'versionName = "1.2.2"' build-src/A53Performance/app/build.gradle.kts
+          grep -q 'versionCode = 5' build-src/A53Performance/app/build.gradle.kts
           grep -q 'dev.rikka.shizuku:api:13.1.5' build-src/A53Performance/app/build.gradle.kts
           grep -q 'constructor() : super()' "$SVC"
           grep -q 'buildConfig = true' build-src/A53Performance/app/build.gradle.kts
-          grep -q 'Abrir Shizuku' build-src/A53Performance/app/src/main/java/com/fer/a53performance/ui/screens/ModesScreen.kt
-          grep -q 'moe.shizuku.privileged.api' build-src/A53Performance/app/src/main/AndroidManifest.xml
+          grep -q 'Shizuku.shouldShowRequestPermissionRationale()' build-src/A53Performance/app/src/main/java/com/fer/a53performance/shizuku/ShizukuController.kt
+          grep -q 'Aplicaciones autorizadas' build-src/A53Performance/app/src/main/java/com/fer/a53performance/shizuku/ShizukuController.kt
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -87,22 +88,22 @@ jobs:
       - name: Prepare downloads
         run: |
           mkdir -p release
-          cp build-src/A53Performance/app/build/outputs/apk/debug/app-debug.apk release/A53Performance-v1.2.1-Shizuku-stable.apk
-          sha256sum release/A53Performance-v1.2.1-Shizuku-stable.apk | tee release/SHA256.txt
+          cp build-src/A53Performance/app/build/outputs/apk/debug/app-debug.apk release/A53Performance-v1.2.2-Shizuku-stable.apk
+          sha256sum release/A53Performance-v1.2.2-Shizuku-stable.apk | tee release/SHA256.txt
           sha256sum ~/.android/debug.keystore | awk '{print $1 "  signing-key"}' > release/SIGNING_KEY_SHA256.txt
-          printf 'A53 Performance v1.2.1\n\nEl botón Shizuku ahora abre Shizuku si está detenido y abre la tienda si no está instalado.\nDespués de iniciar el servicio Shizuku, volvé a A53 Performance y pulsá Autorizar A53 Performance.\n' > release/LEEME.txt
+          printf 'A53 Performance v1.2.2\n\nShizuku: si el permiso no muestra popup, la app detecta el bloqueo y abre Shizuku con la indicacion Aplicaciones autorizadas -> A53 Performance.\nLa firma estable se conserva para actualizar encima de v1.1/v1.2.\n' > release/LEEME.txt
           cd release
-          zip -q A53Performance-v1.2.1-SHIZUKU-STABLE.zip A53Performance-v1.2.1-Shizuku-stable.apk SHA256.txt SIGNING_KEY_SHA256.txt LEEME.txt
+          zip -q A53Performance-v1.2.2-SHIZUKU-STABLE.zip A53Performance-v1.2.2-Shizuku-stable.apk SHA256.txt SIGNING_KEY_SHA256.txt LEEME.txt
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: A53Performance-v1.2.1-SHIZUKU-STABLE
+          name: A53Performance-v1.2.2-SHIZUKU-STABLE
           path: |
-            release/A53Performance-v1.2.1-Shizuku-stable.apk
+            release/A53Performance-v1.2.2-Shizuku-stable.apk
             release/SHA256.txt
             release/SIGNING_KEY_SHA256.txt
             release/LEEME.txt
-            release/A53Performance-v1.2.1-SHIZUKU-STABLE.zip
+            release/A53Performance-v1.2.2-SHIZUKU-STABLE.zip
           if-no-files-found: error
           retention-days: 30
