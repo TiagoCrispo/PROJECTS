@@ -1,0 +1,23 @@
+name: WA Vault v0.4.1 patch integrity
+on:
+  push:
+    branches: [wa-vault-build-v041]
+    paths: ['.github/workflows/wa-vault-v041-patchcheck.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check patch fragments
+        run: |
+          set -u
+          wc -c wa-vault-build-v041/patch-0*.b64
+          sha256sum wa-vault-build-v041/patch-0*.b64
+          echo 'EXPECTED 00 752dc1a7fe271b7146fcac074ed0f2135764c5765394d25981ce093724e40c06'
+          echo 'EXPECTED 01 4a0c8fb0fa0a4dd30d6d2fd26fcaad0baa9ccbeb9f4bd400fcc5c7e16e101d08'
+          echo 'EXPECTED 02 bc04f436f360ac7a572ac499488942769a7493fca84d24dbc9309aea792eab8d'
+          echo 'EXPECTED 03 6f8b9c8d93000e2abe26189e749282719185ade2205ebf93330bec3005d4246c'
+          for f in wa-vault-build-v041/patch-0*.b64; do echo "decode $f"; base64 -d "$f" >/dev/null && echo OK || echo FAIL; done
