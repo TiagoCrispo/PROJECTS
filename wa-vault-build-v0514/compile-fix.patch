@@ -1,0 +1,34 @@
+--- a/app/src/main/java/com/fer/wavault/MainActivity.java
++++ b/app/src/main/java/com/fer/wavault/MainActivity.java
+@@ -820,20 +820,26 @@
+     }
+ 
+     private void showMediaMenu(){
+-        String[] options={"Tipo: "+recoveredFilterName(),"Buscar"+(mediaQuery.isEmpty()?"":" · "+mediaQuery),"Fecha: "+mediaDateLabel(),mediaFavoritesOnly?"Mostrar todos":"Solo favoritos","Ordenar: "+mediaSortShortLabel(),"Calendario","Conversaciones","Papelera","Almacenamiento"};
++        String[] options={"Tipo: "+recoveredFilterName(),"Buscar"+(mediaQuery.isEmpty()?"":" · "+mediaQuery),"Fecha: "+mediaDateLabel(),mediaFavoritesOnly?"Mostrar todos":"Solo favoritos","Ordenar: "+mediaSortShortLabel(),"Papelera","Almacenamiento"};
+         new AlertDialog.Builder(this).setTitle("Recuperados").setItems(options,(d,which)->{
+             if(which==0)showRecoveredFilterDialog();
+             else if(which==1)showRecoveredSearchDialog();
+             else if(which==2)showRecoveredDateDialog();
+             else if(which==3){mediaFavoritesOnly=!mediaFavoritesOnly;showMedia();}
+             else if(which==4)showMediaSortDialog();
+-            else if(which==5)showRecoveryCalendarDialog();
+-            else if(which==6)showRecoveryAlbumsDialog();
+-            else if(which==7)showTrashDialog();
+-            else if(which==8)showStorageManager();
++            else if(which==5)showTrashDialog();
++            else if(which==6)showStorageManager();
+         }).show();
+     }
+ 
++    private String recoveredFilterName(){
++        if("image".equals(mediaFilter))return "Fotos";
++        if("video".equals(mediaFilter))return "Videos";
++        if("audio".equals(mediaFilter))return "Audio";
++        if("document".equals(mediaFilter))return "Documentos";
++        return "Todos";
++    }
++
+     private void showRecoveredFilterDialog(){
+         final String[] labels={"Todos","Fotos","Videos","Audio","Documentos"};final String[] ids={"all","image","video","audio","document"};
+         new AlertDialog.Builder(this).setTitle("Mostrar").setItems(labels,(d,w)->{mediaFilter=ids[w];mediaPendingOnly=false;mediaUnlinkedOnly=false;showMedia();}).show();
