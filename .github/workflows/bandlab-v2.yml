@@ -137,13 +137,13 @@ jobs:
           V20=work/app/build/outputs/apk/v20/debug/app-v20-debug.apk
           V21=work/app/build/outputs/apk/v21/debug/app-v21-debug.apk
 
-          timeout 90s adb install "$V20"
+          timeout 240s adb install "$V20"
           adb logcat -c
           timeout 60s adb shell am start -n com.fer.bandlab/.MainActivity | tee verification/v20-start.txt
           sleep 5
           test -n "$(adb shell pidof com.fer.bandlab | tr -d '\r')"
 
-          timeout 90s adb install -r "$V21"
+          timeout 240s adb install -r "$V21"
           adb logcat -c
           adb shell am force-stop com.fer.bandlab
           timeout 60s adb shell am start -n com.fer.bandlab/.MainActivity | tee verification/v21-start.txt
