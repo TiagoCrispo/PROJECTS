@@ -1,5 +1,6 @@
 name: WA Vault v0.3.2 build
 
+# Rebuild after all verified payload chunks were uploaded.
 on:
   push:
     branches: [wa-vault-build-v032]
