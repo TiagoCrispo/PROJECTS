@@ -1,0 +1,142 @@
+name: A53 Performance v1.15.1 Cleaner Polish
+
+on:
+  push:
+    branches: [a53-build-v1.10]
+    paths:
+      - 'v1151part-*'
+      - '.github/workflows/a53-v1151-build.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct verified v1.15 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat a53v113part-* > source.b64
+          test "$(wc -c < source.b64)" -eq 54840
+          base64 -d source.b64 > a53v113-source.tar.xz
+          echo "2aeec9d8fa486fc7112e9643e0a1628d9d9d9ee85a90dfc80f68cc9d29a0f7ba  a53v113-source.tar.xz" | sha256sum -c -
+          tar -xJf a53v113-source.tar.xz
+
+          cat a53v114diff-* > v114diff.b64
+          test "$(wc -c < v114diff.b64)" -eq 28656
+          base64 -d v114diff.b64 > v114.diff.xz
+          echo "8af44f6f22f7d176638fc92e572022c81fbf324cb117b5ee7cbdb6d98b8c498b  v114.diff.xz" | sha256sum -c -
+          xz -dc v114.diff.xz > v114.diff
+          patch --batch --forward -p4 -d a53v113 < v114.diff
+          mv a53v113 a53v114
+
+          cat a53v1141patch-part-* > v1141patch.b64
+          base64 -d v1141patch.b64 > v1141.patch.xz
+          xz -dc v1141.patch.xz > v1141.patch
+          patch --batch --forward -p1 -d a53v114 < v1141.patch
+          mv a53v114 a53v1141
+
+          cat v115part-* > v115.b64
+          test "$(wc -c < v115.b64)" -eq 17884
+          base64 -d v115.b64 > v115.diff.xz
+          echo "7823ced7165575f269992f710a1674ff2a62ff41319e1be160e5989e0c9ba90a  v115.diff.xz" | sha256sum -c -
+          xz -dc v115.diff.xz > v115.diff
+          patch --batch --forward -p1 -d a53v1141 < v115.diff
+          mv a53v1141 a53v115
+          grep -q "versionCode 22" a53v115/app/build.gradle
+          grep -q "versionName '1.15.0'" a53v115/app/build.gradle
+          grep -q "autoAuthorizeShizuku" a53v115/app/src/main/java/com/fer/a53performance/MainActivity.java
+
+      - name: Apply verified v1.15.1 polish patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat v1151part-* > v1151.b64
+          test "$(wc -c < v1151.b64)" -eq 19632
+          base64 -d v1151.b64 > v1151.diff.xz
+          test "$(wc -c < v1151.diff.xz)" -eq 14724
+          echo "00873cc5910bbf9982cd75d0aac272a66d6c0eff5c1b10502c8f408ce66566d5  v1151.diff.xz" | sha256sum -c -
+          xz -dc v1151.diff.xz > v1151.diff
+          patch --batch --forward -p1 -d a53v115 < v1151.diff
+          mv a53v115 a53v1151
+          grep -q "versionCode 23" a53v1151/app/build.gradle
+          grep -q "versionName '1.15.1'" a53v1151/app/build.gradle
+          grep -q "TextureView" a53v1151/app/src/main/java/com/fer/a53performance/MainActivity.java
+          grep -q "loadVideoThumb" a53v1151/app/src/main/java/com/fer/a53performance/MainActivity.java
+          grep -q "updateBrowserRowSelection" a53v1151/app/src/main/java/com/fer/a53performance/MainActivity.java
+          grep -q "Limpiar RAM" a53v1151/app/src/main/java/com/fer/a53performance/MainActivity.java
+          grep -q "Continuar" a53v1151/app/src/main/java/com/fer/a53performance/service/StorageScanService.java
+          ! grep -q 'smallButton("Herramientas")' a53v1151/app/src/main/java/com/fer/a53performance/MainActivity.java
+          grep -q "autoAuthorizeShizuku" a53v1151/app/src/main/java/com/fer/a53performance/MainActivity.java
+          grep -q "com.sec.android.app.voicenote" a53v1151/app/src/main/java/com/fer/a53performance/AppCore.java
+          grep -q "protectedFromDelete" a53v1151/app/src/main/java/com/fer/a53performance/StorageIndex.java
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Restore stable v1.11+ signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: a53-performance-signing-v110
+          fail-on-cache-miss: true
+
+      - name: Force exact stable signer
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$HOME/.android/debug.keystore"
+          keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | tee SIGNING_CERT.txt
+          grep -q "14:C3:F4:55:94:6E:5E:43:6C:64:A6:A3:22:12:1F:6F:5B:BA:7F:96:F9:CF:9A:28:EC:73:05:CF:B3:87:52:95" SIGNING_CERT.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('a53v1151/app/build.gradle')
+          s=p.read_text()
+          needle='    compileOptions {'
+          insert='''    signingConfigs {\n        stableDebug {\n            storeFile file(System.getProperty("user.home") + "/.android/debug.keystore")\n            storePassword "android"\n            keyAlias "androiddebugkey"\n            keyPassword "android"\n        }\n    }\n\n    buildTypes {\n        debug {\n            signingConfig signingConfigs.stableDebug\n        }\n    }\n\n'''
+          if needle not in s: raise SystemExit('compileOptions anchor missing')
+          p.write_text(s.replace(needle, insert+needle, 1))
+          PY
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Build v1.15.1
+        run: gradle -p a53v1151 :app:assembleDebug --stacktrace
+
+      - name: Verify APK signer package Shizuku protections and alignment
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=a53v1151/app/build/outputs/apk/debug/app-debug.apk
+          BT=$(find "$ANDROID_HOME/build-tools" -maxdepth 1 -mindepth 1 -type d | sort -V | tail -1)
+          OUT=a53v1151/app/build/outputs/apk/debug/verification
+          mkdir -p "$OUT"
+          "$BT/apksigner" verify --verbose --print-certs "$APK" | tee "$OUT/APK_VERIFY.txt"
+          grep -q "certificate SHA-256 digest: 14c3f455946e5e436c64a6a322121f6f5bba7f96f9cf9a28ec7305cfb3875295" "$OUT/APK_VERIFY.txt"
+          sha256sum "$APK" | tee "$OUT/SHA256.txt"
+          "$BT/aapt" dump badging "$APK" | head -35 | tee "$OUT/BADGING.txt"
+          grep -q "package: name='com.fer.a53performance' versionCode='23' versionName='1.15.1'" "$OUT/BADGING.txt"
+          "$BT/aapt" dump xmltree "$APK" AndroidManifest.xml | tee "$OUT/MANIFEST_TREE.txt"
+          grep -q "rikka.shizuku.ShizukuProvider" "$OUT/MANIFEST_TREE.txt"
+          grep -q "com.fer.a53performance.shizuku" "$OUT/MANIFEST_TREE.txt"
+          cp SIGNING_CERT.txt "$OUT/SIGNING_CERT.txt"
+          unzip -t "$APK" > "$OUT/ZIP_TEST.txt"
+          "$BT/zipalign" -v -c -P 16 4 "$APK" > "$OUT/ZIPALIGN_16KB.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: A53Performance-v1.15.1-CLEANER-POLISH
+          retention-days: 1
+          path: |
+            a53v1151/app/build/outputs/apk/debug/app-debug.apk
+            a53v1151/app/build/outputs/apk/debug/verification/*
+          if-no-files-found: error
