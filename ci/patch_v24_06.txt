@@ -1,0 +1,214 @@
++            Row(modifier = Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
++                Column(modifier = Modifier.weight(1f)) {
++                    Text("Auto-pausa GPS", style = MaterialTheme.typography.titleMedium)
++                    Text("Detiene el tiempo activo cuando la velocidad GPS queda baja de forma sostenida.", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
++                }
++                Switch(checked = autoPause, onCheckedChange = vm::setAutoPauseEnabled)
++            }
++            Text("Objetivo de sesión", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
++            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 8.dp)) {
++                listOf(WorkoutGoalType.NONE to "Libre", WorkoutGoalType.DISTANCE to "Distancia", WorkoutGoalType.TIME to "Tiempo").forEach { (type, label) ->
++                    OutlinedButton(onClick = { vm.setWorkoutGoal(goal.copy(type = type)) }, modifier = Modifier.weight(1f)) { Text(if (goal.type == type) "✓ $label" else label) }
++                }
++            }
++            if (goal.type == WorkoutGoalType.DISTANCE) {
++                OutlinedTextField(value = distanceKm, onValueChange = { distanceKm = it.replace(',', '.') }, label = { Text("Distancia objetivo (km)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
++                OutlinedButton(onClick = { distanceKm.toDoubleOrNull()?.let { vm.setWorkoutGoal(WorkoutGoal(WorkoutGoalType.DISTANCE, (it * 1000).toInt(), goal.timeMinutes)) } }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) { Text("Guardar distancia") }
++            }
++            if (goal.type == WorkoutGoalType.TIME) {
++                OutlinedTextField(value = timeMin, onValueChange = { timeMin = it.filter(Char::isDigit) }, label = { Text("Tiempo objetivo (min)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
++                OutlinedButton(onClick = { timeMin.toIntOrNull()?.let { vm.setWorkoutGoal(WorkoutGoal(WorkoutGoalType.TIME, goal.distanceMeters, it)) } }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) { Text("Guardar tiempo") }
++            }
++        }
++
++        BandCard {
++            Text("HOME PERSONALIZABLE", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
++            Text("Mantené pulsada una tarjeta en Hoy para fijarla. Acá podés ordenar u ocultar cada bloque.", style = MaterialTheme.typography.bodyMedium, color = TextSecondary, modifier = Modifier.padding(top = 6.dp))
++            order.forEachIndexed { index, kind ->
++                Row(modifier = Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
++                    Column(modifier = Modifier.weight(1f)) {
++                        Text(cardName(kind), style = MaterialTheme.typography.titleMedium)
++                        Text(if (kind in hidden) "Oculta" else if (kind in pinned) "Visible · fijada" else "Visible", style = MaterialTheme.typography.bodySmall, color = if (kind in pinned) Accent else TextSecondary)
++                    }
++                    FilledTonalIconButton(onClick = { vm.moveDashboardCard(kind, -1) }, enabled = index > 0) { androidx.compose.material3.Icon(Icons.Rounded.ArrowUpward, contentDescription = "Subir") }
++                    FilledTonalIconButton(onClick = { vm.moveDashboardCard(kind, 1) }, enabled = index < order.lastIndex, modifier = Modifier.padding(start = 4.dp)) { androidx.compose.material3.Icon(Icons.Rounded.ArrowDownward, contentDescription = "Bajar") }
++                    FilledTonalIconButton(onClick = { vm.toggleDashboardPinned(kind) }, modifier = Modifier.padding(start = 4.dp)) { androidx.compose.material3.Icon(Icons.Rounded.PushPin, contentDescription = "Fijar", tint = if (kind in pinned) Accent else TextSecondary) }
++                    Switch(checked = kind !in hidden, onCheckedChange = { vm.setDashboardHidden(kind, !it) }, modifier = Modifier.padding(start = 4.dp))
++                }
++            }
++        }
++
++        BandCard {
++            Text("MODO OFFLINE", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
++            Text("Durante una salida BandLab no necesita mapa online: registra coordenadas GNSS y dibuja el recorrido desde esos puntos. Después podés exportarlo como GPX, TCX y CSV.", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
++            Text("Para máxima precisión, dejá Ubicación activada y concedé ubicación precisa antes de salir.", style = MaterialTheme.typography.bodyMedium, color = TextSecondary, modifier = Modifier.padding(top = 8.dp))
++        }
++    }
++}
++
++private fun cardName(kind: TodayCardKind) = when (kind) {
++    TodayCardKind.RECOVERY -> "Recuperación"
++    TodayCardKind.MOVEMENT -> "Movimiento"
++    TodayCardKind.STRENGTH -> "Fuerza"
++    TodayCardKind.HYDRATION -> "Hidratación"
++    TodayCardKind.TRAINING -> "Último entrenamiento"
++}
+diff -ruN '--exclude=.kotlin' '--exclude=build' '--exclude=dist' bandlab_v23_base/app/src/main/java/com/fer/bandlab/ui/screens/TrainingScreen.kt bandlab_v24/app/src/main/java/com/fer/bandlab/ui/screens/TrainingScreen.kt
+--- bandlab_v23_base/app/src/main/java/com/fer/bandlab/ui/screens/TrainingScreen.kt	2026-08-15 21:30:28.000000000 +0000
++++ bandlab_v24/app/src/main/java/com/fer/bandlab/ui/screens/TrainingScreen.kt	2026-08-15 22:11:09.599978854 +0000
+@@ -28,10 +28,12 @@
+ import androidx.compose.material3.FilledTonalButton
+ import androidx.compose.material3.Icon
+ import androidx.compose.material3.MaterialTheme
++import androidx.compose.material3.LinearProgressIndicator
+ import androidx.compose.material3.OutlinedTextField
+ import androidx.compose.material3.OutlinedButton
+ import androidx.compose.material3.Text
+ import androidx.compose.material3.TextButton
++import androidx.compose.material3.Switch
+ import androidx.compose.runtime.Composable
+ import androidx.compose.runtime.getValue
+ import androidx.compose.runtime.mutableStateOf
+@@ -49,9 +51,11 @@
+ import com.fer.bandlab.BandLabViewModel
+ import com.fer.bandlab.model.WorkoutStatus
+ import com.fer.bandlab.model.WorkoutType
++import com.fer.bandlab.model.StrengthSetType
+ import com.fer.bandlab.ui.BandCard
+ import com.fer.bandlab.ui.MetricLabel
+ import com.fer.bandlab.ui.PageHeader
++import com.fer.bandlab.ui.OfflineRouteView
+ import com.fer.bandlab.ui.theme.Accent
+ import com.fer.bandlab.ui.theme.AccentBlue
+ import com.fer.bandlab.ui.theme.TextSecondary
+@@ -67,6 +71,11 @@
+     val splitMeters by vm.splitMeters.collectAsStateWithLifecycle()
+     var strengthWeight by remember { mutableStateOf("") }
+     var strengthReps by remember { mutableStateOf("") }
++    var strengthRpe by remember { mutableStateOf("") }
++    var strengthRir by remember { mutableStateOf("") }
++    var strengthSetType by remember { mutableStateOf(StrengthSetType.NORMAL) }
++    var supersetEnabled by remember { mutableStateOf(false) }
++    var repeatTemplateIndex by remember { mutableStateOf(0) }
+     var showSubstitutes by remember { mutableStateOf(false) }
+     var pendingType by remember { mutableStateOf<WorkoutType?>(null) }
+     var showStopDialog by remember { mutableStateOf(false) }
+@@ -76,9 +85,7 @@
+     ) { granted ->
+         val type = pendingType
+         if (type != null) {
+-            val locationOk = type == WorkoutType.ROPE ||
+-                granted[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+-                granted[Manifest.permission.ACCESS_COARSE_LOCATION] == true
++            val locationOk = type == WorkoutType.ROPE || granted[Manifest.permission.ACCESS_FINE_LOCATION] == true
+             val activityOk = Build.VERSION.SDK_INT < 29 ||
+                 type != WorkoutType.ROPE ||
+                 granted[Manifest.permission.ACTIVITY_RECOGNITION] == true
+@@ -102,7 +109,7 @@
+                 add(Manifest.permission.ACCESS_FINE_LOCATION)
+                 add(Manifest.permission.ACCESS_COARSE_LOCATION)
+             }
+-            if (Build.VERSION.SDK_INT >= 29) add(Manifest.permission.ACTIVITY_RECOGNITION)
++            if (Build.VERSION.SDK_INT >= 29 && (type == WorkoutType.WALK || type == WorkoutType.RUN || type == WorkoutType.ROPE)) add(Manifest.permission.ACTIVITY_RECOGNITION)
+             if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
+         }.toTypedArray()
+         if (permissions.isEmpty()) vm.startWorkout(type) else permissionLauncher.launch(permissions)
+@@ -119,6 +126,14 @@
+                 subtitle = "Tiempo activo separado del tiempo detenido."
+             )
+ 
++            if (BuildConfig.FEATURE_STAGE >= 24) {
++                BandCard {
++                    Text("GNSS OFFLINE", style = MaterialTheme.typography.labelMedium, color = AccentBlue)
++                    Text("Entrena sin datos ni Wi‑Fi", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 6.dp))
++                    Text("Caminar, correr y ciclismo usan el GPS satelital del teléfono. La ruta, los splits, la altitud disponible y la exportación se guardan localmente; no se descargan mapas durante la salida.", style = MaterialTheme.typography.bodyMedium, color = TextSecondary, modifier = Modifier.padding(top = 8.dp))
++                }
++            }
++
+             WorkoutTypeCard(WorkoutType.WALK, Icons.Rounded.DirectionsWalk, Accent) { requestStart(it) }
+             WorkoutTypeCard(WorkoutType.RUN, Icons.Rounded.DirectionsRun, AccentBlue) { requestStart(it) }
+             WorkoutTypeCard(WorkoutType.CYCLE, Icons.Rounded.DirectionsBike, Warm) { requestStart(it) }
+@@ -133,28 +148,68 @@
+                         FilledTonalButton(onClick = { vm.setSplitMeters(500) }, modifier = Modifier.weight(1f)) { Text(if (splitMeters == 500) "✓ 500 m" else "500 m") }
+                         FilledTonalButton(onClick = { vm.setSplitMeters(1000) }, modifier = Modifier.weight(1f)) { Text(if (splitMeters == 1000) "✓ 1 km" else "1 km") }
+                     }
+-                    Text("La ruta descarta saltos >75 m y, después de >10 s sin GPS, reinicia el tramo para no dibujar una línea falsa al recuperar señal.", style = MaterialTheme.typography.bodyMedium, color = TextSecondary, modifier = Modifier.padding(top = 8.dp))
++                    Text("La ruta descarta saltos >75 m y, después de >10 s sin GPS, reinicia el tramo para no dibujar una línea falsa. En 2.4 la ruta se guarda offline con cortes de señal explícitos.", style = MaterialTheme.typography.bodyMedium, color = TextSecondary, modifier = Modifier.padding(top = 8.dp))
+                 }
+ 
+                 BandCard {
+                     Text("FUERZA PRO 2", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+                     Text(strengthStats.exercise.name, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 6.dp))
+                     Text(strengthStats.exercise.muscleGroup, style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
++                    if (BuildConfig.FEATURE_STAGE >= 24) {
++                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 10.dp)) {
++                            vm.strengthRoutines().forEach { routine ->
++                                FilledTonalButton(onClick = { vm.setStrengthRoutine(routine.id) }, modifier = Modifier.weight(1f)) { Text(if (strength.selectedRoutineId == routine.id) "✓ ${routine.id}" else routine.id) }
++                            }
++                        }
++                        Text("Rutina ${vm.strengthRoutines().firstOrNull { it.id == strength.selectedRoutineId }?.name ?: strength.selectedRoutineId}", style = MaterialTheme.typography.bodySmall, color = TextSecondary, modifier = Modifier.padding(top = 5.dp))
++                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
++                            vm.strengthRoutineExercises().take(5).forEach { ex ->
++                                OutlinedButton(onClick = { vm.selectStrengthExercise(ex.id) }, modifier = Modifier.weight(1f)) { Text(ex.name.take(8)) }
++                            }
++                        }
++                        OutlinedButton(onClick = vm::toggleStrengthFavorite, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) { Text(if (strengthStats.favorite) "★ Quitar de favoritos" else "☆ Añadir a favoritos") }
++                    }
+                     Row(modifier = Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                         MetricLabel("PR peso", strengthStats.maxWeightKg?.let { "%.1f".format(it) } ?: "—", "kg", AccentBlue)
+                         MetricLabel("PR reps", strengthStats.maxReps?.toString() ?: "—")
+                         MetricLabel("e1RM", strengthStats.bestE1rmKg?.let { "%.1f".format(it) } ?: "—", "kg", Warm)
+                     }
+                     Text("Volumen histórico: ${"%.0f".format(strengthStats.totalVolumeKg)} kg · próxima carga: ${strengthStats.suggestedWeightKg?.let { "%.1f kg".format(it) } ?: "sin datos"}", style = MaterialTheme.typography.bodyMedium, color = TextSecondary, modifier = Modifier.padding(top = 10.dp))
++                    if (BuildConfig.FEATURE_STAGE >= 24) {
++                        Text("Esta semana: ${"%.0f".format(strengthStats.weeklyVolumeKg)} kg${strengthStats.weeklyDeltaPercent?.let { " · %+.0f%% vs anterior".format(it) } ?: ""}", style = MaterialTheme.typography.bodyMedium, color = AccentBlue, modifier = Modifier.padding(top = 5.dp))
++                        val muscles = vm.strengthMuscleVolume().entries.take(3)
++                        if (muscles.isNotEmpty()) Text("Volumen 7 días · " + muscles.joinToString(" · ") { "${it.key} ${"%.0f".format(it.value)}kg" }, style = MaterialTheme.typography.bodySmall, color = TextSecondary, modifier = Modifier.padding(top = 5.dp))
++                    }
+                     Text("Volumen · últimas series", style = MaterialTheme.typography.labelMedium, color = TextSecondary, modifier = Modifier.padding(top = 10.dp))
+                     VolumeBars(strengthStats.history.take(10).reversed().map { it.volume })
++                    if (BuildConfig.FEATURE_STAGE >= 24 && strengthStats.history.isNotEmpty()) {
++                        Text("e1RM · últimas series de trabajo", style = MaterialTheme.typography.labelMedium, color = TextSecondary, modifier = Modifier.padding(top = 8.dp))
++                        VolumeBars(strengthStats.history.filter { it.setType != StrengthSetType.WARMUP }.take(10).reversed().map { it.e1rm })
++                    }
+                     if (strengthStats.history.isNotEmpty()) {
+                         Text("Historial reciente", style = MaterialTheme.typography.labelMedium, color = TextSecondary, modifier = Modifier.padding(top = 10.dp))
+                         strengthStats.history.take(4).forEach { set ->
+-                            Text("${"%.1f".format(set.weightKg)} kg × ${set.reps} · e1RM ${"%.1f".format(set.e1rm)} kg", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 3.dp))
++                            Text("${set.setType.label} · ${"%.1f".format(set.weightKg)} kg × ${set.reps} · e1RM ${"%.1f".format(set.e1rm)} kg${set.rpe?.let { " · RPE $it" } ?: ""}${set.rir?.let { " · RIR $it" } ?: ""}${set.supersetTag?.let { " · $it" } ?: ""}", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 3.dp))
+                         }
+                     }
+                     OutlinedButton(onClick = { showSubstitutes = true }, modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) { Text("Sustituir ejercicio sin perder historial") }
++                    if (BuildConfig.FEATURE_STAGE >= 24) {
++                        val template = vm.lastStrengthSessionTemplate()
++                        if (template.isNotEmpty()) {
++                            OutlinedButton(onClick = {
++                                val set = template[repeatTemplateIndex % template.size]
++                                vm.selectStrengthExercise(set.exerciseId); strengthWeight = set.weightKg.toString(); strengthReps = set.reps.toString(); strengthRpe = set.rpe?.toString() ?: ""; strengthRir = set.rir?.toString() ?: ""; strengthSetType = set.setType; supersetEnabled = set.supersetTag != null
++                                repeatTemplateIndex = (repeatTemplateIndex + 1) % template.size
++                            }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) { Text("Repetir última sesión · cargar siguiente serie") }
++                        }
++                        Text("Tipo de serie", style = MaterialTheme.typography.labelMedium, color = TextSecondary, modifier = Modifier.padding(top = 10.dp))
++                        Row(horizontalArrangement = Arrangement.spacedBy(5.dp), modifier = Modifier.padding(top = 5.dp)) {
++                            StrengthSetType.entries.forEach { type -> FilledTonalButton(onClick = { strengthSetType = type }, modifier = Modifier.weight(1f)) { Text(if (strengthSetType == type) "✓ ${type.label}" else type.label) } }
++                        }
++                        Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
++                            Text("Superset (grupo SS1)", style = MaterialTheme.typography.bodyMedium); Switch(checked = supersetEnabled, onCheckedChange = { supersetEnabled = it })
++                        }
++                    }
+                     Text("Descanso por serie", style = MaterialTheme.typography.labelMedium, color = TextSecondary, modifier = Modifier.padding(top = 10.dp))
+                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 6.dp)) {
+                         listOf(60, 90, 120).forEach { seconds ->
+@@ -167,10 +222,16 @@
+                         OutlinedTextField(value = strengthWeight, onValueChange = { strengthWeight = it.replace(',', '.') }, label = { Text("kg") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.weight(1f))
+                         OutlinedTextField(value = strengthReps, onValueChange = { strengthReps = it.filter(Char::isDigit) }, label = { Text("reps") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+                     }
++                    if (BuildConfig.FEATURE_STAGE >= 24) {
++                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
++                            OutlinedTextField(value = strengthRpe, onValueChange = { strengthRpe = it.replace(',', '.') }, label = { Text("RPE 1–10") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.weight(1f))
++                            OutlinedTextField(value = strengthRir, onValueChange = { strengthRir = it.filter(Char::isDigit) }, label = { Text("RIR 0–10") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
++                        }
++                    }
+                     Button(onClick = {
+-                        val kg = strengthWeight.toDoubleOrNull(); val reps = strengthReps.toIntOrNull()
+-                        if (kg != null && reps != null) { vm.addStrengthSet(kg, reps); strengthReps = "" } else vm.showMessage("Ingresá peso y repeticiones válidos")
