@@ -31,16 +31,13 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           p=Path('work/app/build.gradle.kts')
-          s=p.read_text().replace('builtins { named("java") { option("lite") } }', 'builtins { maybeCreate("java").apply { option("lite") } }')
-          p.write_text(s)
-
+          p.write_text(p.read_text().replace('builtins { named("java") { option("lite") } }', 'builtins { maybeCreate("java").apply { option("lite") } }'))
           p=Path('work/app/src/main/java/com/fer/bandlab/ui/BandLabApp.kt')
           s=p.read_text()
           if 'import androidx.compose.foundation.layout.RowScope' not in s:
               s=s.replace('import androidx.compose.foundation.layout.WindowInsets\n', 'import androidx.compose.foundation.layout.WindowInsets\nimport androidx.compose.foundation.layout.RowScope\n')
           s=s.replace('private fun NavItem(current: AppTab, target: AppTab, icon: ImageVector, onClick: (AppTab) -> Unit) {', 'private fun RowScope.NavItem(current: AppTab, target: AppTab, icon: ImageVector, onClick: (AppTab) -> Unit) {')
           p.write_text(s)
-
           p=Path('work/app/src/main/java/com/fer/bandlab/ui/screens/HealthScreen.kt')
           p.write_text(p.read_text().replace('import androidx.compose.material.icons.rounded.Walk\n',''))
           PY
@@ -53,7 +50,7 @@ jobs:
       - name: Install Android SDK
         run: |
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools" "emulator" "system-images;android-35;default;x86_64"
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools" "emulator" "system-images;android-30;default;x86_64"
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
@@ -93,19 +90,22 @@ jobs:
         working-directory: work
         run: gradle --no-daemon :app:testV20DebugUnitTest :app:assembleV20Debug :app:assembleV20Release
 
-      - name: Boot Android emulator
+      - name: Boot Android emulator with bounded waits
         shell: bash
         run: |
           set -euo pipefail
-          echo no | avdmanager create avd -n bandlab_ci -k "system-images;android-35;default;x86_64" --device "pixel_6" --force
-          nohup emulator -avd bandlab_ci -no-window -noaudio -no-boot-anim -gpu swiftshader_indirect -accel off -no-snapshot-save -no-metrics > /tmp/bandlab-emulator.log 2>&1 &
-          adb wait-for-device
-          for i in $(seq 1 150); do
-            test "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" && exit 0
-            sleep 4
+          echo no | avdmanager create avd -n bandlab_ci -k "system-images;android-30;default;x86_64" --device "pixel_4" --force
+          nohup emulator -avd bandlab_ci -no-window -noaudio -no-boot-anim -gpu swiftshader_indirect -accel off -no-snapshot -no-metrics -memory 2048 -cores 2 > /tmp/bandlab-emulator.log 2>&1 &
+          if ! timeout 180s adb wait-for-device; then
+            echo 'ADB device did not appear'; cat /tmp/bandlab-emulator.log; exit 1
+          fi
+          for i in $(seq 1 180); do
+            if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then
+              echo "Android boot complete"; exit 0
+            fi
+            sleep 2
           done
-          cat /tmp/bandlab-emulator.log
-          exit 1
+          echo 'Android did not report boot completed'; cat /tmp/bandlab-emulator.log; exit 1
 
       - name: Sequential gates 2.0 to 2.3
         shell: bash
