@@ -24,8 +24,8 @@ jobs:
           gradle-version: '8.13'
       - name: Reconstruct project
         run: |
-          sha256sum v09/part_*.b64
-          cat v09/part_00.b64 v09/part_01.b64 v09/part_02.b64 v09/part_03.b64 v09/part_04.b64 v09/part_05.b64 v09/part_06.b64 v09/part_07.b64 | base64 -d > /tmp/BandLabNative_v09_project.zip
+          sha256sum v09/part_00.b64 v09/part_01.b64 v09/part_02.b64 v09/part_03.b64 v09/part_04.b64 v09/part_05.b64 v09/fix06a.b64 v09/fix06b.b64 v09/part_07.b64
+          cat v09/part_00.b64 v09/part_01.b64 v09/part_02.b64 v09/part_03.b64 v09/part_04.b64 v09/part_05.b64 v09/fix06a.b64 v09/fix06b.b64 v09/part_07.b64 | base64 -d > /tmp/BandLabNative_v09_project.zip
           echo "80887ff56ae0d35b91f4706da8c83df193f2c19da31341190e9aafb46067116b  /tmp/BandLabNative_v09_project.zip" | sha256sum -c -
           unzip -q /tmp/BandLabNative_v09_project.zip
           grep -q "0.9.0-test" BandLabNative_v09/app/build.gradle
