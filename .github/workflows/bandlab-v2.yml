@@ -1,4 +1,4 @@
-name: BandLab 2.x Sequential Verification
+name: BandLab 2.0 Core Verification
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: bandlab-v2-sequential
+  group: bandlab-v20
   cancel-in-progress: true
 
 jobs:
@@ -86,15 +86,34 @@ jobs:
           PY
           printf '%s\n' 'BandLab patch: raw ACTIVITY chunks bypass protobuf parsing.' > work/third_party/Kodo/BANDLAB_PATCHES.txt
 
-      - name: Gate 2.0 - tests and build
+      - name: Gate 2.0 - unit tests and builds
         working-directory: work
         run: gradle --no-daemon :app:testV20DebugUnitTest :app:assembleV20Debug :app:assembleV20Release
 
-      - name: Boot Android emulator with bounded waits
+      - name: Validate APK structure and metadata
         shell: bash
         run: |
           set -euo pipefail
+          DEBUG_APK=work/app/build/outputs/apk/v20/debug/app-v20-debug.apk
+          RELEASE_APK=work/app/build/outputs/apk/v20/release/app-v20-release-unsigned.apk
+          test -s "$DEBUG_APK"
+          test -s "$RELEASE_APK"
+          unzip -t "$DEBUG_APK" >/dev/null
+          unzip -t "$RELEASE_APK" >/dev/null
+          "$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging "$DEBUG_APK" | tee /tmp/badging.txt
+          grep -q "package: name='com.fer.bandlab'" /tmp/badging.txt
+          grep -q "versionName='2.0.0'" /tmp/badging.txt
+
+      - name: Boot Android emulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/android-avd"
+          mkdir -p "$ANDROID_AVD_HOME"
           echo no | avdmanager create avd -n bandlab_ci -k "system-images;android-30;default;x86_64" --device "pixel_4" --force
+          echo "AVD home: $ANDROID_AVD_HOME"
+          "$ANDROID_HOME/emulator/emulator" -list-avds | tee /tmp/avds.txt
+          grep -qx 'bandlab_ci' /tmp/avds.txt
           nohup "$ANDROID_HOME/emulator/emulator" -avd bandlab_ci -no-window -noaudio -no-boot-anim -gpu swiftshader_indirect -accel off -no-snapshot -no-metrics -memory 2048 -cores 2 > /tmp/bandlab-emulator.log 2>&1 &
           if ! timeout 180s adb wait-for-device; then
             echo 'ADB device did not appear'; cat /tmp/bandlab-emulator.log; exit 1
@@ -107,57 +126,52 @@ jobs:
           done
           echo 'Android did not report boot completed'; cat /tmp/bandlab-emulator.log; exit 1
 
-      - name: Sequential gates 2.0 to 2.3
+      - name: 2.0 startup smoke test
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p verification
-          smoke() {
-            local stage="$1" apk="$2" version="$3"
-            adb logcat -c
-            if [ "$stage" = v20 ]; then adb install "$apk"; else adb install -r "$apk"; fi
-            adb shell am force-stop com.fer.bandlab
-            adb shell am start -W -n com.fer.bandlab/.MainActivity | tee "verification/${stage}-am-start.txt"
-            sleep 5
-            test -n "$(adb shell pidof com.fer.bandlab | tr -d '\r')"
-            adb shell dumpsys activity activities > "verification/${stage}-activities.txt"
-            grep -q "com.fer.bandlab/.MainActivity" "verification/${stage}-activities.txt"
-            adb shell dumpsys package com.fer.bandlab | grep -E "versionCode|versionName" > "verification/${stage}-package.txt"
-            adb logcat -d -t 1000 > "verification/${stage}-logcat.txt"
-            ! grep -E "FATAL EXCEPTION|Process: com\.fer\.bandlab.*has died|AndroidRuntime.*com\.fer\.bandlab" "verification/${stage}-logcat.txt"
-            echo "$version PASS" > "verification/${stage}-PASS.txt"
-          }
-          smoke v20 work/app/build/outputs/apk/v20/debug/app-v20-debug.apk 2.0.0
-          (cd work && gradle --no-daemon :app:testV21DebugUnitTest :app:assembleV21Debug :app:assembleV21Release)
-          smoke v21 work/app/build/outputs/apk/v21/debug/app-v21-debug.apk 2.1.0
-          (cd work && gradle --no-daemon :app:testV22DebugUnitTest :app:assembleV22Debug :app:assembleV22Release)
-          smoke v22 work/app/build/outputs/apk/v22/debug/app-v22-debug.apk 2.2.0
-          (cd work && gradle --no-daemon :app:testV23DebugUnitTest :app:assembleV23Debug :app:assembleV23Release)
-          smoke v23 work/app/build/outputs/apk/v23/debug/app-v23-debug.apk 2.3.0
+          APK=work/app/build/outputs/apk/v20/debug/app-v20-debug.apk
+          adb install "$APK"
+          adb logcat -c
+          adb shell am force-stop com.fer.bandlab
+          adb shell am start -W -n com.fer.bandlab/.MainActivity | tee verification/v20-am-start.txt
+          sleep 8
+          PID="$(adb shell pidof com.fer.bandlab | tr -d '\r')"
+          test -n "$PID"
+          echo "PID=$PID" | tee verification/v20-process.txt
+          adb shell dumpsys activity activities > verification/v20-activities.txt
+          grep -q "com.fer.bandlab/.MainActivity" verification/v20-activities.txt
+          adb shell dumpsys package com.fer.bandlab | grep -E "versionCode|versionName" > verification/v20-package.txt
+          adb logcat -d -t 1500 > verification/v20-logcat.txt
+          if grep -E "FATAL EXCEPTION|Process: com\.fer\.bandlab.*has died|AndroidRuntime.*com\.fer\.bandlab" verification/v20-logcat.txt; then
+            echo 'Fatal BandLab crash detected'; exit 1
+          fi
+          echo "2.0.0 STARTUP PASS" > verification/v20-PASS.txt
 
-      - name: Package outputs
+      - name: Package BandLab 2.0 only
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist
-          cp work/app/build/outputs/apk/v20/debug/app-v20-debug.apk dist/BandLab9Active_v2.0_CORE_DEBUG_VERIFIED.apk
-          cp work/app/build/outputs/apk/v21/debug/app-v21-debug.apk dist/BandLab9Active_v2.1_WATCHFACE_DEBUG_VERIFIED.apk
-          cp work/app/build/outputs/apk/v22/debug/app-v22-debug.apk dist/BandLab9Active_v2.2_TRAINING_PRO_DEBUG_VERIFIED.apk
-          cp work/app/build/outputs/apk/v23/debug/app-v23-debug.apk dist/BandLab9Active_v2.3_FULL_DEBUG_VERIFIED.apk
-          find work/app/build/outputs/apk -name '*release-unsigned.apk' -exec cp {} dist/ \;
+          cp work/app/build/outputs/apk/v20/debug/app-v20-debug.apk dist/BandLab9Active_v2.0_CORE_DEBUG_STARTUP_VERIFIED.apk
+          cp work/app/build/outputs/apk/v20/release/app-v20-release-unsigned.apk dist/BandLab9Active_v2.0_CORE_RELEASE_UNSIGNED.apk
           cp -R verification dist/verification
           cp /tmp/bandlab-emulator.log dist/emulator.log || true
           cat > dist/VERIFICATION_REPORT.txt <<'EOF'
-          Sequential gates: 2.0 -> 2.1 -> 2.2 -> 2.3.
-          Each stage passed unit tests/build plus APK install/update, MainActivity launch,
-          process-alive, foreground-activity and fatal-crash-log checks before the next stage.
-          Physical Xiaomi BLE/watchface behavior requires the actual Smart Band 9 Active.
+          BandLab 2.0 only.
+          Verified in CI: source reconstruction hash, pinned Xiaomi core revision,
+          v2.0 unit tests, debug+release builds, APK ZIP integrity, package/version metadata,
+          Android emulator install, MainActivity launch, process-alive check, foreground activity,
+          and fatal-crash log scan after startup.
+          Physical Xiaomi Smart Band 9 Active BLE/auth/activity/watchface behavior requires real hardware.
+          No 2.1, 2.2 or 2.3 artifact is built or delivered by this workflow.
           EOF
-          (cd work && zip -qr ../dist/BandLab9Active_v2.3_SOURCE_COMPLETE.zip . -x 'app/build/*' '.gradle/*' 'build/*')
+          (cd work && zip -qr ../dist/BandLab9Active_v2.0_SOURCE_COMPLETE.zip . -x 'app/build/*' '.gradle/*' 'build/*')
           sha256sum dist/*.apk dist/*.zip > dist/SHA256SUMS.txt
 
       - uses: actions/upload-artifact@v4
         with:
-          name: BandLab-v2.0-to-v2.3-verified
+          name: BandLab-v2.0-verified
           path: dist/
           if-no-files-found: error
