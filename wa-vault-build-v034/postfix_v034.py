@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 root = Path('wa-vault-v034-project')
 p = root / 'app/src/main/java/com/fer/wavault/MainActivity.java'
@@ -65,33 +66,27 @@ storage = '''    private void showStorageManager(){
 '''
 s = s[:start] + storage + s[end:]
 
-# Merge duplicate onDestroy methods.
-first_old = '''    @Override protected void onDestroy(){
+# Remove every previous onDestroy implementation, regardless of spacing, and insert one canonical lifecycle cleanup.
+# Both legacy implementations are short and contain no nested multi-line method blocks.
+s = re.sub(
+    r'\n\s*@Override\s+protected\s+void\s+onDestroy\s*\(\s*\)\s*\{.*?\n\s{4}\}\n',
+    '\n',
+    s,
+    flags=re.S,
+)
+canonical_destroy = '''    @Override protected void onDestroy(){
         try{if(uiReceiverRegistered)unregisterReceiver(dataChangedReceiver);}catch(Throwable ignored){}
         uiReceiverRegistered=false;
         uiRefreshHandler.removeCallbacksAndMessages(null);
-        releaseAudioPlayer(true);
-        super.onDestroy();
-    }
-'''
-first_new = '''    @Override protected void onDestroy(){
-        try{if(uiReceiverRegistered)unregisterReceiver(dataChangedReceiver);}catch(Throwable ignored){}
-        uiReceiverRegistered=false;
-        uiRefreshHandler.removeCallbacksAndMessages(null);
-        try { if (biometricCancel != null) biometricCancel.cancel(); } catch (Throwable ignored) {}
-        releaseAudioPlayer(false);
-        super.onDestroy();
-    }
-'''
-s = s.replace(first_old, first_new)
-second = '''    @Override protected void onDestroy() {
         try { if (biometricCancel != null) biometricCancel.cancel(); } catch (Throwable ignored) {}
         releaseAudioPlayer(false);
         super.onDestroy();
     }
 
 '''
-s = s.replace(second, '')
+resume_anchor = '    @Override protected void onResume() {'
+pos = s.index(resume_anchor)
+s = s[:pos] + canonical_destroy + s[pos:]
 
 p.write_text(s)
 
