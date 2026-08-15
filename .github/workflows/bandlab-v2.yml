@@ -19,6 +19,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          cat > /tmp/CHUNK_SHA256SUMS <<'EOF'
+          79cff69b984c8bf78c99317eb91ef292f7b7ca98d1db8c7f603e19ec98ab022b  src_chunks/00.b64
+          8013110de9d8f842d8ecb37a9a377ac19761344fac2fce9a1be79db504e0177e  src_chunks/01.b64
+          76f5da7c21270d49e054c792a9e61b92e44f48736fc6a522df13656a565eaf2f  src_chunks/02.b64
+          905408338378d168d0688ea12593e38449ba567b41b92512491807855031890d  src_chunks/03.b64
+          3daba85da67f43f769a392489e550ae2b28d106b8a2ac12e37dd628da6ae7c6e  src_chunks/04.b64
+          4e8dfc5e4ee49e2714d457485d555ee745e4f45bbaf6ff1fe37d17f11629e730  src_chunks/05.b64
+          f385e474ae6ea774a6b1cad1ca72ca4f25135999751e39969145347c4d17ddcd  src_chunks/06.b64
+          EOF
+          sha256sum -c /tmp/CHUNK_SHA256SUMS
           cat src_chunks/*.b64 > /tmp/bandlab.b64
           base64 -d /tmp/bandlab.b64 > /tmp/bandlab.tar.xz
           echo "$SOURCE_SHA256  /tmp/bandlab.tar.xz" | sha256sum -c -
