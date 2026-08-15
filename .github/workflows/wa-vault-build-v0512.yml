@@ -29,23 +29,25 @@ jobs:
           set -euo pipefail
           mkdir wa-vault-v0512-project
           gh run download 31908975463 -n WA-Vault-v0.5.11-source -D wa-vault-v0512-project
-          grep -q 'versionCode = 60' wa-vault-v0512-project/app/build.gradle.kts
+          grep -q 'versionCode = 61' wa-vault-v0512-project/app/build.gradle.kts
           grep -q 'versionName = "0.5.11"' wa-vault-v0512-project/app/build.gradle.kts
 
       - name: Apply verified v0.5.12 patch
         run: |
           set -euo pipefail
-          base64 -d wa-vault-build-v0512/v0512.patch.gz.b64 | gzip -dc > /tmp/v0512.patch
-          echo 'a82f8485c623aa7e6dd75a0e882a327911dd4755f0f8878d2b9cd268ecb68844  /tmp/v0512.patch' | sha256sum -c -
+          cat wa-vault-build-v0512/chunks/part* > /tmp/v0512.patch.gz.b64
+          echo '6781d511dac08a45e70ac55b8715eeb401acc89cbbc7b941a773678e6c74e78c  /tmp/v0512.patch.gz.b64' | sha256sum -c -
+          base64 -d /tmp/v0512.patch.gz.b64 | gzip -dc > /tmp/v0512.patch
+          echo 'ffafcea04767d742c5be4f15ae662901d1cd51e2ccab666d492d72a1f71ecaee  /tmp/v0512.patch' | sha256sum -c -
           cd wa-vault-v0512-project
           patch -p1 --batch < /tmp/v0512.patch
           find . -name '*.rej' -print -quit | grep -q . && { find . -name '*.rej' -print; exit 1; } || true
-          grep -q 'versionCode = 61' app/build.gradle.kts
+          grep -q 'versionCode = 62' app/build.gradle.kts
           grep -q 'versionName = "0.5.12"' app/build.gradle.kts
           grep -q 'APP_CANCEL_PERSISTENT_REPOST' app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java
           grep -q 'PROVISIONAL_MEDIA_TTL_MS' app/src/main/java/com/fer/wavault/VaultDb.java
           grep -q 'monitorPendingMedia' app/src/main/java/com/fer/wavault/MediaArchiver.java
-          grep -q 'whatsapp stickers' app/src/main/java/com/fer/wavault/DirectMediaWatcher.java
+          grep -qi 'whatsapp stickers' app/src/main/java/com/fer/wavault/DirectMediaWatcher.java
           grep -q 'consumeArm' app/src/main/java/com/fer/wavault/DirectVoiceWatcher.java
           test -s V0512_NOTES.md
 
