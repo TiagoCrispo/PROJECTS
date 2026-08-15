@@ -66,8 +66,8 @@ jobs:
           grep -q "browserSelectAll" a53v115/app/src/main/java/com/fer/a53performance/MainActivity.java
           grep -q "SCOPE_HIDDEN" a53v115/app/src/main/java/com/fer/a53performance/StorageIndex.java
           grep -q "SCOPE_OLD" a53v115/app/src/main/java/com/fer/a53performance/StorageIndex.java
-          grep -q "protectedFromDelete" a53v115/app/src/main/java/com/fer/a53performance/StorageIndex.java
-          grep -q "recordings" a53v115/app/src/main/java/com/fer/a53performance/StorageIndex.java
+          grep -q "ProtectedStore.isRecorderPath" a53v115/app/src/main/java/com/fer/a53performance/StorageIndex.java
+          grep -q "isRecorderPath" a53v115/app/src/main/java/com/fer/a53performance/ProtectedStore.java
           grep -q "com.sec.android.app.voicenote" a53v115/app/src/main/java/com/fer/a53performance/AppCore.java
           grep -q "autoAuthorizeShizuku" a53v115/app/src/main/java/com/fer/a53performance/MainActivity.java
 
@@ -129,7 +129,7 @@ jobs:
           unzip -t "$APK" > "$OUT/ZIP_TEST.txt"
           "$BT/zipalign" -v -c -P 16 4 "$APK" > "$OUT/ZIPALIGN_16KB.txt"
           grep -R -q "com.sec.android.app.voicenote" a53v115/app/src/main/java
-          grep -R -q "protectedFromDelete" a53v115/app/src/main/java
+          grep -R -q "ProtectedStore.isRecorderPath" a53v115/app/src/main/java
 
       - uses: actions/upload-artifact@v4
         with:
