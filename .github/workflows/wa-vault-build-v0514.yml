@@ -42,6 +42,7 @@ jobs:
           echo '0bafc3af8bde213023530e2c921c151300b4efd4075aaf623449c20f18a71feb  wa-vault-build-v0514/chunks/part04' | sha256sum -c -
           echo 'dc33e474118fe7a2cd48b32bd8a376c1cba36d24ed0cf1560a506bc69b42b1c3  wa-vault-build-v0514/chunks/part05' | sha256sum -c -
           echo '080e673f2ac3ac3950e51eff1dc7083dec1de0f5fef428a0b0ace3aa9778ae0e  wa-vault-build-v0514/chunks/part06' | sha256sum -c -
+          echo 'f32d29d3bdea290032c40ee14d3e5514f69a5a98e3767aff6509ee732284d100  wa-vault-build-v0514/compile-fix.patch' | sha256sum -c -
           cat wa-vault-build-v0514/chunks/part00 \
               wa-vault-build-v0514/chunks/part01 \
               wa-vault-build-v0514/chunks/part02 \
@@ -53,12 +54,16 @@ jobs:
           echo '78c2a8d11cd7ab1482d57a88a70e53eb4db428636815397f62f221ef0341eb4d  /tmp/v0514.patch' | sha256sum -c -
           cd wa-vault-v0514-project
           patch -p4 --batch < /tmp/v0514.patch
+          patch -p1 --batch < ../wa-vault-build-v0514/compile-fix.patch
           find . -name '*.rej' -print -quit | grep -q . && { find . -name '*.rej' -print; exit 1; } || true
           grep -q 'versionCode = 64' app/build.gradle.kts
           grep -q 'versionName = "0.5.14"' app/build.gradle.kts
           grep -q 'CONFIRMED_MEDIA_SQL' app/src/main/java/com/fer/wavault/VaultDb.java
           grep -q 'media_tombstones' app/src/main/java/com/fer/wavault/VaultDb.java
           grep -q 'buildCaptureBatchKey' app/src/main/java/com/fer/wavault/VaultDb.java
+          grep -q 'private String recoveredFilterName()' app/src/main/java/com/fer/wavault/MainActivity.java
+          ! grep -q 'showRecoveryCalendarDialog' app/src/main/java/com/fer/wavault/MainActivity.java
+          ! grep -q 'showRecoveryAlbumsDialog' app/src/main/java/com/fer/wavault/MainActivity.java
           ! grep -q 'findNearestUnlinkedMedia' app/src/main/java/com/fer/wavault/MainActivity.java
           test -s V0514_NOTES.md
           python3 tools/v0514_regression_test.py
