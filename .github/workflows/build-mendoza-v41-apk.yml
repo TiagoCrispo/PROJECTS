@@ -1,0 +1,65 @@
+name: Build Mendoza Meteo v4.1 APK
+
+on:
+  push:
+    branches: ["chatgpt/mendoza-meteo-v4-1"]
+    paths:
+      - "mendoza_v41_source.part00"
+      - "mendoza_v41_source.part01"
+      - "mendoza_v41_source.part02"
+      - "mendoza_v41_source.part03"
+      - "mendoza_v41_source.part04"
+      - ".github/workflows/build-mendoza-v41-apk.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct v4.1 source
+        run: |
+          cat mendoza_v41_source.part00 mendoza_v41_source.part01 mendoza_v41_source.part02 mendoza_v41_source.part03 mendoza_v41_source.part04 | base64 -d > mendoza_v41_source.zip
+          test "$(sha256sum mendoza_v41_source.zip | cut -d' ' -f1)" = "d7b368c82ea2e4e6a21470b6e6e62b4e380084a4812d23594e9f2a5047bdb767"
+          unzip -t mendoza_v41_source.zip
+          mkdir -p mendoza_v41
+          unzip -q mendoza_v41_source.zip -d mendoza_v41
+          printf 'android.useAndroidX=true\nandroid.enableJetifier=true\norg.gradle.jvmargs=-Xmx2g -Dfile.encoding=UTF-8\n' > mendoza_v41/gradle.properties
+          grep -n "versionName '4.1'" mendoza_v41/app/build.gradle
+          grep -n "setDecorFitsSystemWindows" mendoza_v41/app/src/main/java/com/mendozameteo/pro/MainActivity.java
+          grep -n "systemBars" mendoza_v41/app/src/main/java/com/mendozameteo/pro/MainActivity.java
+          grep -n "HISTORIAL LOCAL" mendoza_v41/app/src/main/java/com/mendozameteo/pro/MainActivity.java
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: yes | sdkmanager "platforms;android-35" "build-tools;35.0.0" || true
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Verify weather API contract
+        run: |
+          python - <<'PY'
+          import json, urllib.request
+          u='https://api.open-meteo.com/v1/forecast?latitude=-32.8895&longitude=-68.8458&current=temperature_2m,weather_code,wind_gusts_10m&hourly=temperature_2m,precipitation_probability,wind_gusts_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=2'
+          with urllib.request.urlopen(u, timeout=20) as r: d=json.load(r)
+          assert 'current' in d and 'hourly' in d and 'daily' in d
+          assert len(d['hourly']['temperature_2m']) >= 24
+          assert len(d['daily']['temperature_2m_max']) >= 2
+          print('weather-api-contract: OK')
+          PY
+      - name: Build debug APK
+        working-directory: mendoza_v41
+        run: gradle :app:assembleDebug --stacktrace
+      - name: Verify APK
+        working-directory: mendoza_v41
+        run: |
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose app/build/outputs/apk/debug/app-debug.apk
+          cp app/build/outputs/apk/debug/app-debug.apk ../MendozaMeteo_PRO_v4.1_SmartNative.apk
+          sha256sum ../MendozaMeteo_PRO_v4.1_SmartNative.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MendozaMeteo-PRO-v4.1-SmartNative-APK
+          path: MendozaMeteo_PRO_v4.1_SmartNative.apk
