@@ -1,0 +1,53 @@
+name: A53 v1.14.1 Source Export
+
+on:
+  push:
+    branches: [a53-work-v1.15]
+  workflow_dispatch:
+
+jobs:
+  export-source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct verified v1.14.1 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat a53v113part-* > source.b64
+          test "$(wc -c < source.b64)" -eq 54840
+          base64 -d source.b64 > a53v113-source.tar.xz
+          test "$(wc -c < a53v113-source.tar.xz)" -eq 41128
+          echo "2aeec9d8fa486fc7112e9643e0a1628d9d9d9ee85a90dfc80f68cc9d29a0f7ba  a53v113-source.tar.xz" | sha256sum -c -
+          tar -tJf a53v113-source.tar.xz >/dev/null
+          tar -xJf a53v113-source.tar.xz
+
+          cat a53v114diff-* > v114diff.b64
+          test "$(wc -c < v114diff.b64)" -eq 28656
+          base64 -d v114diff.b64 > v114.diff.xz
+          test "$(wc -c < v114.diff.xz)" -eq 21492
+          echo "8af44f6f22f7d176638fc92e572022c81fbf324cb117b5ee7cbdb6d98b8c498b  v114.diff.xz" | sha256sum -c -
+          xz -dc v114.diff.xz > v114.diff
+          patch --batch --forward -p4 -d a53v113 < v114.diff
+          mv a53v113 a53v114
+
+          cat a53v1141patch-part-* > v1141patch.b64
+          test "$(wc -c < v1141patch.b64)" -eq 6128
+          base64 -d v1141patch.b64 > v1141.patch.xz
+          xz -dc v1141.patch.xz > v1141.patch
+          patch --batch --forward -p1 -d a53v114 < v1141.patch
+          mv a53v114 a53v1141
+
+          grep -q "versionCode 21" a53v1141/app/build.gradle
+          grep -q "versionName '1.14.1'" a53v1141/app/build.gradle
+          tar -czf a53v1141-source.tar.gz a53v1141
+          sha256sum a53v1141-source.tar.gz > SOURCE_SHA256.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: A53Performance-v1.14.1-SOURCE
+          path: |
+            a53v1141-source.tar.gz
+            SOURCE_SHA256.txt
+          retention-days: 1
