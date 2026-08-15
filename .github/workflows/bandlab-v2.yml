@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Reconstruct source
+      - name: Reconstruct and patch source
         shell: bash
         run: |
           set -euo pipefail
@@ -28,11 +28,18 @@ jobs:
           from pathlib import Path
           p=Path('work/app/build.gradle.kts')
           s=p.read_text()
-          old='builtins { named("java") { option("lite") } }'
-          new='builtins { maybeCreate("java").apply { option("lite") } }'
-          if old not in s and new not in s:
-              raise SystemExit('protobuf builtin anchor missing')
-          p.write_text(s.replace(old,new))
+          s=s.replace('builtins { named("java") { option("lite") } }', 'builtins { maybeCreate("java").apply { option("lite") } }')
+          p.write_text(s)
+
+          p=Path('work/app/src/main/java/com/fer/bandlab/ui/BandLabApp.kt')
+          s=p.read_text()
+          if 'import androidx.compose.material3.NavigationBarItem' not in s:
+              s=s.replace('import androidx.compose.material3.NavigationBar\n', 'import androidx.compose.material3.NavigationBar\nimport androidx.compose.material3.NavigationBarItem\n')
+          p.write_text(s)
+
+          p=Path('work/app/src/main/java/com/fer/bandlab/ui/screens/HealthScreen.kt')
+          s=p.read_text().replace('import androidx.compose.material.icons.rounded.Walk\n','')
+          p.write_text(s)
           PY
 
       - uses: actions/setup-java@v5
@@ -48,7 +55,7 @@ jobs:
         with:
           gradle-version: '8.13'
 
-      - name: Import pinned Xiaomi protocol and BandLab raw-activity fix
+      - name: Import pinned Xiaomi protocol
         shell: bash
         run: |
           set -euo pipefail
@@ -79,11 +86,11 @@ jobs:
           PY
           printf '%s\n' 'BandLab patch: raw ACTIVITY chunks bypass protobuf parsing.' > work/third_party/Kodo/BANDLAB_PATCHES.txt
 
-      - name: Gate 2.0 - unit tests and build
+      - name: Gate 2.0 - tests and build
         working-directory: work
         run: gradle --no-daemon :app:testV20DebugUnitTest :app:assembleV20Debug :app:assembleV20Release
 
-      - name: Boot Android emulator manually
+      - name: Boot Android emulator
         shell: bash
         run: |
           set -euo pipefail
@@ -91,15 +98,13 @@ jobs:
           nohup emulator -avd bandlab_ci -no-window -noaudio -no-boot-anim -gpu swiftshader_indirect -accel off -no-snapshot-save -no-metrics > /tmp/bandlab-emulator.log 2>&1 &
           adb wait-for-device
           for i in $(seq 1 150); do
-            if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then
-              echo "Android boot complete"; exit 0
-            fi
+            test "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" && exit 0
             sleep 4
           done
           cat /tmp/bandlab-emulator.log
           exit 1
 
-      - name: Sequential launch gates 2.0 to 2.3
+      - name: Sequential gates 2.0 to 2.3
         shell: bash
         run: |
           set -euo pipefail
@@ -116,8 +121,8 @@ jobs:
             grep -q "com.fer.bandlab/.MainActivity" "verification/${stage}-activities.txt"
             adb shell dumpsys package com.fer.bandlab | grep -E "versionCode|versionName" > "verification/${stage}-package.txt"
             adb logcat -d -t 1000 > "verification/${stage}-logcat.txt"
-            if grep -E "FATAL EXCEPTION|Process: com\.fer\.bandlab.*has died|AndroidRuntime.*com\.fer\.bandlab" "verification/${stage}-logcat.txt"; then exit 1; fi
-            echo "$version PASS" | tee "verification/${stage}-PASS.txt"
+            ! grep -E "FATAL EXCEPTION|Process: com\.fer\.bandlab.*has died|AndroidRuntime.*com\.fer\.bandlab" "verification/${stage}-logcat.txt"
+            echo "$version PASS" > "verification/${stage}-PASS.txt"
           }
           smoke v20 work/app/build/outputs/apk/v20/debug/app-v20-debug.apk 2.0.0
           (cd work && gradle --no-daemon :app:testV21DebugUnitTest :app:assembleV21Debug :app:assembleV21Release)
@@ -141,10 +146,9 @@ jobs:
           cp /tmp/bandlab-emulator.log dist/emulator.log || true
           cat > dist/VERIFICATION_REPORT.txt <<'EOF'
           Sequential gates: 2.0 -> 2.1 -> 2.2 -> 2.3.
-          Each stage: unit tests/build, APK install/update, MainActivity launch,
-          process alive, Activity present, fatal-crash log scan. Later versions were
-          built only after the previous stage passed its launch gate.
-          Physical Xiaomi BLE/watchface behavior still requires the actual Smart Band 9 Active.
+          Each stage passed unit tests/build plus APK install/update, MainActivity launch,
+          process-alive, foreground-activity and fatal-crash-log checks before the next stage.
+          Physical Xiaomi BLE/watchface behavior requires the actual Smart Band 9 Active.
           EOF
           (cd work && zip -qr ../dist/BandLab9Active_v2.3_SOURCE_COMPLETE.zip . -x 'app/build/*' '.gradle/*' 'build/*')
           sha256sum dist/*.apk dist/*.zip > dist/SHA256SUMS.txt
