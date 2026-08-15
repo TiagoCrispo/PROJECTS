@@ -1,0 +1,78 @@
+name: WA Vault v0.3.2 build
+
+on:
+  push:
+    branches: [wa-vault-build-v032]
+    paths:
+      - 'wa-vault-build-v032-small/**'
+      - '.github/workflows/wa-vault-build-v032.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Decode verified project
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat \
+            wa-vault-build-v032-small/part-000.b64 \
+            wa-vault-build-v032-small/part-001.b64 \
+            wa-vault-build-v032-small/part-002.b64 \
+            wa-vault-build-v032-small/part-003.b64 \
+            wa-vault-build-v032-small/part-004.b64 \
+            wa-vault-build-v032-small/part-005.b64 \
+            wa-vault-build-v032-small/part-006.b64 \
+            wa-vault-build-v032-small/part-007a.b64 \
+            wa-vault-build-v032-small/part-007b.b64 \
+            wa-vault-build-v032-small/part-008a.b64 \
+            wa-vault-build-v032-small/part-008b.b64 > /tmp/project.b64
+          base64 -d /tmp/project.b64 > /tmp/project.tar.xz
+          echo '3de5ae483616191f012cdbfc57d2bdd94678133f94c96050f30cbb1a186815a2  /tmp/project.tar.xz' | sha256sum -c -
+          xz -t /tmp/project.tar.xz
+          rm -rf wa-vault-build-v032-project
+          mkdir -p wa-vault-build-v032-project
+          tar -xJf /tmp/project.tar.xz -C wa-vault-build-v032-project
+          test -f wa-vault-build-v032-project/app/src/main/java/com/fer/wavault/MainActivity.java
+          test -f wa-vault-build-v032-project/app/src/main/java/com/fer/wavault/MediaThumbnailLoader.java
+          grep -q 'versionCode = 32' wa-vault-build-v032-project/app/build.gradle.kts
+          grep -q 'pending_manual_media' wa-vault-build-v032-project/app/src/main/java/com/fer/wavault/VaultDb.java
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 35
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Build debug APK
+        working-directory: wa-vault-build-v032-project
+        run: gradle :app:assembleDebug --stacktrace --console=plain
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          APK=wa-vault-build-v032-project/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          sha256sum "$APK" | tee wa-vault-build-v032-project/APK_SHA256.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WA-Vault-v0.3.2-debug
+          path: |
+            wa-vault-build-v032-project/app/build/outputs/apk/debug/app-debug.apk
+            wa-vault-build-v032-project/APK_SHA256.txt
+            wa-vault-build-v032-project/CHANGELOG.md
+            wa-vault-build-v032-project/README.md
