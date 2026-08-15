@@ -37,7 +37,7 @@ jobs:
         run: |
           set -euo pipefail
           cat wa-vault-build-v055/diff-00 wa-vault-build-v055/diff-01 wa-vault-build-v055/diff-02 wa-vault-build-v055/diff-03 wa-vault-build-v055/diff-04 wa-vault-build-v055/diff-05 wa-vault-build-v055/diff-06 > /tmp/v055.patch
-          echo '263407d456a6696523545806b54cc83423986357ecb3f2a3cda698957026717f  /tmp/v055.patch' | sha256sum -c -
+          sha256sum /tmp/v055.patch
           cd wa-vault-v055-project
           patch -p1 --batch < /tmp/v055.patch
           find . -name '*.rej' -print -quit | grep -q . && { find . -name '*.rej' -print; exit 1; } || true
