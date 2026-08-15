@@ -52,7 +52,7 @@ jobs:
           base64 -d /tmp/v0514.patch.gz.b64 | gzip -dc > /tmp/v0514.patch
           echo '78c2a8d11cd7ab1482d57a88a70e53eb4db428636815397f62f221ef0341eb4d  /tmp/v0514.patch' | sha256sum -c -
           cd wa-vault-v0514-project
-          patch -p3 --batch < /tmp/v0514.patch
+          patch -p4 --batch < /tmp/v0514.patch
           find . -name '*.rej' -print -quit | grep -q . && { find . -name '*.rej' -print; exit 1; } || true
           grep -q 'versionCode = 64' app/build.gradle.kts
           grep -q 'versionName = "0.5.14"' app/build.gradle.kts
