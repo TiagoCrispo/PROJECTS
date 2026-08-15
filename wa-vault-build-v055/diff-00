@@ -1,0 +1,77 @@
+diff -ruN wav055_base/CHANGELOG.md wav055_work/CHANGELOG.md
+--- wav055_base/CHANGELOG.md	2026-08-15 08:28:42.000000000 +0000
++++ wav055_work/CHANGELOG.md	2026-08-15 08:44:01.430329798 +0000
+@@ -1,3 +1,9 @@
++## 0.5.5
++- Deduplicación lógica de mensajes y adjuntos bajo captura agresiva.
++- Cierre de carreras entre capturadores de audio/media.
++- Reparación conservadora de duplicados ya guardados.
++- Selección múltiple por toque simple tras iniciar selección y botón Seleccionar todo.
++
+ ## 0.5.3
+ - Remote-delete reconciliation on WhatsApp app-cancel/empty replacement.
+ - Per-audio rescue path; no generic voice re-arming from non-audio messages.
+diff -ruN wav055_base/TEST_MATRIX.md wav055_work/TEST_MATRIX.md
+--- wav055_base/TEST_MATRIX.md	2026-08-15 08:28:42.000000000 +0000
++++ wav055_work/TEST_MATRIX.md	2026-08-15 08:44:01.430264274 +0000
+@@ -127,3 +127,16 @@
+ - [ ] Audio seguido inmediatamente por foto/video conserva su propia asociación.
+ - [ ] Audio .opus visible solo en MediaStore.Files se captura.
+ - [ ] Varias notas de voz consecutivas no se pisan entre sí.
++
++
++## v0.5.5 — deduplicación y selección
++- [ ] Un texto recibido y repost de la notificación: una sola fila de mensaje.
++- [ ] Foto: primero placeholder “Foto” y luego URI/MIME disponible: una sola fila lógica de mensaje.
++- [ ] Audio con URI de notificación + FileObserver + MediaStore: un solo archivo final por mensaje.
++- [ ] Dos mensajes distintos con el mismo texto pero timestamps diferentes: ambos se conservan.
++- [ ] Dos mensajes idénticos dentro del mismo snapshot: occurrence #1/#2 se conservan separados.
++- [ ] Mantenimiento elimina solo duplicados exactos con timestamp idéntico y repara media vinculada repetida.
++- [ ] Mantener pulsado un archivo inicia selección; tocar otros una vez los añade/quita sin abrirlos.
++- [ ] “Seleccionar todo” selecciona todos los elementos del filtro/búsqueda actual.
++- [ ] Favoritos/Papelera masivos funcionan tras Seleccionar todo.
++- [ ] Borrado múltiple super agresivo de v0.5.4 sigue funcionando.
+diff -ruN wav055_base/V055_NOTES.md wav055_work/V055_NOTES.md
+--- wav055_base/V055_NOTES.md	1970-01-01 00:00:00.000000000 +0000
++++ wav055_work/V055_NOTES.md	2026-08-15 08:44:01.430195112 +0000
+@@ -0,0 +1,14 @@
++# WA Vault v0.5.5 — deduplicación urgente + selección rápida
++
++- Corrige mensajes duplicados cuando WhatsApp reposta la misma notificación con otra key/índice o cuando aparece después el URI/MIME de una foto/audio.
++- La identidad lógica del mensaje ya no depende de notification_key, message_index ni MIME del adjunto.
++- Reutiliza IDs del snapshot y del timestamp lógico exacto antes de insertar otra fila.
++- Limpia snapshots al retirar una notificación por acción del usuario para no confundir un mensaje nuevo idéntico con uno viejo.
++- Serializa las rutas agresivas de inserción de media para cerrar carreras entre FileObserver, MediaStore y URI de notificación.
++- Al vincular dos copias al mismo mensaje/tipo conserva la copia más completa y elimina la redundante.
++- Mantenimiento repara duplicados de mensaje demostrables (mismo contenido + timestamp exacto) y duplicados de media vinculada.
++- En Todo lo recuperado: pulsación larga inicia selección; desde ese momento un toque simple selecciona/deselecciona los demás.
++- Nuevo botón “Seleccionar todo” para todos los elementos que coinciden con el filtro/búsqueda actual (hasta 12.000 por operación).
++- Mantiene el modo super agresivo de v0.5.4 para borrados y audio, pero evita rearmar audio en cada poll/repost del mismo mensaje.
++
++La compilación automática verifica versionCode 55 / versionName 0.5.5, el parche, compilación release, firma y APK.
+diff -ruN wav055_base/app/build.gradle.kts wav055_work/app/build.gradle.kts
+--- wav055_base/app/build.gradle.kts	2026-08-15 08:28:42.000000000 +0000
++++ wav055_work/app/build.gradle.kts	2026-08-15 08:44:01.423894521 +0000
+@@ -10,8 +10,8 @@
+         applicationId = "com.fer.wavault"
+         minSdk = 26
+         targetSdk = 35
+-        versionCode = 54
+-        versionName = "0.5.4"
++        versionCode = 55
++        versionName = "0.5.5"
+     }
+ 
+     compileOptions {
+diff -ruN wav055_base/app/src/main/java/com/fer/wavault/MainActivity.java wav055_work/app/src/main/java/com/fer/wavault/MainActivity.java
+--- wav055_base/app/src/main/java/com/fer/wavault/MainActivity.java	2026-08-15 08:28:42.000000000 +0000
++++ wav055_work/app/src/main/java/com/fer/wavault/MainActivity.java	2026-08-15 08:44:01.430067198 +0000
+@@ -804,8 +804,9 @@
+         LinearLayout summary=card();summary.addView(text("Guardados "+st.savedFiles+"   ·   "+human(st.totalBytes)+"   ·   Papelera "+st.trashedMedia,17,fg,true));summary.addView(text("Fotos "+human(st.imageBytes)+"   ·   Videos "+human(st.videoBytes)+"   ·   Audio "+human(st.audioBytes)+"   ·   Docs "+human(st.documentBytes),11,muted,false));summary.addView(text(st.recoveryIssues>0?st.recoveryIssues+" recuperaciones con incidencia":"Sin incidencias pendientes",11,st.recoveryIssues>0?Color.rgb(255,190,110):muted,false));
+         LinearLayout sumActions=row();addWeighted(sumActions,button("Buscar ahora",v->{RecoveryScanner.scanAsync(getApplicationContext());Toast.makeText(this,"Búsqueda iniciada",Toast.LENGTH_SHORT).show();}));addWeighted(sumActions,button("Papelera",v->showTrashDialog()));summary.addView(sumActions);root.addView(summary);
+ 
+-        recoveredSelectionText=text("Mantén pulsado un archivo para seleccionar varios",11,muted,false);recoveredSelectionText.setPadding(0,dp(4),0,dp(4));root.addView(recoveredSelectionText);
+-        LinearLayout bulk=row();addWeighted(bulk,button("★ Favoritos",v->bulkFavoriteSelected()));addWeighted(bulk,button("🗑 Papelera",v->bulkTrashSelected()));addWeighted(bulk,button("✕ Limpiar selección",v->{recoveredSelection.clear();updateRecoveredSelectionUi();}));root.addView(bulk);
++        recoveredSelectionText=text("Mantén pulsado un archivo para iniciar selección múltiple",11,muted,false);recoveredSelectionText.setPadding(0,dp(4),0,dp(4));root.addView(recoveredSelectionText);
++        LinearLayout selectBulk=row();addWeighted(selectBulk,button("✓ Seleccionar todo",v->selectAllRecovered()));addWeighted(selectBulk,button("✕ Limpiar",v->{recoveredSelection.clear();updateRecoveredSelectionUi();}));root.addView(selectBulk);
++        LinearLayout bulk=row();addWeighted(bulk,button("★ Favoritos",v->bulkFavoriteSelected()));addWeighted(bulk,button("🗑 Papelera",v->bulkTrashSelected()));root.addView(bulk);

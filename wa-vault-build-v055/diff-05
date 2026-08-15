@@ -1,0 +1,90 @@
+             if (id > 0) {
+                 if (!currentIds.contains(id)) currentIds.add(id);
+                 currentItems.add(new SnapshotItem(messageToken, id));
+@@ -269,25 +282,29 @@
+                     newestMessageId = id;
+                     newestMessageMediaKind = p.mediaKind();
+                 }
+-                try { db.logEvent("MESSAGE_CAPTURED", p.conversation + " · " + p.sender + " · " + p.text, id, 0L); } catch (Throwable ignored) {}
+                 String mediaKind=p.mediaKind();
+-                rememberConversationBurst(p.conversation, messageToken, id, p.timestamp);
+-                if ("audio".equals(mediaKind)) {
++                boolean mediaMissing=!mediaKind.isEmpty() && db.findLinkedMedia(id,mediaKind)==null;
++                boolean armCapture=logicalNew || (!fromPoll && mediaMissing);
++                if (logicalNew) {
++                    try { db.logEvent("MESSAGE_CAPTURED", p.conversation + " · " + p.sender + " · " + p.text, id, 0L); } catch (Throwable ignored) {}
++                    rememberConversationBurst(p.conversation, messageToken, id, p.timestamp);
++                }
++                if ("audio".equals(mediaKind) && armCapture) {
+                     if (p.timestamp >= newestAudioMessageTime) { newestAudioMessageTime = p.timestamp; newestAudioMessageId = id; }
+                     try { DirectVoiceWatcher.armForMessage(getApplicationContext(), id, p.timestamp); } catch (Throwable ignored) {}
+                     try { FastCaptureEngine.enterHotMode("audio", 30_000L); } catch (Throwable ignored) {}
+                     scheduleAudioRescue(id, p.timestamp);
+                 }
+-                if ("image".equals(mediaKind) || "video".equals(mediaKind)) {
+-                    // Arm the hot filesystem engine as soon as the notification tells us what is coming.
++                if (("image".equals(mediaKind) || "video".equals(mediaKind)) && armCapture) {
+                     try { FastCaptureEngine.enterHotMode(mediaKind,"video".equals(mediaKind)?25_000L:15_000L); } catch(Throwable ignored) {}
+-                    // Before a shared file exists, Android may still expose a notification thumbnail.
+                     long previewId=-1L;
+                     try { previewId=NotificationPreviewCapture.captureBestPreview(getApplicationContext(), n, id, p.timestamp, mediaKind); } catch (Throwable ignored) {}
+                     if(previewId<=0&&!p.hasMediaData())try{db.logEvent("MEDIA_WAITING",mediaKind+" · sin URI/preview; esperando archivo compartido",id,0L);}catch(Throwable ignored){}
+                 }
+-                try { DirectMediaWatcher.armForMessage(getApplicationContext(), id, p.timestamp, mediaKind); } catch (Throwable ignored) {}
+-                try { MediaStoreWatcher.armForMessage(getApplicationContext(), id, p.timestamp, mediaKind); } catch (Throwable ignored) {}
++                if(armCapture){
++                    try { DirectMediaWatcher.armForMessage(getApplicationContext(), id, p.timestamp, mediaKind); } catch (Throwable ignored) {}
++                    try { MediaStoreWatcher.armForMessage(getApplicationContext(), id, p.timestamp, mediaKind); } catch (Throwable ignored) {}
++                }
+                 if (p.hasMediaData()) {
+                     try { NotificationMediaCapture.linkToMessage(getApplicationContext(), p.dataUri, id); } catch (Throwable ignored) {}
+                 }
+@@ -296,7 +313,7 @@
+ 
+         // Link the already-opened notification-level audio descriptor after message insertion.
+         try {
+-            if (earlyAudioUri[0] != null) {
++            if (earlyAudioUri[0] != null && earlyAudioFresh[0]) {
+                 long linkId = newestAudioMessageId > 0 ? newestAudioMessageId : (newestMessageId > 0 ? newestMessageId : (currentIds.isEmpty() ? 0L : currentIds.get(currentIds.size()-1)));
+                 if (linkId > 0) {
+                     NotificationAudioCapture.linkToMessage(getApplicationContext(), earlyAudioUri[0], linkId);
+@@ -440,8 +457,11 @@
+ 
+     private String messageTokenBase(Parsed p) {
+         if (p == null) return "";
++        // MIME/URI availability can change while WhatsApp updates the same notification.
++        // They are attachment state, not message identity. Excluding them prevents "Foto"/audio
++        // from becoming a second logical message when the media URI appears a moment later.
+         String raw = normalizeTokenPart(p.conversation) + "|" + normalizeTokenPart(p.sender) + "|"
+-                + normalizeTokenPart(p.text) + "|" + normalizeTokenPart(p.dataMime);
++                + normalizeTokenPart(p.text);
+         try {
+             byte[] digest = MessageDigest.getInstance("SHA-256").digest(raw.getBytes(StandardCharsets.UTF_8));
+             StringBuilder b = new StringBuilder(64);
+@@ -479,7 +499,7 @@
+         }
+         if (left != null) for (SnapshotItem x : left) {
+             if (x == null) continue;
+-            boolean found = !x.token.isEmpty() ? rightTokens.contains(x.token) : rightIds.contains(x.id);
++            boolean found = (!x.token.isEmpty() && rightTokens.contains(x.token)) || (x.id > 0 && rightIds.contains(x.id));
+             if (!found) out.add(x);
+         }
+         return out;
+@@ -632,11 +652,26 @@
+             scheduleRemovedDeletionCheck(oldKey, oldConversation, oldItems, reason);
+             diagnostic("WhatsApp retiró la notificación · verificando borrado", oldItems.size(), false);
+         } else {
++            // A click/swipe/clear-all ends this active notification snapshot. Keeping it around
++            // would make a later identical "ok"/"Foto" look like the same old message.
++            clearConversationIdentityState(oldConversation, oldKey);
+             diagnostic("Notificación retirada por usuario/sistema · no es borrado", oldItems.size(), false);
+         }
+         try { MediaArchiver.resumePendingMonitors(getApplicationContext()); } catch (Throwable ignored) {}
+     }
+ 
++    private boolean shouldOpenDescriptor(Uri uri){
++        if(uri==null)return false;long now=System.currentTimeMillis();String k=uri.toString();Long prev=recentDescriptorOpens.put(k,now);
++        if(recentDescriptorOpens.size()>128)for(Map.Entry<String,Long> e:new ArrayList<>(recentDescriptorOpens.entrySet()))if(now-e.getValue()>30_000L)recentDescriptorOpens.remove(e.getKey(),e.getValue());
++        return prev==null || now-prev>1500L;
++    }
++

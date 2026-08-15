@@ -1,10 +1,10 @@
-name: WA Vault v0.5.4 super aggressive delete + audio
+name: WA Vault v0.5.5 dedupe + fast selection
 
 on:
   push:
-    branches: [wa-vault-build-v054]
+    branches: [wa-vault-build-v055]
     paths:
-      - 'wa-vault-build-v054/**'
+      - 'wa-vault-build-v055/**'
       - '.github/workflows/wa-vault-build-v052.yml'
   workflow_dispatch:
 
@@ -22,35 +22,35 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Restore verified v0.5.3 source
+      - name: Restore verified v0.5.4 source
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          mkdir wa-vault-v054-project
-          gh run download 31873847515 -n WA-Vault-v0.5.3-source -D wa-vault-v054-project
-          grep -q 'versionCode = 53' wa-vault-v054-project/app/build.gradle.kts
-          grep -q 'versionName = "0.5.3"' wa-vault-v054-project/app/build.gradle.kts
-          grep -q 'android.useAndroidX=true' wa-vault-v054-project/gradle.properties
+          mkdir wa-vault-v055-project
+          gh run download 31874568521 -n WA-Vault-v0.5.4-source -D wa-vault-v055-project
+          grep -q 'versionCode = 54' wa-vault-v055-project/app/build.gradle.kts
+          grep -q 'versionName = "0.5.4"' wa-vault-v055-project/app/build.gradle.kts
+          grep -q 'android.useAndroidX=true' wa-vault-v055-project/gradle.properties
 
-      - name: Apply verified v0.5.4 patch
+      - name: Apply verified v0.5.5 patch
         run: |
           set -euo pipefail
-          base64 -d wa-vault-build-v054/patch.b64 > /tmp/v054.patch.xz
-          echo 'd5e97f71408572d1d1e18f15fd5e5d11265c81c66379da2b1553cc5bbf2199dc  /tmp/v054.patch.xz' | sha256sum -c -
-          xz -dc /tmp/v054.patch.xz > /tmp/v054.patch
-          cd wa-vault-v054-project
-          patch -p1 --batch < /tmp/v054.patch
+          cat wa-vault-build-v055/diff-00 wa-vault-build-v055/diff-01 wa-vault-build-v055/diff-02 wa-vault-build-v055/diff-03 wa-vault-build-v055/diff-04 wa-vault-build-v055/diff-05 wa-vault-build-v055/diff-06 > /tmp/v055.patch
+          echo '263407d456a6696523545806b54cc83423986357ecb3f2a3cda698957026717f  /tmp/v055.patch' | sha256sum -c -
+          cd wa-vault-v055-project
+          patch -p1 --batch < /tmp/v055.patch
           find . -name '*.rej' -print -quit | grep -q . && { find . -name '*.rej' -print; exit 1; } || true
-          grep -q 'versionCode = 54' app/build.gradle.kts
-          grep -q 'versionName = "0.5.4"' app/build.gradle.kts
-          grep -q 'DELETE_VERIFY_MS = 160L' app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java
-          grep -q 'DELETE_BATCH_OPTIMISTIC' app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java
-          grep -q 'AGGRESSIVE_BATCH_WINDOW_MS' app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java
-          grep -q 'scanRecentAudioAggressive' app/src/main/java/com/fer/wavault/MediaArchiver.java
-          grep -q 'MediaStore.Audio.Media.EXTERNAL_CONTENT_URI' app/src/main/java/com/fer/wavault/MediaStoreWatcher.java
-          grep -q 'newFixedThreadPool(6' app/src/main/java/com/fer/wavault/DirectVoiceWatcher.java
-          test -s V054_NOTES.md
+          grep -q 'versionCode = 55' app/build.gradle.kts
+          grep -q 'versionName = "0.5.5"' app/build.gradle.kts
+          grep -q 'findExactMessageId' app/src/main/java/com/fer/wavault/VaultDb.java
+          grep -q 'MEDIA_INSERT_LOCK' app/src/main/java/com/fer/wavault/VaultDb.java
+          grep -q 'DUPLICATE_MEDIA_REPAIRED' app/src/main/java/com/fer/wavault/VaultDb.java
+          grep -q 'MIME/URI availability can change' app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java
+          grep -q 'shouldOpenDescriptor' app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java
+          grep -q 'selectionActive' app/src/main/java/com/fer/wavault/RecoveryCenterAdapter.java
+          grep -q 'Seleccionar todo' app/src/main/java/com/fer/wavault/MainActivity.java
+          test -s V055_NOTES.md
 
       - uses: android-actions/setup-android@v3
       - name: Install Android SDK 35
@@ -63,7 +63,7 @@ jobs:
           gradle-version: '8.13'
 
       - name: Compile release
-        working-directory: wa-vault-v054-project
+        working-directory: wa-vault-v055-project
         run: gradle :app:assembleRelease --stacktrace --console=plain
 
       - name: Restore signing key
@@ -74,38 +74,38 @@ jobs:
           mkdir -p signing
           gh run download 31869556369 -n WA-Vault-v0.4.0-signing-backup-fixed -D signing
           test -s signing/WA-Vault-v0.4.0-signing-backup.jks
-          test -s signing/SIGNING_BACKUP_PASSWORD.txt
+          grep -q 'WAVault-v040-2026' signing/SIGNING_BACKUP_PASSWORD.txt
 
-      - name: Sign and verify v0.5.4
+      - name: Sign and verify v0.5.5
         run: |
           set -euo pipefail
-          UNSIGNED=wa-vault-v054-project/app/build/outputs/apk/release/app-release-unsigned.apk
-          mkdir -p wa-vault-v054-output
-          PASS="$(cat signing/SIGNING_BACKUP_PASSWORD.txt)"
+          UNSIGNED=wa-vault-v055-project/app/build/outputs/apk/release/app-release-unsigned.apk
+          mkdir -p wa-vault-v055-output
+          PASS='WAVault-v040-2026'
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign \
             --ks signing/WA-Vault-v0.4.0-signing-backup.jks \
             --ks-key-alias wavault \
             --ks-pass pass:"$PASS" \
             --key-pass pass:"$PASS" \
-            --out wa-vault-v054-output/WA-Vault-v0.5.4.apk "$UNSIGNED"
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs wa-vault-v054-output/WA-Vault-v0.5.4.apk > wa-vault-v054-output/APK_SIGNATURE.txt
-          sha256sum wa-vault-v054-output/WA-Vault-v0.5.4.apk > wa-vault-v054-output/APK_SHA256.txt
-          cp wa-vault-v054-project/V054_NOTES.md wa-vault-v054-output/
-          cp wa-vault-v054-project/TEST_MATRIX.md wa-vault-v054-output/
+            --out wa-vault-v055-output/WA-Vault-v0.5.5.apk "$UNSIGNED"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs wa-vault-v055-output/WA-Vault-v0.5.5.apk > wa-vault-v055-output/APK_SIGNATURE.txt
+          sha256sum wa-vault-v055-output/WA-Vault-v0.5.5.apk > wa-vault-v055-output/APK_SHA256.txt
+          cp wa-vault-v055-project/V055_NOTES.md wa-vault-v055-output/
+          cp wa-vault-v055-project/TEST_MATRIX.md wa-vault-v055-output/
 
       - uses: actions/upload-artifact@v4
         with:
-          name: WA-Vault-v0.5.4-release
+          name: WA-Vault-v0.5.5-release
           path: |
-            wa-vault-v054-output/WA-Vault-v0.5.4.apk
-            wa-vault-v054-output/APK_SHA256.txt
-            wa-vault-v054-output/APK_SIGNATURE.txt
-            wa-vault-v054-output/V054_NOTES.md
-            wa-vault-v054-output/TEST_MATRIX.md
+            wa-vault-v055-output/WA-Vault-v0.5.5.apk
+            wa-vault-v055-output/APK_SHA256.txt
+            wa-vault-v055-output/APK_SIGNATURE.txt
+            wa-vault-v055-output/V055_NOTES.md
+            wa-vault-v055-output/TEST_MATRIX.md
           retention-days: 90
 
       - uses: actions/upload-artifact@v4
         with:
-          name: WA-Vault-v0.5.4-source
-          path: wa-vault-v054-project
+          name: WA-Vault-v0.5.5-source
+          path: wa-vault-v055-project
           retention-days: 30

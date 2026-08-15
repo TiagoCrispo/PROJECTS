@@ -1,0 +1,98 @@
+-        h.favorite.setOnClickListener(v->callback.onFavorite(m));h.share.setOnClickListener(v->callback.onShare(m));h.save.setOnClickListener(v->callback.onSave(m));h.trash.setOnClickListener(v->callback.onTrash(m));
++        h.favorite.setOnClickListener(v->{if(callback.selectionActive())callback.onToggleSelection(m);else callback.onFavorite(m);});
++        h.share.setOnClickListener(v->{if(callback.selectionActive())callback.onToggleSelection(m);else callback.onShare(m);});
++        h.save.setOnClickListener(v->{if(callback.selectionActive())callback.onToggleSelection(m);else callback.onSave(m);});
++        h.trash.setOnClickListener(v->{if(callback.selectionActive())callback.onToggleSelection(m);else callback.onTrash(m);});
+     }
+ 
+     static final class Holder extends RecyclerView.ViewHolder{
+diff -ruN wav055_base/app/src/main/java/com/fer/wavault/VaultDb.java wav055_work/app/src/main/java/com/fer/wavault/VaultDb.java
+--- wav055_base/app/src/main/java/com/fer/wavault/VaultDb.java	2026-08-15 08:28:42.000000000 +0000
++++ wav055_work/app/src/main/java/com/fer/wavault/VaultDb.java	2026-08-15 08:44:01.424604578 +0000
+@@ -22,6 +22,9 @@
+     private final CryptoManager crypto = new CryptoManager();
+     private final Context appContext;
+     private static final AtomicInteger EVENT_WRITES = new AtomicInteger(0);
++    /** Serialize the check->insert critical sections used by the aggressive capture routes. */
++    private static final Object MESSAGE_INSERT_LOCK = new Object();
++    private static final Object MEDIA_INSERT_LOCK = new Object();
+ 
+     public static final int RETENTION_NORMAL = 0;
+     public static final int RETENTION_PENDING = 1;
+@@ -203,28 +206,53 @@
+ 
+     public long insertMessage(String pkg, String conv, String sender, String body, long ts, String key, boolean isGroup, int messageIndex) {
+         if (body == null || body.trim().isEmpty()) return -1;
+-        byte[] encConv = crypto.encrypt(conv);
+-        byte[] encSender = crypto.encrypt(sender);
+-        byte[] encBody = crypto.encrypt(body);
+-        if (encConv == null || encSender == null || encBody == null) return -1;
+-        String stableKey = key == null ? "" : key;
+-        String fp = sha256(pkg + "|" + conv + "|" + sender + "|" + body + "|" + ts + "|" + stableKey + "|" + messageIndex);
+-        ContentValues v = new ContentValues();
+-        v.put("package_name", pkg);
+-        v.put("conversation", encConv);
+-        v.put("sender", encSender);
+-        v.put("body", encBody);
+-        v.put("timestamp", ts);
+-        v.put("notification_key", stableKey);
+-        v.put("fingerprint", fp);
+-        v.put("is_group", isGroup ? 1 : 0);
+-        v.put("message_index", messageIndex);
+-        long id = getWritableDatabase().insertWithOnConflict("messages", null, v, SQLiteDatabase.CONFLICT_IGNORE);
+-        if (id != -1) { notifyUi("message"); return id; }
+-        Cursor c = getReadableDatabase().query("messages", new String[]{"id"}, "fingerprint=?", new String[]{fp}, null,null,null,"1");
+-        try { return c.moveToFirst() ? c.getLong(0) : -1; } finally { c.close(); }
++        synchronized (MESSAGE_INSERT_LOCK) {
++            // MessagingStyle keeps the logical message timestamp stable even if WhatsApp cancels
++            // and reposts the notification under another Android notification key. Reuse that row
++            // before encrypting/inserting again. This is the strongest no-false-positive dedupe.
++            long exact = findExactMessageId(pkg, conv, sender, body, ts, isGroup);
++            if (exact > 0) return exact;
++            byte[] encConv = crypto.encrypt(conv);
++            byte[] encSender = crypto.encrypt(sender);
++            byte[] encBody = crypto.encrypt(body);
++            if (encConv == null || encSender == null || encBody == null) return -1;
++            String stableKey = key == null ? "" : key;
++            // v0.5.5: notification key and row index are volatile presentation details. Never
++            // include them in the durable identity of a WhatsApp message.
++            String fp = sha256((pkg==null?"":pkg) + "|" + safeText(conv) + "|" + safeText(sender) + "|" + safeText(body) + "|" + ts + "|" + (isGroup?1:0));
++            ContentValues v = new ContentValues();
++            v.put("package_name", pkg);
++            v.put("conversation", encConv);
++            v.put("sender", encSender);
++            v.put("body", encBody);
++            v.put("timestamp", ts);
++            v.put("notification_key", stableKey);
++            v.put("fingerprint", fp);
++            v.put("is_group", isGroup ? 1 : 0);
++            v.put("message_index", messageIndex);
++            long id = getWritableDatabase().insertWithOnConflict("messages", null, v, SQLiteDatabase.CONFLICT_IGNORE);
++            if (id != -1) { notifyUi("message"); return id; }
++            Cursor c = getReadableDatabase().query("messages", new String[]{"id"}, "fingerprint=?", new String[]{fp}, null,null,null,"1");
++            try { return c.moveToFirst() ? c.getLong(0) : -1; } finally { c.close(); }
++        }
+     }
+ 
++    private static String safeText(String x){return x==null?"":x.trim();}
++
++    /** Exact logical-message lookup used as a compatibility bridge for rows written before v0.5.5. */
++    public long findExactMessageId(String pkg,String conv,String sender,String body,long ts,boolean isGroup){
++        if(ts<=0||body==null)return -1L;
++        String sel="timestamp=? AND is_group=?" + (pkg==null?"":" AND package_name=?");
++        String[] args=pkg==null?new String[]{String.valueOf(ts),isGroup?"1":"0"}:new String[]{String.valueOf(ts),isGroup?"1":"0",pkg};
++        Cursor c=getReadableDatabase().query("messages",new String[]{"id","conversation","sender","body","is_deleted"},sel,args,null,null,"id ASC",null);
++        try{while(c.moveToNext()){
++            String cc=crypto.decrypt(c.getBlob(1)),ss=crypto.decrypt(c.getBlob(2)),bb=crypto.decrypt(c.getBlob(3));
++            if(c.getInt(4)==0 && sameText(cc,conv) && sameText(ss,sender) && sameText(bb,body))return c.getLong(0);
++        }}finally{c.close();}
++        return -1L;
++    }
++    private static boolean sameText(String a,String b){return safeText(a).equals(safeText(b));}
++
+     public long markLatestDeleted(String conv) { return markLatestDeleted(conv, DELETE_PROBABLE); }
+     public long markLatestDeleted(String conv, int state) {
+         List<Msg> list = listMessages(160);
+@@ -364,6 +392,12 @@
+     }
+ 

@@ -1,0 +1,9 @@
++    private void clearConversationIdentityState(String conversation,String notificationKey){
++        if(prefs==null)prefs=getSharedPreferences(DIAG_PREFS,MODE_PRIVATE);String ck=conversationSnapshotKey(conversation);
++        prefs.edit().remove("conv_snapshot2_"+ck).remove("burst2_"+ck)
++                .remove("snapshot_"+notificationKey).remove("snapshot2_"+notificationKey).remove("state2_"+notificationKey).remove("conv_"+notificationKey).apply();
++    }
++
+     private String conversationHint(StatusBarNotification sbn) {
+         if (sbn == null || sbn.getNotification() == null || sbn.getNotification().extras == null) return "WhatsApp";
+         Bundle e = sbn.getNotification().extras;

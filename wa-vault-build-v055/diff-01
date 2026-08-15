@@ -1,0 +1,52 @@
++        LinearLayout bulk=row();addWeighted(bulk,button("★ Favoritos",v->bulkFavoriteSelected()));addWeighted(bulk,button("🗑 Papelera",v->bulkTrashSelected()));root.addView(bulk);
+ 
+         RecyclerView rv=new RecyclerView(this);recoveryRecycler=rv;rv.setBackgroundColor(bg);rv.setClipToPadding(false);rv.setPadding(0,dp(8),0,dp(16));GridLayoutManager glm=new GridLayoutManager(this,2);rv.setLayoutManager(glm);
+         recoveryCenterAdapter=new RecoveryCenterAdapter(this,new RecoveryCenterAdapter.Callback(){
+@@ -817,6 +818,7 @@
+             @Override public void onToggleSelection(VaultDb.Media m){if(!recoveredSelection.add(m.id))recoveredSelection.remove(m.id);updateRecoveredSelectionUi();}
+             @Override public void onDetails(VaultDb.Media m){showRecoveryTimeline(m);}
+             @Override public boolean isSelected(long id){return recoveredSelection.contains(id);}
++            @Override public boolean selectionActive(){return !recoveredSelection.isEmpty();}
+             @Override public String contextFor(long id){String x=recoveredContext.get(id);return x==null?"":x;}
+             @Override public String confidenceFor(VaultDb.Media m){return associationConfidence(m);}
+         });
+@@ -843,7 +845,17 @@
+     private void submitRecoveredList(){if(recoveryCenterAdapter!=null)recoveryCenterAdapter.submitList(new ArrayList<>(recoveredItems));updateRecoveredSelectionUi();}
+     private void refreshRecoveredInPlace(){if("recovered".equals(currentScreen)){++mediaLoadGeneration;loadRecoveredPage(true);}}
+     private void loadMoreRecoveredInPlace(){if(!mediaHasMore||mediaLoadingMore||!"recovered".equals(currentScreen))return;loadRecoveredPage(false);}
+-    private void updateRecoveredSelectionUi(){if(recoveredSelectionText!=null)recoveredSelectionText.setText(recoveredSelection.isEmpty()?"Mantén pulsado un archivo para seleccionar varios":recoveredSelection.size()+" seleccionados");if(recoveryCenterAdapter!=null)recoveryCenterAdapter.notifyDataSetChanged();}
++    private void updateRecoveredSelectionUi(){if(recoveredSelectionText!=null)recoveredSelectionText.setText(recoveredSelection.isEmpty()?"Mantén pulsado un archivo para iniciar selección múltiple":recoveredSelection.size()+" seleccionados · ahora toca una vez para añadir/quitar");if(recoveryCenterAdapter!=null)recoveryCenterAdapter.notifyDataSetChanged();}
++    private void selectAllRecovered(){
++        final int generation=mediaLoadGeneration;final long cutoff=mediaDays<=0?0L:System.currentTimeMillis()-mediaDays*86400000L;
++        Toast.makeText(this,"Seleccionando todos los elementos del filtro…",Toast.LENGTH_SHORT).show();
++        new Thread(()->{
++            List<VaultDb.Media> all;try{all=db.listRecoveryCenterPage(mediaFilter,mediaPendingOnly,mediaSort,mediaFavoritesOnly,mediaUnlinkedOnly,cutoff,12000,0);}catch(Throwable t){all=new ArrayList<>();}
++            LinkedHashMap<Long,String> ctx=new LinkedHashMap<>();for(int i=0;i<all.size();i+=300)try{ctx.putAll(db.listMessageContextsForMedia(all.subList(i,Math.min(all.size(),i+300))));}catch(Throwable ignored){}
++            final List<VaultDb.Media> filtered=applyRecoveredFilters(all,ctx);final ArrayList<Long> ids=new ArrayList<>();for(VaultDb.Media m:filtered)if(m!=null)ids.add(m.id);
++            runOnUiThread(()->{if(!"recovered".equals(currentScreen)||generation!=mediaLoadGeneration)return;recoveredSelection.clear();recoveredSelection.addAll(ids);updateRecoveredSelectionUi();Toast.makeText(this,ids.size()+" seleccionados",Toast.LENGTH_SHORT).show();});
++        },"wa-vault-select-all").start();
++    }
+     private void bulkFavoriteSelected(){if(recoveredSelection.isEmpty()){Toast.makeText(this,"No hay archivos seleccionados",Toast.LENGTH_SHORT).show();return;}new Thread(()->{int n=0;for(Long id:new ArrayList<>(recoveredSelection))if(id!=null&&db.setFavorite(id,true))n++;final int done=n;runOnUiThread(()->{Toast.makeText(this,done+" marcados como favoritos",Toast.LENGTH_SHORT).show();recoveredSelection.clear();++mediaLoadGeneration;loadRecoveredPage(true);});},"wa-vault-bulk-fav").start();}
+     private void bulkTrashSelected(){if(recoveredSelection.isEmpty()){Toast.makeText(this,"No hay archivos seleccionados",Toast.LENGTH_SHORT).show();return;}new AlertDialog.Builder(this).setTitle("Mover a papelera").setMessage("Los "+recoveredSelection.size()+" archivos seleccionados se conservarán 7 días antes de su eliminación automática.").setNegativeButton("Cancelar",null).setPositiveButton("Mover",(d,w)->new Thread(()->{int n=db.moveMediaToTrash(new ArrayList<>(recoveredSelection));runOnUiThread(()->{Toast.makeText(this,n+" movidos a papelera",Toast.LENGTH_SHORT).show();recoveredSelection.clear();++mediaLoadGeneration;loadRecoveredPage(true);});},"wa-vault-bulk-trash").start()).show();}
+ 
+diff -ruN wav055_base/app/src/main/java/com/fer/wavault/RecoveryCenterAdapter.java wav055_work/app/src/main/java/com/fer/wavault/RecoveryCenterAdapter.java
+--- wav055_base/app/src/main/java/com/fer/wavault/RecoveryCenterAdapter.java	2026-08-15 08:28:42.000000000 +0000
++++ wav055_work/app/src/main/java/com/fer/wavault/RecoveryCenterAdapter.java	2026-08-15 08:44:55.530237139 +0000
+@@ -35,6 +35,7 @@
+         void onToggleSelection(VaultDb.Media media);
+         void onDetails(VaultDb.Media media);
+         boolean isSelected(long mediaId);
++        boolean selectionActive();
+         String contextFor(long mediaId);
+         String confidenceFor(VaultDb.Media media);
+     }
+@@ -79,10 +80,14 @@
+         h.confidence.setText(callback.confidenceFor(m));
+         h.preview.setImageDrawable(null);h.preview.setTag(null);h.glyph.setText("audio".equals(type)?"♪":("video".equals(type)?"▶":("document".equals(type)?"DOC":"▣")));
+         if(available && ("image".equals(type)||"video".equals(type)))MediaThumbnailLoader.load(context,h.preview,f,type,dp(320));
+-        h.root.setOnClickListener(v->{if(callback.isSelected(m.id))callback.onToggleSelection(m);else callback.onOpen(m);});
+-        h.confidence.setOnClickListener(v->callback.onDetails(m));
++        boolean selecting=callback.selectionActive();
++        h.root.setOnClickListener(v->{if(callback.selectionActive())callback.onToggleSelection(m);else callback.onOpen(m);});
++        h.confidence.setOnClickListener(v->{if(callback.selectionActive())callback.onToggleSelection(m);else callback.onDetails(m);});
+         h.root.setOnLongClickListener(v->{callback.onToggleSelection(m);return true;});

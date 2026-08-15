@@ -1,0 +1,64 @@
+     private long insertMediaInternal(String uri, String localPath, String name, String mime, String type, long size, long sourceTime, long linkedMessageId, int retentionState, long expiresAt, String origin) {
++        synchronized (MEDIA_INSERT_LOCK) {
++            return insertMediaInternalLocked(uri,localPath,name,mime,type,size,sourceTime,linkedMessageId,retentionState,expiresAt,origin);
++        }
++    }
++
++    private long insertMediaInternalLocked(String uri, String localPath, String name, String mime, String type, long size, long sourceTime, long linkedMessageId, int retentionState, long expiresAt, String origin) {
+         File f = localPath == null ? null : new File(localPath);
+ 
+         // Cheapest dedupe first: if this exact source was already archived, avoid hashing and
+@@ -571,6 +605,8 @@
+ 
+     public int performConsistencyMaintenance(){
+         int changes=0;SQLiteDatabase w=getWritableDatabase();
++        changes+=repairProvableMessageDuplicates(6000);
++        changes+=repairLinkedMediaDuplicates(6000);
+         List<Media> all=queryMedia(null,null,"captured_at DESC",6000);Set<String> referenced=new HashSet<>();
+         for(Media m:all){if(m.path!=null&&!m.path.isEmpty())referenced.add(m.path);File f=m.path==null?null:new File(m.path);if(f==null||!f.exists()){changes+=w.delete("media","id=?",new String[]{String.valueOf(m.id)});}}
+         File dir=new File(appContext.getFilesDir(),"vault_media");File[] fs=dir.listFiles();if(fs!=null)for(File f:fs){if(f.isFile()&&!referenced.contains(f.getAbsolutePath())&&System.currentTimeMillis()-Math.max(0L,f.lastModified())>10*60_000L){if(f.delete())changes++;}}
+@@ -579,11 +615,59 @@
+         if(changes>0)notifyUi("media");return changes;
+     }
+ 
++    /** Only collapses message copies that have identical decrypted content AND the exact same logical timestamp. */
++    public int repairProvableMessageDuplicates(int limit){
++        List<Msg> rows=listMessages(Math.max(1,limit));Map<String,Long> keepByKey=new LinkedHashMap<>();int n=0;SQLiteDatabase w=getWritableDatabase();
++        // listMessages is newest first; use the smaller/original id when an exact duplicate is found.
++        for(Msg m:rows){if(m==null)continue;String key=safeText(m.conversation)+"\u0001"+safeText(m.sender)+"\u0001"+safeText(m.body)+"\u0001"+m.timestamp+"\u0001"+(m.isGroup?1:0);Long old=keepByKey.get(key);if(old==null){keepByKey.put(key,m.id);continue;}
++            long keep=Math.min(old,m.id),drop=Math.max(old,m.id);keepByKey.put(key,keep);
++            Msg kd=getMessage(keep),dd=getMessage(drop);if(kd==null||dd==null)continue;
++            if(dd.deleted&&!kd.deleted)markDeletedById(keep,dd.deletionState);
++            ContentValues mv=new ContentValues();mv.put("linked_message_id",keep);w.update("media",mv,"linked_message_id=?",new String[]{String.valueOf(drop)});
++            n+=w.delete("messages","id=?",new String[]{String.valueOf(drop)});
++        }
++        if(n>0)try{logEvent("DUPLICATE_MESSAGES_REPAIRED","exactos="+n,0L,0L);}catch(Throwable ignored){}
++        return n;
++    }
++
++    /** Collapse concurrent capture-route copies that ended up attached to the same logical message/type. */
++    public int repairLinkedMediaDuplicates(int limit){
++        List<Media> rows=queryMedia("linked_message_id>0",null,"linked_message_id ASC, media_type ASC, byte_size DESC, captured_at DESC",Math.max(1,limit));
++        Map<String,Media> keep=new LinkedHashMap<>();int n=0;SQLiteDatabase w=getWritableDatabase();
++        for(Media m:rows){if(m==null)continue;String key=m.linkedMessageId+"|"+safeText(m.type);Media k=keep.get(key);if(k==null){keep.put(key,m);continue;}
++            Media winner=(m.size>k.size)?m:k,loser=winner.id==m.id?k:m;keep.put(key,winner);
++            ContentValues u=new ContentValues();if(m.favorite||k.favorite)u.put("is_favorite",1);u.put("retention_state",Math.max(m.retentionState,k.retentionState));w.update("media",u,"id=?",new String[]{String.valueOf(winner.id)});
++            File lf=loser.path==null?null:new File(loser.path),wf=winner.path==null?null:new File(winner.path);if(lf!=null&&(wf==null||!lf.equals(wf)))try{lf.delete();}catch(Throwable ignored){}
++            n+=w.delete("media","id=?",new String[]{String.valueOf(loser.id)});
++        }
++        if(n>0)try{logEvent("DUPLICATE_MEDIA_REPAIRED","vinculados="+n,0L,0L);}catch(Throwable ignored){}
++        return n;
++    }
++
+     public List<Event> listEventsSince(long since,int limit){List<Event> out=new ArrayList<>();Cursor c=getReadableDatabase().query("event_log",new String[]{"id","timestamp","code","detail","message_id","media_id"},"timestamp>=?",new String[]{String.valueOf(since)},null,null,"timestamp DESC",String.valueOf(Math.max(1,limit)));try{while(c.moveToNext()){Event e=new Event();e.id=c.getLong(0);e.timestamp=c.getLong(1);e.code=c.getString(2);e.detail=crypto.decrypt(c.getBlob(3));e.messageId=c.getLong(4);e.mediaId=c.getLong(5);out.add(e);}}finally{c.close();}return out;}
+ 
+     public void deleteMessage(long id) { if(getWritableDatabase().delete("messages", "id=?", new String[]{String.valueOf(id)})>0)notifyUi("message"); }
+-    public void linkMediaToMessage(long mediaId,long messageId){ if(mediaId<=0||messageId<=0)return; ContentValues v=new ContentValues();v.put("linked_message_id",messageId);if(getWritableDatabase().update("media",v,"id=?",new String[]{String.valueOf(mediaId)})>0)notifyUi("media"); }
+-    public void linkMediaToMessageIfFree(long mediaId,long messageId){ if(mediaId<=0||messageId<=0)return; ContentValues v=new ContentValues();v.put("linked_message_id",messageId);if(getWritableDatabase().update("media",v,"id=? AND linked_message_id=0",new String[]{String.valueOf(mediaId)})>0)notifyUi("media"); }
++    public void linkMediaToMessage(long mediaId,long messageId){ if(mediaId<=0||messageId<=0)return; synchronized(MEDIA_INSERT_LOCK){mergeOrLinkMedia(mediaId,messageId,false);} }
++    public void linkMediaToMessageIfFree(long mediaId,long messageId){ if(mediaId<=0||messageId<=0)return; synchronized(MEDIA_INSERT_LOCK){mergeOrLinkMedia(mediaId,messageId,true);} }
++
++    /** A WhatsApp message has one logical attachment of each media type. Prefer the largest/full copy. */
++    private void mergeOrLinkMedia(long mediaId,long messageId,boolean onlyIfFree){
++        Media candidate=getMedia(mediaId);if(candidate==null)return;
++        if(onlyIfFree && candidate.linkedMessageId>0 && candidate.linkedMessageId!=messageId)return;

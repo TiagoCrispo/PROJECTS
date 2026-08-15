@@ -1,0 +1,92 @@
++        Media existing=findLinkedMedia(messageId,candidate.type);
++        if(existing!=null&&existing.id!=candidate.id){
++            Media keep=(candidate.size>existing.size)?candidate:existing;
++            Media drop=keep.id==candidate.id?existing:candidate;
++            ContentValues kv=new ContentValues();kv.put("linked_message_id",messageId);if(candidate.favorite||existing.favorite)kv.put("is_favorite",1);kv.put("retention_state",Math.max(candidate.retentionState,existing.retentionState));
++            getWritableDatabase().update("media",kv,"id=?",new String[]{String.valueOf(keep.id)});
++            File df=drop.path==null?null:new File(drop.path);File kf=keep.path==null?null:new File(keep.path);if(df!=null&&(kf==null||!df.equals(kf)))try{df.delete();}catch(Throwable ignored){}
++            getWritableDatabase().delete("media","id=?",new String[]{String.valueOf(drop.id)});
++            try{logEvent("DUPLICATE_MEDIA_COLLAPSED",candidate.type+" · mensaje="+messageId,messageId,keep.id);}catch(Throwable ignored){}
++            notifyUi("media");return;
++        }
++        ContentValues v=new ContentValues();v.put("linked_message_id",messageId);String where=onlyIfFree?"id=? AND linked_message_id=0":"id=?";
++        if(getWritableDatabase().update("media",v,where,new String[]{String.valueOf(mediaId)})>0)notifyUi("media");
++    }
+ 
+     public int promotePendingForMessage(long messageId){ if(messageId<=0)return 0; ContentValues v=new ContentValues();v.put("retention_state",RETENTION_KEPT_DELETED);v.put("expires_at",0L);int n=getWritableDatabase().update("media",v,"retention_state=? AND linked_message_id=?",new String[]{String.valueOf(RETENTION_PENDING),String.valueOf(messageId)});if(n>0)notifyUi("media");return n; }
+     public int promotePendingNear(long timestamp,long windowMs){ if(timestamp<=0)return 0; List<Media> ms=queryMedia("retention_state=? AND media_type='audio' AND linked_message_id=0 AND ABS(CASE WHEN source_time>0 THEN source_time ELSE captured_at END - ?) <= ?",new String[]{String.valueOf(RETENTION_PENDING),String.valueOf(timestamp),String.valueOf(Math.min(windowMs,5000L))},"ABS(CASE WHEN source_time>0 THEN source_time ELSE captured_at END - "+timestamp+") ASC",1); int n=0; for(Media m:ms) if(promotePendingById(m.id))n++; return n; }
+diff -ruN wav055_base/app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java wav055_work/app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java
+--- wav055_base/app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java	2026-08-15 08:28:42.000000000 +0000
++++ wav055_work/app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java	2026-08-15 08:44:55.529995747 +0000
+@@ -55,6 +55,7 @@
+     private static final long REMOVAL_VERIFY_MS = 220L;
+     private static final long EMPTY_VERIFY_MS = 190L;
+     private final Map<String,Long> removalCandidateGenerations = new ConcurrentHashMap<>();
++    private final Map<String,Long> recentDescriptorOpens = new ConcurrentHashMap<>();
+     private volatile long latestLinkedMessageId = 0L;
+     private volatile long latestNotificationTime = 0L;
+     private volatile long lastWhatsAppEventAt = 0L;
+@@ -177,18 +178,22 @@
+         // PRECISION EXTREME: preserve notification-level audio before parsing/DB work.
+         // The descriptor is opened synchronously while WhatsApp's temporary grant is alive.
+         final Uri[] earlyAudioUri = new Uri[]{null};
++        final boolean[] earlyAudioFresh = new boolean[]{false};
+         try {
+             String audioContents = n.extras.getString(Notification.EXTRA_AUDIO_CONTENTS_URI, "");
+             if (audioContents != null && !audioContents.trim().isEmpty()) {
+                 earlyAudioUri[0] = Uri.parse(audioContents.trim());
+-                NotificationAudioCapture.tryCaptureNow(getApplicationContext(), earlyAudioUri[0], "audio/*", 0L, sbn.getPostTime(), sbn.getPostTime());
++                if (shouldOpenDescriptor(earlyAudioUri[0])) {
++                    earlyAudioFresh[0] = true;
++                    NotificationAudioCapture.tryCaptureNow(getApplicationContext(), earlyAudioUri[0], "audio/*", 0L, sbn.getPostTime(), sbn.getPostTime());
++                }
+             }
+         } catch (Throwable ignored) {}
+ 
+         List<Parsed> parsed = parseNotification(sbn);
+         // Preserve every per-message media URI before encryption, correlation and SQLite writes.
+         for (Parsed early : parsed) {
+-            if (early == null || !early.hasMediaData()) continue;
++            if (early == null || !early.hasMediaData() || !shouldOpenDescriptor(early.dataUri)) continue;
+             try { NotificationMediaCapture.tryCaptureNow(getApplicationContext(), early.dataUri, early.dataMime, 0L, sbn.getPostTime(), early.timestamp); }
+             catch (Throwable ignored) {}
+         }
+@@ -230,6 +235,8 @@
+         String newestMessageMediaKind = "";
+         long newestAudioMessageId = -1L;
+         long newestAudioMessageTime = 0L;
++        Map<String,Long> previousTokenIds = new LinkedHashMap<>();
++        for (SnapshotItem x : previousItems) if (x != null && !x.token.isEmpty() && x.id > 0) previousTokenIds.put(x.token,x.id);
+ 
+         for (Parsed p : parsed) {
+             fallbackConversation = p.conversation;
+@@ -251,16 +258,22 @@
+             tokenOccurrences.put(baseToken, occurrence);
+             String messageToken = baseToken + "#" + occurrence;
+ 
+-            long id = db.insertMessage(
+-                    sbn.getPackageName(),
+-                    p.conversation,
+-                    p.sender,
+-                    p.text,
+-                    p.timestamp,
+-                    sbn.getKey(),
+-                    p.isGroup,
+-                    p.messageIndex
+-            );
++            long id = previousTokenIds.containsKey(messageToken) ? previousTokenIds.get(messageToken) : -1L;
++            boolean logicalNew = false;
++            if (id <= 0) id = db.findExactMessageId(sbn.getPackageName(),p.conversation,p.sender,p.text,p.timestamp,p.isGroup);
++            if (id <= 0) {
++                id = db.insertMessage(
++                        sbn.getPackageName(),
++                        p.conversation,
++                        p.sender,
++                        p.text,
++                        p.timestamp,
++                        sbn.getKey(),
++                        p.isGroup,
++                        p.messageIndex
++                );
++                logicalNew = id > 0;
++            }
