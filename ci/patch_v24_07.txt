@@ -1,0 +1,158 @@
+-                    }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Guardar serie + iniciar descanso") }
++                        val kg = strengthWeight.toDoubleOrNull(); val reps = strengthReps.toIntOrNull(); val rpe = strengthRpe.toDoubleOrNull(); val rir = strengthRir.toIntOrNull()
++                        if (kg != null && reps != null) { vm.addStrengthSet(kg, reps, rpe, rir, strengthSetType, if (supersetEnabled) "SS1" else null); strengthReps = "" } else vm.showMessage("Ingresá peso y repeticiones válidos")
++                    }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Guardar ${if (strengthSetType == StrengthSetType.WARMUP) "calentamiento" else "serie"} + descanso") }
+                     if (strength.restRunning) {
+                         Text("Descanso automático: ${strength.restSecondsRemaining}s", style = MaterialTheme.typography.titleMedium, color = Accent, modifier = Modifier.padding(top = 10.dp))
+                         TextButton(onClick = vm::cancelRestTimer) { Text("Terminar descanso") }
+@@ -200,6 +261,21 @@
+                 subtitle = if (live.autoPaused) "Pausa automática detectada" else "Registro activo"
+             )
+ 
++            if (BuildConfig.FEATURE_STAGE >= 24 && live.type != WorkoutType.ROPE && (!live.gpsProviderEnabled || !live.fineLocationGranted)) {
++                BandCard {
++                    Text("GPS NO DISPONIBLE", style = MaterialTheme.typography.labelMedium, color = Warm)
++                    Text(if (!live.fineLocationGranted) "Falta ubicación precisa" else "Activá Ubicación/GPS del teléfono", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 6.dp))
++                    Text("No hacen falta datos móviles, pero sí debe estar encendido el GPS y BandLab necesita ubicación precisa.", style = MaterialTheme.typography.bodyMedium, color = TextSecondary, modifier = Modifier.padding(top = 6.dp))
++                }
++            }
++
++            if (BuildConfig.FEATURE_STAGE >= 24 && live.route.size >= 2) {
++                BandCard {
++                    Text("RUTA OFFLINE", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
++                    OfflineRouteView(live.route, modifier = Modifier.padding(top = 10.dp))
++                }
++            }
++
+             BandCard {
+                 Text("TIEMPO ACTIVO", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+                 Text(formatDuration(live.activeMs), style = MaterialTheme.typography.displaySmall, modifier = Modifier.padding(top = 6.dp))
+@@ -229,6 +305,17 @@
+                     MetricLabel("Calorías est.", if (live.caloriesKcal > 0) "%.0f".format(live.caloriesKcal) else "—", "kcal", Warm)
+                     MetricLabel("Velocidad", "%.1f".format(live.currentSpeedMps * 3.6), "km/h")
+                 }
++                if (BuildConfig.FEATURE_STAGE >= 24) {
++                    Row(modifier = Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
++                        MetricLabel("Ascenso", "%.0f".format(live.ascentMeters), "m")
++                        MetricLabel("Cadencia", live.cadenceSpm?.toString() ?: "—", "pasos/min", AccentBlue)
++                        MetricLabel("Pasos", if (live.stepCount > 0) live.stepCount.toString() else "—")
++                    }
++                    live.goalProgress?.let { progress ->
++                        Text(if (live.goalReached) "Objetivo cumplido" else "Objetivo ${(progress * 100).toInt()}%", style = MaterialTheme.typography.bodyMedium, color = if (live.goalReached) Accent else TextSecondary, modifier = Modifier.padding(top = 12.dp))
++                        LinearProgressIndicator(progress = { progress.toFloat() }, modifier = Modifier.fillMaxWidth().padding(top = 5.dp))
++                    }
++                }
+                 Text(
+                     live.gpsAccuracyMeters?.let { "Precisión GPS ±${it.toInt()} m" } ?: "Esperando señal GPS",
+                     style = MaterialTheme.typography.bodyMedium,
+@@ -255,6 +342,12 @@
+                 )
+             }
+ 
++            if (BuildConfig.FEATURE_STAGE >= 24) {
++                OutlinedButton(onClick = vm::addManualLap, modifier = Modifier.fillMaxWidth()) {
++                    Text("Marcar vuelta${if (live.manualLaps.isNotEmpty()) " · ${live.manualLaps.size} guardada(s)" else ""}")
++                }
++            }
++
+             if (live.status == WorkoutStatus.PAUSED) {
+                 Button(onClick = vm::resumeWorkout, modifier = Modifier.fillMaxWidth()) {
+                     Icon(Icons.Rounded.PlayArrow, contentDescription = null)
+diff -ruN '--exclude=.kotlin' '--exclude=build' '--exclude=dist' bandlab_v23_base/app/src/main/res/xml/file_paths.xml bandlab_v24/app/src/main/res/xml/file_paths.xml
+--- bandlab_v23_base/app/src/main/res/xml/file_paths.xml	2026-08-15 08:14:56.000000000 +0000
++++ bandlab_v24/app/src/main/res/xml/file_paths.xml	2026-08-15 22:06:02.068349612 +0000
+@@ -1,2 +1,5 @@
+ <?xml version="1.0" encoding="utf-8"?>
+-<paths xmlns:android="http://schemas.android.com/apk/res/android"><cache-path name="diagnostics" path="diagnostics/" /></paths>
++<paths xmlns:android="http://schemas.android.com/apk/res/android">
++    <cache-path name="diagnostics" path="diagnostics/" />
++    <cache-path name="exports" path="exports/" />
++</paths>
+diff -ruN '--exclude=.kotlin' '--exclude=build' '--exclude=dist' bandlab_v23_base/app/src/test/java/com/fer/bandlab/health/HealthRecordDeduplicatorTest.kt bandlab_v24/app/src/test/java/com/fer/bandlab/health/HealthRecordDeduplicatorTest.kt
+--- bandlab_v23_base/app/src/test/java/com/fer/bandlab/health/HealthRecordDeduplicatorTest.kt	1970-01-01 00:00:00.000000000 +0000
++++ bandlab_v24/app/src/test/java/com/fer/bandlab/health/HealthRecordDeduplicatorTest.kt	2026-08-15 22:04:30.895360578 +0000
+@@ -0,0 +1,32 @@
++package com.fer.bandlab.health
++
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertTrue
++import org.junit.Test
++
++class HealthRecordDeduplicatorTest {
++    @Test fun identicalIntervalsFromTwoOriginsAreNotDoubled() {
++        val result = HealthRecordDeduplicator.reconcile(listOf(
++            HealthRecordDeduplicator.Interval(0, 60_000, 100.0, "watch"),
++            HealthRecordDeduplicator.Interval(0, 60_000, 100.0, "phone"),
++        ))
++        assertEquals(100.0, result.value, 0.001)
++        assertTrue(result.overlapSuppressedRecords >= 1)
++    }
++
++    @Test fun nonOverlappingIntervalsAreAdded() {
++        val result = HealthRecordDeduplicator.reconcile(listOf(
++            HealthRecordDeduplicator.Interval(0, 60_000, 100.0, "watch"),
++            HealthRecordDeduplicator.Interval(60_000, 120_000, 120.0, "phone"),
++        ))
++        assertEquals(220.0, result.value, 0.001)
++    }
++
++    @Test fun higherResolutionSourceWinsPerMinuteWithoutLosingOtherMinutes() {
++        val result = HealthRecordDeduplicator.reconcile(listOf(
++            HealthRecordDeduplicator.Interval(0, 120_000, 200.0, "daily"),
++            HealthRecordDeduplicator.Interval(0, 60_000, 130.0, "watch"),
++        ))
++        assertEquals(230.0, result.value, 0.001)
++    }
++}
+diff -ruN '--exclude=.kotlin' '--exclude=build' '--exclude=dist' bandlab_v23_base/app/src/test/java/com/fer/bandlab/training/WorkoutExporterTest.kt bandlab_v24/app/src/test/java/com/fer/bandlab/training/WorkoutExporterTest.kt
+--- bandlab_v23_base/app/src/test/java/com/fer/bandlab/training/WorkoutExporterTest.kt	1970-01-01 00:00:00.000000000 +0000
++++ bandlab_v24/app/src/test/java/com/fer/bandlab/training/WorkoutExporterTest.kt	2026-08-15 22:11:28.483401602 +0000
+@@ -0,0 +1,38 @@
++package com.fer.bandlab.training
++
++import com.fer.bandlab.model.RoutePoint
++import com.fer.bandlab.model.WorkoutSummary
++import com.fer.bandlab.model.WorkoutType
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertTrue
++import org.junit.Test
++
++class WorkoutExporterTest {
++    private val workout = WorkoutSummary(
++        type = WorkoutType.RUN,
++        startedAtEpochMs = 1_700_000_000_000L,
++        elapsedMs = 120_000L,
++        activeMs = 110_000L,
++        pausedMs = 10_000L,
++        pauseCount = 1,
++        distanceMeters = 300.0,
++        caloriesKcal = 30.0,
++        route = listOf(
++            RoutePoint(-32.89, -68.84, 750.0, 5f, 0, segmentStart = true),
++            RoutePoint(-32.891, -68.841, 751.0, 6f, 60_000),
++            RoutePoint(-32.892, -68.842, 752.0, 7f, 120_000, segmentStart = true),
++        )
++    )
++
++    @Test fun gpxPreservesGpsLossAsSeparateTrackSegment() {
++        val gpx = WorkoutExporter.toGpx(workout)
++        assertEquals(2, "<trkseg>".toRegex().findAll(gpx).count())
++        assertTrue(gpx.contains("<ele>750.00</ele>"))
++    }
++
++    @Test fun csvContainsOfflineCoordinates() {
++        val csv = WorkoutExporter.toCsv(workout)
++        assertTrue(csv.contains("-32.89,-68.84"))
++        assertTrue(csv.lines().first().contains("segment_start"))
++    }
++}
+diff -ruN '--exclude=.kotlin' '--exclude=build' '--exclude=dist' bandlab_v23_base/bandlab-version.properties bandlab_v24/bandlab-version.properties
+--- bandlab_v23_base/bandlab-version.properties	2026-08-15 21:30:28.000000000 +0000
++++ bandlab_v24/bandlab-version.properties	2026-08-15 22:03:54.402288917 +0000
+@@ -1,3 +1,3 @@
+-versionName=2.3.0
+-versionCode=230
+-stage=DynamicHomeRecovery
++versionName=2.4.0
++versionCode=240
++stage=ReliabilityOfflineTraining
