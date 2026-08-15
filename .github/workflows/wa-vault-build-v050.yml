@@ -41,6 +41,7 @@ jobs:
           xz -dc /tmp/v050.patch.xz > /tmp/v050.patch
           cd wa-vault-v050-project
           patch -p1 --batch < /tmp/v050.patch
+          grep -q '^android.useAndroidX=true$' gradle.properties || echo 'android.useAndroidX=true' >> gradle.properties
           find . -name '*.rej' -print -quit | grep -q . && { find . -name '*.rej' -print; exit 1; } || true
           grep -q 'versionCode = 50' app/build.gradle.kts
           grep -q 'versionName = "0.5.0"' app/build.gradle.kts
