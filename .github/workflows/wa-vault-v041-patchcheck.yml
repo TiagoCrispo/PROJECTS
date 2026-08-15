@@ -14,10 +14,11 @@ jobs:
       - name: Check patch fragments
         run: |
           set -u
-          wc -c wa-vault-build-v041/patch-0*.b64
-          sha256sum wa-vault-build-v041/patch-0*.b64
-          echo 'EXPECTED 00 752dc1a7fe271b7146fcac074ed0f2135764c5765394d25981ce093724e40c06'
+          for f in patch-000 patch-001 patch-002 patch-003 patch-01 patch-02 patch-03; do wc -c "wa-vault-build-v041/$f.b64"; sha256sum "wa-vault-build-v041/$f.b64"; base64 -d "wa-vault-build-v041/$f.b64" >/dev/null && echo "$f OK" || echo "$f FAIL"; done
+          echo 'EXPECTED 000 31f73f26347046e8a68fcd67d070aeb9121dff9498490f1cedfc5b0a181ac3b0'
+          echo 'EXPECTED 001 2ba9f50e03509da79c20a43b13999501eb2a60b0c773b451e7f329bfe1a64c67'
+          echo 'EXPECTED 002 4f7658052ca1cdeba71cceb5a4c9726587105775b3baf1a41907afb15ef491b0'
+          echo 'EXPECTED 003 349d861fed54321045ee1ec119bd4d52734f993846f6f4e53269d2cc7d314b9a'
           echo 'EXPECTED 01 4a0c8fb0fa0a4dd30d6d2fd26fcaad0baa9ccbeb9f4bd400fcc5c7e16e101d08'
           echo 'EXPECTED 02 bc04f436f360ac7a572ac499488942769a7493fca84d24dbc9309aea792eab8d'
           echo 'EXPECTED 03 6f8b9c8d93000e2abe26189e749282719185ade2205ebf93330bec3005d4246c'
-          for f in wa-vault-build-v041/patch-0*.b64; do echo "decode $f"; base64 -d "$f" >/dev/null && echo OK || echo FAIL; done
