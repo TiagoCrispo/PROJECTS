@@ -38,7 +38,7 @@ jobs:
           test "$(wc -c < v114.diff.xz)" -eq 21492
           echo "8af44f6f22f7d176638fc92e572022c81fbf324cb117b5ee7cbdb6d98b8c498b  v114.diff.xz" | sha256sum -c -
           xz -dc v114.diff.xz > v114.diff
-          patch --batch --forward -p3 -d a53v113 < v114.diff
+          patch --batch --forward -p4 -d a53v113 < v114.diff
           mv a53v113 a53v114
           grep -q "versionCode 20" a53v114/app/build.gradle
           grep -q "versionName '1.14.0'" a53v114/app/build.gradle
