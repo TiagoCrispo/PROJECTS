@@ -1,0 +1,162 @@
+diff -ruN wav055src/CHANGELOG.md wav056src/CHANGELOG.md
+--- wav055src/CHANGELOG.md	2026-08-15 08:54:28.000000000 +0000
++++ wav056src/CHANGELOG.md	2026-08-15 09:02:43.950321170 +0000
+@@ -93,3 +93,6 @@
+ ## 0.5.2
+ - Fixed deleted-message UI persistence: explicit deletion signals now always produce a visible deleted row.
+ - Added honest deletion tombstones when original text cannot be correlated; no arbitrary latest-message guessing.
++
++## v0.5.6
++- Expand capped deletion-marker batches from the active compact conversation burst so 6 consecutive deletions are not truncated to the 4 rows exposed by WhatsApp/Android.
+diff -ruN wav055src/TEST_MATRIX.md wav056src/TEST_MATRIX.md
+--- wav055src/TEST_MATRIX.md	2026-08-15 08:54:28.000000000 +0000
++++ wav056src/TEST_MATRIX.md	2026-08-15 09:02:43.954321170 +0000
+@@ -140,3 +140,8 @@
+ - [ ] “Seleccionar todo” selecciona todos los elementos del filtro/búsqueda actual.
+ - [ ] Favoritos/Papelera masivos funcionan tras Seleccionar todo.
+ - [ ] Borrado múltiple super agresivo de v0.5.4 sigue funcionando.
++
++## v0.5.6 batch cap
++- Receive 6 distinct text messages consecutively, verify all 6 were captured, then delete all 6 together: Messages should surface all 6 (confirmed/probable according to signal path), even if the notification replacement exposes only 4 deletion markers.
++- Receive 4 text messages and delete all 4: no regression; 4 remain 4.
++- Receive >6 messages spread over more than 90 seconds: marker count is not expanded from the old history solely by this heuristic.
+diff -ruN wav055src/V056_NOTES.md wav056src/V056_NOTES.md
+--- wav055src/V056_NOTES.md	1970-01-01 00:00:00.000000000 +0000
++++ wav056src/V056_NOTES.md	2026-08-15 09:03:15.370320112 +0000
+@@ -0,0 +1,10 @@
++# WA Vault v0.5.6 — batch-delete cap hotfix
++
++- Fixes the case where six (or more) consecutive text messages are deleted together but Android/WhatsApp exposes only four deletion-marker rows.
++- The deletion target can now expand beyond the marker count from two independent sources: the active per-conversation burst ledger and a DB-backed compact recent-message cluster.
++- The DB fallback only walks the newest undeleted messages, requires consecutive gaps <= 20 s, and caps the whole cluster to <= 90 s to avoid sweeping older chat history into the batch.
++- Example: 6 consecutive captured messages + replacement exposing 4 deletion markers -> aggressive target becomes 6 and the existing DB fallback can mark the remaining two rows.
++- Keeps v0.5.5 dedupe, aggressive media/audio capture, and fast multi-selection unchanged.
++- Adds diagnostics: last_delete_marker_count, last_delete_ledger_count, last_delete_db_burst_count, last_delete_target, DELETE_MARKER_CAP_EXPANDED.
++
++This still depends on Android/WhatsApp notification data. It cannot recover message content that WA Vault never captured before deletion.
+diff -ruN wav055src/app/build.gradle.kts wav056src/app/build.gradle.kts
+--- wav055src/app/build.gradle.kts	2026-08-15 08:54:28.000000000 +0000
++++ wav056src/app/build.gradle.kts	2026-08-15 09:02:42.823815013 +0000
+@@ -10,8 +10,8 @@
+         applicationId = "com.fer.wavault"
+         minSdk = 26
+         targetSdk = 35
+-        versionCode = 55
+-        versionName = "0.5.5"
++        versionCode = 56
++        versionName = "0.5.6"
+     }
+ 
+     compileOptions {
+diff -ruN wav055src/app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java wav056src/app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java
+--- wav055src/app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java	2026-08-15 08:54:28.000000000 +0000
++++ wav056src/app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java	2026-08-15 09:03:15.148034482 +0000
+@@ -361,12 +361,28 @@
+                 }
+             }
+ 
+-            // v0.5.4 aggressive batch fallback: WhatsApp may report "4 mensajes eliminados"
+-            // while Android exposes only the newest notification row. Fill any unresolved count
+-            // from the short per-conversation burst first, then from recent undeleted DB rows.
++            // v0.5.6: Android/WhatsApp commonly caps the visible MessagingStyle replacement
++            // around four rows. A six-message burst can therefore arrive as four deletion-marker
++            // rows even though all six messages in the still-active notification lifecycle were
++            // deleted. When the replacement contains no surviving normal messages and the recent
++            // conversation ledger is a compact burst, use the whole ledger as the aggressive
++            // target instead of treating the marker count as a hard ceiling.
++            List<SnapshotItem> aggressive = loadRecentConversationBurst(fallbackConversation, AGGRESSIVE_BATCH_WINDOW_MS, AGGRESSIVE_BATCH_MAX);
++            int compactBurst = compactActiveBurstCount(aggressive);
++            int compactDbBurst = compactRecentDbBurstCount(db, fallbackConversation, sbn.getPostTime());
+             int targetFromMarker = Math.max(1, deletionMarkers);
++            int expandedBurstTarget = Math.max(compactBurst, compactDbBurst);
++            if (currentItems.isEmpty() && expandedBurstTarget > targetFromMarker && deletionMarkers >= 3) {
++                targetFromMarker = expandedBurstTarget;
++                try { db.logEvent("DELETE_MARKER_CAP_EXPANDED", "Marcadores="+deletionMarkers+" · ledger="+compactBurst+" · dbBurst="+compactDbBurst+" · objetivo="+targetFromMarker, 0L, 0L); } catch (Throwable ignored) {}
++            }
++            if (prefs != null) prefs.edit()
++                    .putInt("last_delete_marker_count", deletionMarkers)
++                    .putInt("last_delete_ledger_count", compactBurst)
++                    .putInt("last_delete_db_burst_count", compactDbBurst)
++                    .putInt("last_delete_target", targetFromMarker)
++                    .apply();
+             if (markedDeleted < targetFromMarker) {
+-                List<SnapshotItem> aggressive = loadRecentConversationBurst(fallbackConversation, AGGRESSIVE_BATCH_WINDOW_MS, AGGRESSIVE_BATCH_MAX);
+                 Set<Long> used = new HashSet<>();
+                 for (SnapshotItem x : missing) if (x != null && x.id > 0) used.add(x.id);
+                 for (SnapshotItem x : aggressive) {
+@@ -390,8 +406,8 @@
+             // the deletion event. We intentionally do NOT guess and mark an unrelated latest
+             // message as deleted.
+             int desiredVisible = (currentItems.isEmpty() && !missing.isEmpty())
+-                    ? Math.max(deletionMarkers, missing.size())
+-                    : Math.max(1, deletionMarkers);
++                    ? Math.max(targetFromMarker, missing.size())
++                    : Math.max(1, targetFromMarker);
+             int unresolved = Math.max(0, desiredVisible - visibleDeletionRows);
+             for (int i = 0; i < unresolved; i++) {
+                 Parsed marker = firstDeletionMarker;
+@@ -853,6 +869,64 @@
+         return out;
+     }
+ 
++    /**
++     * Count a compact unread/capture burst from the current notification lifecycle. The burst is
++     * reset on user-driven notification removal, so it is a stronger signal than a generic DB
++     * history query. We only expand marker counts when at least three marker rows are present and
++     * the replacement has no surviving normal messages.
++     */
++    private int compactActiveBurstCount(List<SnapshotItem> burst) {
++        if (burst == null || burst.isEmpty()) return 0;
++        VaultDb db = new VaultDb(getApplicationContext());
++        int count = 0;
++        long newest = 0L;
++        long oldest = Long.MAX_VALUE;
++        Set<Long> seen = new HashSet<>();
++        for (SnapshotItem x : burst) {
++            if (x == null || x.id <= 0 || seen.contains(x.id) || db.isMessageDeleted(x.id)) continue;
++            long ts = db.messageTimestamp(x.id);
++            if (ts <= 0) continue;
++            seen.add(x.id);
++            count++;
++            newest = Math.max(newest, ts);
++            oldest = Math.min(oldest, ts);
++        }
++        // "Seguidos" should be a genuinely compact notification burst, not a long conversation
++        // history. 90 seconds is deliberately aggressive while still bounding false positives.
++        if (count <= 1 || newest <= 0 || oldest == Long.MAX_VALUE || newest - oldest > 90_000L) return 0;
++        return count;
++    }
++
++    /**
++     * DB-backed fallback for builds/OEMs that clear or truncate the in-memory notification ledger.
++     * Walk only the newest undeleted messages and stop at the first meaningful time gap. This lets
++     * a compact six-message sequence expand a four-row marker replacement without sweeping old chat
++     * history into the delete batch.
++     */
++    private int compactRecentDbBurstCount(VaultDb db, String conversation, long referenceTime) {
++        if (db == null || conversation == null || conversation.trim().isEmpty()) return 0;
++        long ref = referenceTime > 0 ? referenceTime : System.currentTimeMillis();
++        List<VaultDb.Msg> recent = db.listRecentUndeletedForConversation(conversation, AGGRESSIVE_BATCH_MAX, ref - 120_000L);
++        if (recent == null || recent.isEmpty()) return 0;
++        int count = 0;
++        long newest = 0L;
++        long previous = 0L;
++        for (VaultDb.Msg m : recent) {
++            if (m == null || m.id <= 0 || m.timestamp <= 0) continue;
++            if (count == 0) {
++                if (Math.abs(ref - m.timestamp) > 120_000L) continue;
++                newest = m.timestamp; previous = m.timestamp; count = 1;
++                continue;
++            }
++            long gap = Math.abs(previous - m.timestamp);
++            long span = Math.abs(newest - m.timestamp);
++            if (gap > 20_000L || span > 90_000L) break;
++            previous = m.timestamp;
++            count++;
++        }
++        return count;
++    }
++
+     private List<SnapshotItem> mergeSnapshotItems(List<SnapshotItem> a, List<SnapshotItem> b, int max) {
+         List<SnapshotItem> out=new ArrayList<>(); Set<Long> ids=new HashSet<>();
+         for(List<SnapshotItem> src:new List[]{a,b}) if(src!=null) for(SnapshotItem x:src){ if(x==null||x.id<=0||ids.contains(x.id))continue;out.add(x);ids.add(x.id);if(out.size()>=max)return out; }
