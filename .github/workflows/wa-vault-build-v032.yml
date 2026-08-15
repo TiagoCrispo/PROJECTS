@@ -52,6 +52,7 @@ jobs:
         run: |
           python3 wa-vault-build-v032-small/compile_fix.py wa-vault-build-v032-project
           python3 wa-vault-build-v032-small/compile_fix2.py wa-vault-build-v032-project
+          python3 wa-vault-build-v032-small/compile_fix3.py wa-vault-build-v032-project
           grep -q 'versionCode = 33' wa-vault-build-v032-project/app/build.gradle.kts
           grep -q 'versionName = "0.3.3"' wa-vault-build-v032-project/app/build.gradle.kts
 
