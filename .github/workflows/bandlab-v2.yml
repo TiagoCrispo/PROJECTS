@@ -24,6 +24,16 @@ jobs:
           echo "$SOURCE_SHA256  /tmp/bandlab.tar.xz" | sha256sum -c -
           mkdir -p work && tar -xJf /tmp/bandlab.tar.xz -C work
           test -f work/app/src/main/java/com/fer/bandlab/MainActivity.kt
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('work/app/build.gradle.kts')
+          s=p.read_text()
+          old='builtins { named("java") { option("lite") } }'
+          new='builtins { maybeCreate("java").apply { option("lite") } }'
+          if old not in s and new not in s:
+              raise SystemExit('protobuf builtin anchor missing')
+          p.write_text(s.replace(old,new))
+          PY
 
       - uses: actions/setup-java@v5
         with:
