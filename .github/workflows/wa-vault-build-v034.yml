@@ -56,17 +56,42 @@ jobs:
           xz -t /tmp/v034.patch.xz
           xz -dc /tmp/v034.patch.xz > /tmp/v034.patch
           cd wa-vault-v034-project
+          set +e
           patch -p4 -F3 --batch < /tmp/v034.patch
+          patch_rc=$?
+          set -e
           python3 - <<'PY'
           from pathlib import Path
           p=Path('app/src/main/java/com/fer/wavault/MainActivity.java')
           s=p.read_text()
+          rej=Path('app/src/main/java/com/fer/wavault/MainActivity.java.rej')
+          if rej.exists():
+              lines=rej.read_text().splitlines(True)
+              desired=[]
+              in_hunk=False
+              for line in lines:
+                  if line.startswith('@@'):
+                      in_hunk=True
+                      continue
+                  if not in_hunk or line.startswith(('---','+++')):
+                      continue
+                  if line.startswith('+') or line.startswith(' '):
+                      desired.append(line[1:])
+                  elif line.startswith('\\'):
+                      continue
+              block=''.join(desired)
+              anchor='        LinearLayout capture=card();'
+              start=s.index(anchor, s.index('    private void showSettings(){'))
+              end=s.index('    private boolean hasAllMediaPermissions()', start)
+              s=s[:start]+block+s[end:]
           s=s.replace('    private boolean openedBatterySettings = false;\n        openedSamsungSettings = false;\n    private boolean openedSamsungSettings = false;', '    private boolean openedBatterySettings = false;\n    private boolean openedSamsungSettings = false;')
           s=s.replace('        openedBatterySettings = false;\n        if (cameBack) {', '        openedBatterySettings = false;\n        openedSamsungSettings = false;\n        if (cameBack) {')
-          s=s.replace('private TextView diagRow(String label,String value){return text(label+"\n"+(value==null||value.isEmpty()?"Sin datos":value),12,muted,false);}', 'private TextView diagRow(String label,String value){return text(label+"\\n"+(value==null||value.isEmpty()?"Sin datos":value),12,muted,false);}')
+          # Repair Java strings that the original large patch represented across physical lines.
+          import re
+          s=re.sub(r'private TextView diagRow\(String label,String value\)\{return text\(label\+"\s*"\+\(value==null\|\|value\.isEmpty\(\)\?"Sin datos":value\),12,muted,false\);\}', 'private TextView diagRow(String label,String value){return text(label+"\\n"+(value==null||value.isEmpty()?"Sin datos":value),12,muted,false);}', s)
           start=s.index('    private void showStorageManager(){')
           end=s.index('    private void confirmDeleteUnlinkedMedia(){',start)
-          block='''    private void showStorageManager(){
+          storage='''    private void showStorageManager(){
               VaultDb.Stats st;try{st=db.getStats();}catch(Throwable t){st=new VaultDb.Stats();}
               String msg="WA Vault usa "+human(st.totalBytes)+"\\n\\n"
                       +"Fotos  "+human(st.imageBytes)+"\\n"
@@ -86,7 +111,7 @@ jobs:
           }
 
           '''
-          s=s[:start]+block+s[end:]
+          s=s[:start]+storage+s[end:]
           p.write_text(s)
           PY
           grep -q 'versionCode = 34' app/build.gradle.kts
@@ -94,7 +119,8 @@ jobs:
           grep -q 'class VaultUiNotifier' app/src/main/java/com/fer/wavault/VaultUiNotifier.java
           grep -q 'ingestGrowingDirectMedia' app/src/main/java/com/fer/wavault/MediaArchiver.java
           grep -q 'getStats()' app/src/main/java/com/fer/wavault/VaultDb.java
-          grep -q 'showDiagnostics()' app/src/main/java/com/fer/wavault/MainActivity.java
+          grep -q 'private void showDiagnostics()' app/src/main/java/com/fer/wavault/MainActivity.java
+          grep -q 'private void confirmDeleteUnlinkedMedia()' app/src/main/java/com/fer/wavault/MainActivity.java
 
       - uses: android-actions/setup-android@v3
 
