@@ -1,10 +1,9 @@
-name: WA Vault v0.5.6 batch-delete cap hotfix
+name: WA Vault v0.5.7 unlimited active burst hotfix
 
 on:
   push:
-    branches: [wa-vault-build-v056]
+    branches: [wa-vault-build-v057]
     paths:
-      - 'wa-vault-build-v056/**'
       - '.github/workflows/wa-vault-build-v052.yml'
   workflow_dispatch:
 
@@ -22,31 +21,58 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Restore verified v0.5.5 source
+      - name: Restore verified v0.5.6 source
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          mkdir wa-vault-v056-project
-          gh run download 31875639488 -n WA-Vault-v0.5.5-source -D wa-vault-v056-project
-          grep -q 'versionCode = 55' wa-vault-v056-project/app/build.gradle.kts
-          grep -q 'versionName = "0.5.5"' wa-vault-v056-project/app/build.gradle.kts
-          grep -q 'android.useAndroidX=true' wa-vault-v056-project/gradle.properties
+          mkdir wa-vault-v057-project
+          gh run download 31876081730 -n WA-Vault-v0.5.6-source -D wa-vault-v057-project
+          grep -q 'versionCode = 56' wa-vault-v057-project/app/build.gradle.kts
+          grep -q 'versionName = "0.5.6"' wa-vault-v057-project/app/build.gradle.kts
+          grep -q 'android.useAndroidX=true' wa-vault-v057-project/gradle.properties
 
-      - name: Apply verified v0.5.6 patch
+      - name: Apply v0.5.7 active-burst fix
         run: |
           set -euo pipefail
-          cp wa-vault-build-v056/v056.patch /tmp/v056.patch
-          echo '25eac5207745abb2cdbda735fea16e1003fcf1d9e6be8b71ab0b26f0dfc3ebbb  /tmp/v056.patch' | sha256sum -c -
-          cd wa-vault-v056-project
-          patch -p1 --batch < /tmp/v056.patch
-          find . -name '*.rej' -print -quit | grep -q . && { find . -name '*.rej' -print; exit 1; } || true
-          grep -q 'versionCode = 56' app/build.gradle.kts
-          grep -q 'versionName = "0.5.6"' app/build.gradle.kts
-          grep -q 'DELETE_MARKER_CAP_EXPANDED' app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java
-          grep -q 'compactRecentDbBurstCount' app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java
-          grep -q 'last_delete_db_burst_count' app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java
-          test -s V056_NOTES.md
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path('wa-vault-v057-project')
+          p=root/'app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java'
+          s=p.read_text()
+          s=s.replace('private static final long AGGRESSIVE_BATCH_WINDOW_MS = 30_000L;\n    private static final int AGGRESSIVE_BATCH_MAX = 16;', 'private static final long AGGRESSIVE_BATCH_WINDOW_MS = 10 * 60_000L;\n    private static final long AGGRESSIVE_BATCH_GAP_MS = 30_000L;\n    private static final int AGGRESSIVE_BATCH_MAX = 256;')
+          s=s.replace('if (currentItems.isEmpty() && expandedBurstTarget > targetFromMarker && deletionMarkers >= 3) {', 'if (currentItems.isEmpty() && expandedBurstTarget > targetFromMarker) {')
+          old='''    private void rememberConversationBurst(String conversation, String token, long id, long timestamp) {\n        if (id <= 0) return;\n        if (prefs == null) prefs = getSharedPreferences(DIAG_PREFS, MODE_PRIVATE);\n        String key = "burst2_" + conversationSnapshotKey(conversation);\n        long now = System.currentTimeMillis();\n        List<String> keep = new ArrayList<>();\n        String raw = prefs.getString(key, "");\n        if (raw != null && !raw.isEmpty()) for (String part : raw.split(";")) {\n            String[] f = part.split(",", 3);\n            if (f.length < 3) continue;\n            try { long ts=Long.parseLong(f[0]); long oldId=Long.parseLong(f[1]); if (now-ts <= 60_000L && oldId != id) keep.add(part); } catch (Throwable ignored) {}\n        }\n        keep.add(0, now + "," + id + "," + (token == null ? "" : token));\n        while (keep.size() > 32) keep.remove(keep.size()-1);\n        prefs.edit().putString(key, android.text.TextUtils.join(";", keep)).apply();\n    }'''
+          new='''    private void rememberConversationBurst(String conversation, String token, long id, long timestamp) {\n        if (id <= 0) return;\n        if (prefs == null) prefs = getSharedPreferences(DIAG_PREFS, MODE_PRIVATE);\n        String key = "burst2_" + conversationSnapshotKey(conversation);\n        long now = System.currentTimeMillis();\n        List<String> keep = new ArrayList<>();\n        String raw = prefs.getString(key, "");\n        long newestCapture = 0L;\n        if (raw != null && !raw.isEmpty()) {\n            String[] parts = raw.split(";");\n            if (parts.length > 0) {\n                String[] first = parts[0].split(",", 3);\n                if (first.length >= 2) try { newestCapture = Long.parseLong(first[0]); } catch (Throwable ignored) {}\n            }\n            if (newestCapture > 0 && now - newestCapture <= AGGRESSIVE_BATCH_GAP_MS) {\n                for (String part : parts) {\n                    String[] f = part.split(",", 3);\n                    if (f.length < 3) continue;\n                    try { long ts=Long.parseLong(f[0]); long oldId=Long.parseLong(f[1]); if (now-ts <= AGGRESSIVE_BATCH_WINDOW_MS && oldId != id) keep.add(part); } catch (Throwable ignored) {}\n                }\n            }\n        }\n        keep.add(0, now + "," + id + "," + (token == null ? "" : token));\n        while (keep.size() > AGGRESSIVE_BATCH_MAX) keep.remove(keep.size()-1);\n        prefs.edit().putString(key, android.text.TextUtils.join(";", keep)).apply();\n    }'''
+          if old not in s: raise SystemExit('rememberConversationBurst baseline not found')
+          s=s.replace(old,new)
+          old='''    private int compactActiveBurstCount(List<SnapshotItem> burst) {\n        if (burst == null || burst.isEmpty()) return 0;\n        VaultDb db = new VaultDb(getApplicationContext());\n        int count = 0;\n        long newest = 0L;\n        long oldest = Long.MAX_VALUE;\n        Set<Long> seen = new HashSet<>();\n        for (SnapshotItem x : burst) {\n            if (x == null || x.id <= 0 || seen.contains(x.id) || db.isMessageDeleted(x.id)) continue;\n            long ts = db.messageTimestamp(x.id);\n            if (ts <= 0) continue;\n            seen.add(x.id);\n            count++;\n            newest = Math.max(newest, ts);\n            oldest = Math.min(oldest, ts);\n        }\n        // "Seguidos" should be a genuinely compact notification burst, not a long conversation\n        // history. 90 seconds is deliberately aggressive while still bounding false positives.\n        if (count <= 1 || newest <= 0 || oldest == Long.MAX_VALUE || newest - oldest > 90_000L) return 0;\n        return count;\n    }'''
+          new='''    private int compactActiveBurstCount(List<SnapshotItem> burst) {\n        if (burst == null || burst.isEmpty()) return 0;\n        VaultDb db = new VaultDb(getApplicationContext());\n        int count = 0;\n        Set<Long> seen = new HashSet<>();\n        for (SnapshotItem x : burst) {\n            if (x == null || x.id <= 0 || seen.contains(x.id) || db.isMessageDeleted(x.id)) continue;\n            if (db.messageTimestamp(x.id) <= 0) continue;\n            seen.add(x.id);\n            count++;\n        }\n        return count;\n    }'''
+          if old not in s: raise SystemExit('compactActiveBurstCount baseline not found')
+          s=s.replace(old,new)
+          old='''        List<VaultDb.Msg> recent = db.listRecentUndeletedForConversation(conversation, AGGRESSIVE_BATCH_MAX, ref - 120_000L);\n        if (recent == null || recent.isEmpty()) return 0;\n        int count = 0;\n        long newest = 0L;\n        long previous = 0L;\n        for (VaultDb.Msg m : recent) {\n            if (m == null || m.id <= 0 || m.timestamp <= 0) continue;\n            if (count == 0) {\n                if (Math.abs(ref - m.timestamp) > 120_000L) continue;\n                newest = m.timestamp; previous = m.timestamp; count = 1;\n                continue;\n            }\n            long gap = Math.abs(previous - m.timestamp);\n            long span = Math.abs(newest - m.timestamp);\n            if (gap > 20_000L || span > 90_000L) break;\n            previous = m.timestamp;\n            count++;\n        }\n        return count;'''
+          new='''        List<VaultDb.Msg> recent = db.listRecentUndeletedForConversation(conversation, AGGRESSIVE_BATCH_MAX, ref - AGGRESSIVE_BATCH_WINDOW_MS);\n        if (recent == null || recent.isEmpty()) return 0;\n        int count = 0;\n        long previous = 0L;\n        for (VaultDb.Msg m : recent) {\n            if (m == null || m.id <= 0 || m.timestamp <= 0) continue;\n            if (count == 0) {\n                if (Math.abs(ref - m.timestamp) > AGGRESSIVE_BATCH_WINDOW_MS) continue;\n                previous = m.timestamp; count = 1;\n                continue;\n            }\n            long gap = Math.abs(previous - m.timestamp);\n            if (gap > AGGRESSIVE_BATCH_GAP_MS) break;\n            previous = m.timestamp;\n            count++;\n        }\n        return count;'''
+          if old not in s: raise SystemExit('compactRecentDbBurstCount baseline not found')
+          s=s.replace(old,new)
+          p.write_text(s)
+
+          db=root/'app/src/main/java/com/fer/wavault/VaultDb.java'
+          d=db.read_text().replace('int cap=Math.max(1,Math.min(200,limit));\n        for(Msg m:listMessages(500)){', 'int cap=Math.max(1,Math.min(512,limit));\n        for(Msg m:listMessages(2000)){')
+          db.write_text(d)
+
+          bp=root/'app/build.gradle.kts'
+          b=bp.read_text().replace('versionCode = 56','versionCode = 57').replace('versionName = "0.5.6"','versionName = "0.5.7"')
+          bp.write_text(b)
+          (root/'V057_NOTES.md').write_text('# WA Vault v0.5.7\n\n- Removes the practical six-message batch ceiling.\n- Active bursts are defined by a 30-second inactivity gap instead of a 30-second total window.\n- Retains up to 256 messages in one active burst for up to 10 minutes.\n- Removes the old 90-second total-span cap from the DB fallback.\n- Keeps v0.5.5 dedupe, v0.5.6 audio and fast selection unchanged.\n')
+          with (root/'TEST_MATRIX.md').open('a') as f:
+              f.write('\n## v0.5.7 batch-delete regression\n- [ ] 8 consecutive texts -> delete all -> 8 visible deleted rows.\n- [ ] 20 consecutive texts over >90s with <30s gaps -> all recovered.\n- [ ] 50-message continuous burst -> no six/sixteen-message ceiling.\n- [ ] >30s inactivity starts a new burst and excludes the old one.\n')
+          PY
+          grep -q 'versionCode = 57' wa-vault-v057-project/app/build.gradle.kts
+          grep -q 'versionName = "0.5.7"' wa-vault-v057-project/app/build.gradle.kts
+          grep -q 'AGGRESSIVE_BATCH_MAX = 256' wa-vault-v057-project/app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java
+          grep -q 'AGGRESSIVE_BATCH_GAP_MS = 30_000L' wa-vault-v057-project/app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java
+          grep -q 'listMessages(2000)' wa-vault-v057-project/app/src/main/java/com/fer/wavault/VaultDb.java
+          test -s wa-vault-v057-project/V057_NOTES.md
 
       - uses: android-actions/setup-android@v3
       - name: Install Android SDK 35
@@ -59,7 +85,7 @@ jobs:
           gradle-version: '8.13'
 
       - name: Compile release
-        working-directory: wa-vault-v056-project
+        working-directory: wa-vault-v057-project
         run: gradle :app:assembleRelease --stacktrace --console=plain
 
       - name: Restore signing key
@@ -72,36 +98,36 @@ jobs:
           test -s signing/WA-Vault-v0.4.0-signing-backup.jks
           grep -q 'WAVault-v040-2026' signing/SIGNING_BACKUP_PASSWORD.txt
 
-      - name: Sign and verify v0.5.6
+      - name: Sign and verify v0.5.7
         run: |
           set -euo pipefail
-          UNSIGNED=wa-vault-v056-project/app/build/outputs/apk/release/app-release-unsigned.apk
-          mkdir -p wa-vault-v056-output
+          UNSIGNED=wa-vault-v057-project/app/build/outputs/apk/release/app-release-unsigned.apk
+          mkdir -p wa-vault-v057-output
           PASS='WAVault-v040-2026'
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign \
             --ks signing/WA-Vault-v0.4.0-signing-backup.jks \
             --ks-key-alias wavault \
             --ks-pass pass:"$PASS" \
             --key-pass pass:"$PASS" \
-            --out wa-vault-v056-output/WA-Vault-v0.5.6.apk "$UNSIGNED"
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs wa-vault-v056-output/WA-Vault-v0.5.6.apk > wa-vault-v056-output/APK_SIGNATURE.txt
-          sha256sum wa-vault-v056-output/WA-Vault-v0.5.6.apk > wa-vault-v056-output/APK_SHA256.txt
-          cp wa-vault-v056-project/V056_NOTES.md wa-vault-v056-output/
-          cp wa-vault-v056-project/TEST_MATRIX.md wa-vault-v056-output/
+            --out wa-vault-v057-output/WA-Vault-v0.5.7.apk "$UNSIGNED"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs wa-vault-v057-output/WA-Vault-v0.5.7.apk > wa-vault-v057-output/APK_SIGNATURE.txt
+          sha256sum wa-vault-v057-output/WA-Vault-v0.5.7.apk > wa-vault-v057-output/APK_SHA256.txt
+          cp wa-vault-v057-project/V057_NOTES.md wa-vault-v057-output/
+          cp wa-vault-v057-project/TEST_MATRIX.md wa-vault-v057-output/
 
       - uses: actions/upload-artifact@v4
         with:
-          name: WA-Vault-v0.5.6-release
+          name: WA-Vault-v0.5.7-release
           path: |
-            wa-vault-v056-output/WA-Vault-v0.5.6.apk
-            wa-vault-v056-output/APK_SHA256.txt
-            wa-vault-v056-output/APK_SIGNATURE.txt
-            wa-vault-v056-output/V056_NOTES.md
-            wa-vault-v056-output/TEST_MATRIX.md
+            wa-vault-v057-output/WA-Vault-v0.5.7.apk
+            wa-vault-v057-output/APK_SHA256.txt
+            wa-vault-v057-output/APK_SIGNATURE.txt
+            wa-vault-v057-output/V057_NOTES.md
+            wa-vault-v057-output/TEST_MATRIX.md
           retention-days: 90
 
       - uses: actions/upload-artifact@v4
         with:
-          name: WA-Vault-v0.5.6-source
-          path: wa-vault-v056-project
+          name: WA-Vault-v0.5.7-source
+          path: wa-vault-v057-project
           retention-days: 30
