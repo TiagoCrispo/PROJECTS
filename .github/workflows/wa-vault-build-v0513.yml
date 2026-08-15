@@ -42,7 +42,30 @@ jobs:
           find . -name '*.rej' -print -quit | grep -q . && { find . -name '*.rej' -print; exit 1; } || true
           grep -q 'versionCode = 63' app/build.gradle.kts
           grep -q 'versionName = "0.5.13"' app/build.gradle.kts
-          python3 tools/v0513_regression_test.py
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path('.')
+          listener=(root/'app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java').read_text()
+          media=(root/'app/src/main/java/com/fer/wavault/MediaArchiver.java').read_text()
+          db=(root/'app/src/main/java/com/fer/wavault/VaultDb.java').read_text()
+          assert 'if(armCapture && !mediaKind.isEmpty())' in listener
+          assert 'long linkId = newestAudioMessageId > 0 ? newestAudioMessageId : 0L;' in listener
+          assert 'db.isMessageConfirmedDeleted(m.linkedMessageId)' in media
+          assert 'finalizePendingForConfirmedMessage' in db
+          msgs=[('aa','text',1000),('bb','text',2000),('cc','text',3000),('foto','image',4000),('video','video',5000),('audio1','audio',6000),('audio2','audio',7000)]
+          rows=[['image',4100,None],['video',5050,None],['audio',6080,None],['audio',7090,None]]
+          for name,kind,t in reversed(msgs):
+              if kind=='text': continue
+              cand=[r for r in rows if r[0]==kind and r[2] is None and abs(r[1]-t)<=10000]
+              cand.sort(key=lambda r: abs(r[1]-t))
+              assert cand, (name,'missing')
+              if len(cand)>1:
+                  d0=abs(cand[0][1]-t); d1=abs(cand[1][1]-t)
+                  assert d0<=2500 and d1-d0>=700,(name,d0,d1)
+              cand[0][2]=name
+          assert {r[2] for r in rows}=={'foto','video','audio1','audio2'}
+          print('v0.5.13 mixed-media regression: PASS')
+          PY
 
       - uses: android-actions/setup-android@v3
       - name: Install Android SDK 35
@@ -82,8 +105,14 @@ jobs:
             --out wa-vault-v0513-output/WA-Vault-v0.5.13.apk "$UNSIGNED"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs wa-vault-v0513-output/WA-Vault-v0.5.13.apk > wa-vault-v0513-output/APK_SIGNATURE.txt
           sha256sum wa-vault-v0513-output/WA-Vault-v0.5.13.apk > wa-vault-v0513-output/APK_SHA256.txt
-          cp wa-vault-v0513-project/V0513_NOTES.md wa-vault-v0513-output/
-          cp wa-vault-v0513-project/tools/v0513_regression_test.py wa-vault-v0513-output/
+          cat > wa-vault-v0513-output/V0513_NOTES.md <<'EOF'
+          # WA Vault v0.5.13
+          - Fix mixed-media regression from v0.5.12.
+          - Only DELETE_CONFIRMED can release quarantined media.
+          - Text messages no longer arm generic media capture.
+          - Early audio never falls back to a text message.
+          - Confirmed deletion performs a final conservative reconciliation for preserved image/video/audio.
+          EOF
 
       - uses: actions/upload-artifact@v4
         with:
@@ -93,7 +122,6 @@ jobs:
             wa-vault-v0513-output/APK_SHA256.txt
             wa-vault-v0513-output/APK_SIGNATURE.txt
             wa-vault-v0513-output/V0513_NOTES.md
-            wa-vault-v0513-output/v0513_regression_test.py
           retention-days: 90
 
       - uses: actions/upload-artifact@v4
