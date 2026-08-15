@@ -47,6 +47,9 @@ jobs:
           grep -q 'versionCode = 32' wa-vault-build-v032-project/app/build.gradle.kts
           grep -q 'pending_manual_media' wa-vault-build-v032-project/app/src/main/java/com/fer/wavault/VaultDb.java
 
+      - name: Apply compile fixes
+        run: python3 wa-vault-build-v032-small/compile_fix.py wa-vault-build-v032-project
+
       - uses: android-actions/setup-android@v3
 
       - name: Install Android SDK 35
