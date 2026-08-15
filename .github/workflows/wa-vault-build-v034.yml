@@ -86,7 +86,6 @@ jobs:
               s=s[:start]+block+s[end:]
           s=s.replace('    private boolean openedBatterySettings = false;\n        openedSamsungSettings = false;\n    private boolean openedSamsungSettings = false;', '    private boolean openedBatterySettings = false;\n    private boolean openedSamsungSettings = false;')
           s=s.replace('        openedBatterySettings = false;\n        if (cameBack) {', '        openedBatterySettings = false;\n        openedSamsungSettings = false;\n        if (cameBack) {')
-          # Replace diagRow by method boundaries so an accidental literal newline cannot survive.
           a=s.index('    private TextView diagRow(')
           b=s.index('    private String friendlyEventCode(', a)
           diag='    private TextView diagRow(String label,String value){return text(label+"\\n"+(value==null||value.isEmpty()?"Sin datos":value),12,muted,false);}\n'
@@ -114,6 +113,30 @@ jobs:
 
           '''
           s=s[:start]+storage+s[end:]
+          # Merge the old biometric/player cleanup into the new live-update onDestroy.
+          s=s.replace('''    @Override protected void onDestroy(){
+              try{if(uiReceiverRegistered)unregisterReceiver(dataChangedReceiver);}catch(Throwable ignored){}
+              uiReceiverRegistered=false;
+              uiRefreshHandler.removeCallbacksAndMessages(null);
+              releaseAudioPlayer(true);
+              super.onDestroy();
+          }
+''','''    @Override protected void onDestroy(){
+              try{if(uiReceiverRegistered)unregisterReceiver(dataChangedReceiver);}catch(Throwable ignored){}
+              uiReceiverRegistered=false;
+              uiRefreshHandler.removeCallbacksAndMessages(null);
+              try { if (biometricCancel != null) biometricCancel.cancel(); } catch (Throwable ignored) {}
+              releaseAudioPlayer(false);
+              super.onDestroy();
+          }
+''')
+          s=s.replace('''    @Override protected void onDestroy() {
+              try { if (biometricCancel != null) biometricCancel.cancel(); } catch (Throwable ignored) {}
+              releaseAudioPlayer(false);
+              super.onDestroy();
+          }
+
+''','')
           p.write_text(s)
           PY
           grep -q 'versionCode = 34' app/build.gradle.kts
@@ -123,6 +146,7 @@ jobs:
           grep -q 'getStats()' app/src/main/java/com/fer/wavault/VaultDb.java
           grep -q 'private void showDiagnostics()' app/src/main/java/com/fer/wavault/MainActivity.java
           grep -q 'private void confirmDeleteUnlinkedMedia()' app/src/main/java/com/fer/wavault/MainActivity.java
+          test "$(grep -c 'onDestroy()' app/src/main/java/com/fer/wavault/MainActivity.java)" -eq 1
 
       - uses: android-actions/setup-android@v3
 
