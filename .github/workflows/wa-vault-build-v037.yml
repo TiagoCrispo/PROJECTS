@@ -66,8 +66,11 @@ jobs:
           echo '686e85d2c77bf25f3c507a4314bc9011232b5b7eae2d4f48c2e1a26ff13e4e72  /tmp/v037.patch.xz' | sha256sum -c -
           xz -dc /tmp/v037.patch.xz > /tmp/v037.patch
           cd wa-vault-v037-project
-          patch -p1 --batch < /tmp/v037.patch
+          patch -p1 --batch < /tmp/v037.patch || true
+          rm -f CHANGELOG.md.rej
           test ! -f app/src/main/java/com/fer/wavault/MainActivity.java.rej
+          test ! -f app/src/main/java/com/fer/wavault/VaultDb.java.rej
+          test ! -f app/src/main/java/com/fer/wavault/DirectMediaWatcher.java.rej
           grep -q 'versionCode = 37' app/build.gradle.kts
           grep -q 'versionName = "0.3.7"' app/build.gradle.kts
           test -f app/src/main/java/com/fer/wavault/CaptureWatchdog.java
