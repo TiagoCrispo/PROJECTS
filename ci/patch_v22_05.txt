@@ -1,0 +1,13 @@
+1500, 360_000L, 125_000L),\n        )\n        assertEquals(235_000L, WorkoutPrEngine.bestSegmentMs(w, 1000))\n        assertEquals(115_000L, WorkoutPrEngine.bestSegmentMs(w, 500))\n    }\n\n    @Test fun doesNotInvent500mPrFromOnly1kmCheckpoints() {\n        val w = workout(SplitRecord(1000, 240_000L, 240_000L), SplitRecord(2000, 470_000L, 230_000L))\n        assertNull(WorkoutPrEngine.bestSegmentMs(w, 500))\n    }\n}\n''')
+
+# Update roadmap/test plan
+p=root/'docs/ROADMAP.md'
+s=p.read_text()
+s += '''\n## v2.2 — Entrenamiento Pro / Fuerza Pro 2\n- Splits configurables 500 m / 1 km con PRs calculados sólo desde checkpoints reales.\n- Protección de ruta ante saltos >75 m y recuperación tras >10 s sin GPS sin unir extremos.\n- Contador de pérdidas GPS en vivo e historial.\n- Fuerza Pro 2 con PR peso/reps/e1RM, volumen, gráfico de últimas series y carga sugerida.\n- Descansos configurables 60/90/120 s persistentes al recrear la app.\n- Sustitutos por patrón de movimiento sin borrar el historial del ejercicio original.\n'''
+p.write_text(s)
+
+p=root/'docs/TEST_PLAN.md'
+s=p.read_text()
+s += '''\n\n## 9. v2.2 — Entrenamiento Pro / Fuerza Pro 2\n- Cambiar split 500 m / 1 km y confirmar selección visible.\n- Generar checkpoints y confirmar PR de 1 km desde dos splits de 500 m.\n- Confirmar que no se inventa PR de 500 m si sólo existen checkpoints cada 1 km.\n- Simular >10 s sin GPS y confirmar que al recuperar señal no se suma un segmento falso.\n- Guardar serie de fuerza y confirmar PR/e1RM/volumen/gráfico.\n- Elegir descanso 60/90/120 s, recrear la Activity y confirmar que el contador continúa según hora absoluta.\n- Sustituir ejercicio y volver al anterior: su historial debe permanecer intacto.\n'''
+p.write_text(s)
+print('v2.2 modifications applied')
