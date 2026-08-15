@@ -1,0 +1,178 @@
+name: BandLab 2.3 Home Recovery Verification
+
+on:
+  push:
+    branches: [ bandlab-v2 ]
+  workflow_dispatch:
+
+concurrency:
+  group: bandlab-v23
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      SOURCE_SHA256: 7d696773dea791c0637db14082e71f9e537799e84c46221f6c90b3e4d9455f5a
+      V22_PATCH_SHA256: a18aba0039255ea2b19ae5cf5c4de286161c82dcd85f2c0b1867e6dd982e4b5b
+      V23_PATCH_SHA256: 5820a5a20a39aab3d80ebe11b3342102a06cb12f816931d7f29b192c52009fa8
+      KODO_COMMIT: 8152ffdd3f384e0563a39db7bf77a8b70d3a6e84
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct 2.2 source and apply 2.3 patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat src_chunks/00.b64 src_chunks/01a.b64 src_chunks/01b.b64 src_chunks/02.b64 src_chunks/03.b64 src_chunks/04.b64 src_chunks/05.b64 src_chunks/06.b64 | base64 -d > /tmp/base.tar.xz
+          echo "$SOURCE_SHA256  /tmp/base.tar.xz" | sha256sum -c -
+          mkdir work && tar -xJf /tmp/base.tar.xz -C work
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('work/app/build.gradle.kts')
+          p.write_text(p.read_text().replace('builtins { named("java") { option("lite") } }','builtins { maybeCreate("java").apply { option("lite") } }'))
+          p=Path('work/app/src/main/java/com/fer/bandlab/ui/BandLabApp.kt')
+          s=p.read_text()
+          if 'import androidx.compose.foundation.layout.RowScope' not in s:
+              s=s.replace('import androidx.compose.foundation.layout.WindowInsets\n','import androidx.compose.foundation.layout.WindowInsets\nimport androidx.compose.foundation.layout.RowScope\n')
+          s=s.replace('private fun NavItem(current: AppTab, target: AppTab, icon: ImageVector, onClick: (AppTab) -> Unit) {','private fun RowScope.NavItem(current: AppTab, target: AppTab, icon: ImageVector, onClick: (AppTab) -> Unit) {')
+          p.write_text(s)
+          p=Path('work/app/src/main/java/com/fer/bandlab/ui/screens/HealthScreen.kt')
+          p.write_text(p.read_text().replace('import androidx.compose.material.icons.rounded.Walk\n',''))
+          PY
+          python3 ci/patch_v21.py work
+          cat ci/patch_v22_0*.txt > /tmp/patch_v22.py
+          echo "$V22_PATCH_SHA256  /tmp/patch_v22.py" | sha256sum -c -
+          python3 /tmp/patch_v22.py work
+          cat ci/v23_patch_00.b64 ci/v23_patch_01.b64 ci/v23_patch_02.b64 ci/v23_patch_03.b64 ci/v23_patch_04.b64 ci/v23_patch_05.b64 ci/v23_patch_06.b64 | base64 -d > /tmp/v23.patch
+          echo "$V23_PATCH_SHA256  /tmp/v23.patch" | sha256sum -c -
+          patch -d work -p4 --batch < /tmp/v23.patch
+          printf 'versionName=2.3.0\nversionCode=230\nstage=DynamicHomeRecovery\n' > work/bandlab-version.properties
+          grep -q 'TodayDashboardEngine' work/app/src/main/java/com/fer/bandlab/BandLabViewModel.kt
+          grep -q 'baselineSleepMinutes' work/app/src/main/java/com/fer/bandlab/model/Models.kt
+          grep -q 'TrendLine' work/app/src/main/java/com/fer/bandlab/ui/screens/HealthScreen.kt
+          grep -q 'NavigationBarItemDefaults' work/app/src/main/java/com/fer/bandlab/ui/BandLabApp.kt
+          grep -q 'versionName = "2.3.0"' work/app/build.gradle.kts
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools" "emulator" "system-images;android-30;default;x86_64"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Import pinned Xiaomi protocol
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none https://github.com/kidneyweakx/Kodo.git /tmp/Kodo
+          git -C /tmp/Kodo checkout "$KODO_COMMIT"
+          test "$(git -C /tmp/Kodo rev-parse HEAD)" = "$KODO_COMMIT"
+          X=/tmp/Kodo/android-port/src/main/java/com/kidneyweakx/miband9active/xiaomi
+          D=work/app/src/main/java/com/kidneyweakx/miband9active/xiaomi
+          mkdir -p "$D" "$D/services" work/app/src/main/proto work/third_party/Kodo
+          cp -R "$X/auth" "$X/protocol" "$X/activity" "$D/"
+          cp "$X/services/SystemCommands.kt" "$X/services/MiBand9DataUploader.kt" "$D/services/"
+          cp /tmp/Kodo/android-port/src/main/proto/xiaomi.proto work/app/src/main/proto/
+          cp /tmp/Kodo/LICENSE /tmp/Kodo/NOTICE.md work/third_party/Kodo/
+          echo "$KODO_COMMIT" > work/third_party/Kodo/COMMIT.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('work/app/src/main/java/com/kidneyweakx/miband9active/xiaomi/protocol/MiBand9BleDriver.kt')
+          s=p.read_text()
+          old='''            is XiaomiSppPacketV2.Data -> {\n                sendAck(packet.sequenceNumber)\n                val plain = packet.decryptedPayload(authSession)\n                val cmd = runCatching { XiaomiProto.Command.parseFrom(plain) }.getOrNull()\n'''
+          new='''            is XiaomiSppPacketV2.Data -> {\n                sendAck(packet.sequenceNumber)\n                val plain = packet.decryptedPayload(authSession)\n                if (packet.channel == XiaomiChannel.ACTIVITY) {\n                    _activityChunks.tryEmit(plain)\n                    return\n                }\n                val cmd = runCatching { XiaomiProto.Command.parseFrom(plain) }.getOrNull()\n'''
+          if old not in s: raise SystemExit('activity patch anchor missing')
+          s=s.replace(old,new,1)
+          s=s.replace('''        if (channel == XiaomiChannel.ACTIVITY) {\n            _activityChunks.tryEmit(cmd.toByteArray())\n            return\n        }\n''','')
+          p.write_text(s)
+          PY
+          printf '%s\n' 'BandLab patch: raw ACTIVITY chunks bypass protobuf parsing.' > work/third_party/Kodo/BANDLAB_PATCHES.txt
+
+      - name: Gate 2.3 - unit tests and builds
+        working-directory: work
+        run: gradle --no-daemon :app:assembleV22Debug :app:testV23DebugUnitTest :app:assembleV23Debug :app:assembleV23Release
+
+      - name: Validate 2.3 APK metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          D=work/app/build/outputs/apk/v23/debug/app-v23-debug.apk
+          R=work/app/build/outputs/apk/v23/release/app-v23-release-unsigned.apk
+          test -s "$D"; test -s "$R"
+          unzip -t "$D" >/dev/null; unzip -t "$R" >/dev/null
+          "$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging "$D" | tee /tmp/badging-v23.txt
+          grep -q "package: name='com.fer.bandlab'" /tmp/badging-v23.txt
+          grep -q "versionCode='230'" /tmp/badging-v23.txt
+          grep -q "versionName='2.3.0'" /tmp/badging-v23.txt
+
+      - name: Upgrade smoke test 2.2 to 2.3
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/android-avd"
+          mkdir -p "$ANDROID_AVD_HOME" verification
+          echo no | avdmanager create avd -n bandlab_ci -k "system-images;android-30;default;x86_64" --device pixel_4 --force
+          nohup "$ANDROID_HOME/emulator/emulator" -avd bandlab_ci -no-window -noaudio -no-boot-anim -gpu swiftshader_indirect -accel off -no-snapshot -no-metrics -memory 2048 -cores 2 >/tmp/emulator.log 2>&1 &
+          timeout 180s adb wait-for-device
+          for i in $(seq 1 180); do
+            [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] && break
+            sleep 2
+          done
+          test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = 1
+          V22=work/app/build/outputs/apk/v22/debug/app-v22-debug.apk
+          V23=work/app/build/outputs/apk/v23/debug/app-v23-debug.apk
+          timeout 240s adb install "$V22"
+          timeout 60s adb shell am start -n com.fer.bandlab/.MainActivity | tee verification/v22-start.txt
+          sleep 5
+          test -n "$(adb shell pidof com.fer.bandlab | tr -d '\r')"
+          timeout 240s adb install -r "$V23"
+          adb shell am force-stop com.fer.bandlab
+          adb logcat -c
+          timeout 60s adb shell am start -n com.fer.bandlab/.MainActivity | tee verification/v23-start.txt
+          sleep 8
+          PID="$(adb shell pidof com.fer.bandlab | tr -d '\r')"
+          test -n "$PID"
+          echo "PID=$PID" > verification/v23-process.txt
+          adb shell dumpsys activity activities > verification/v23-activities.txt
+          grep -q 'com.fer.bandlab/.MainActivity' verification/v23-activities.txt
+          adb shell dumpsys package com.fer.bandlab | grep -E 'versionCode|versionName' > verification/v23-package.txt
+          grep -q 'versionCode=230' verification/v23-package.txt
+          grep -q 'versionName=2.3.0' verification/v23-package.txt
+          adb logcat -d -t 1800 > verification/v23-logcat.txt
+          ! grep -E 'FATAL EXCEPTION|Process: com\.fer\.bandlab.*has died|AndroidRuntime.*com\.fer\.bandlab' verification/v23-logcat.txt
+          echo '2.2 -> 2.3 UPGRADE + STARTUP PASS' > verification/v23-PASS.txt
+
+      - name: Package BandLab 2.3
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp work/app/build/outputs/apk/v23/debug/app-v23-debug.apk dist/BandLab9Active_v2.3_HOME_RECOVERY_DEBUG_VERIFIED.apk
+          cp work/app/build/outputs/apk/v23/release/app-v23-release-unsigned.apk dist/BandLab9Active_v2.3_HOME_RECOVERY_RELEASE_UNSIGNED.apk
+          cp -R verification dist/verification
+          cp /tmp/emulator.log dist/emulator.log || true
+          cat > dist/VERIFICATION_REPORT.txt <<'EOF'
+          BandLab 2.3 Dynamic Home / Recovery / Trends.
+          Verified: pinned base/v2.2/v2.3 hashes, v2.3 unit tests, debug+release builds,
+          package/version metadata, Android emulator update 2.2 -> 2.3, MainActivity process/foreground,
+          and fatal-crash scan. Dynamic Home ranks recovery/movement/strength/hydration/training from stored data.
+          Recovery exposes measured sleep/resting-HR baselines and deltas and never fabricates a numeric score.
+          Seven-day trends are real Canvas charts with missing-data gaps. One UI dark theme applies to scaffold/cards/nav.
+          BLE/watchface/training protocol behavior is inherited; physical Band/GPS validation still requires real hardware.
+          EOF
+          (cd work && zip -qr ../dist/BandLab9Active_v2.3_SOURCE_COMPLETE.zip . -x 'app/build/*' '.gradle/*' 'build/*')
+          sha256sum dist/*.apk dist/*.zip > dist/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BandLab-v2.3-home-recovery-verified
+          path: dist/
+          if-no-files-found: error
