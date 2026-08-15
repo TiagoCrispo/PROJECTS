@@ -28,18 +28,20 @@ jobs:
           cat wa-vault-build-v032-small/part-000.b64 wa-vault-build-v032-small/part-001.b64 wa-vault-build-v032-small/part-002.b64 wa-vault-build-v032-small/part-003.b64 wa-vault-build-v032-small/part-004.b64 wa-vault-build-v032-small/part-005.b64 wa-vault-build-v032-small/part-006.b64 wa-vault-build-v032-small/part-007a.b64 wa-vault-build-v032-small/part-007b.b64 wa-vault-build-v032-small/part-008a.b64 wa-vault-build-v032-small/part-008b.b64 > /tmp/project.b64
           base64 -d /tmp/project.b64 > /tmp/project.tar.xz
           echo 'a5933b2452ec76b37f552a8bb42bb14045de3c3d8b80d5aee27a9526981ac90b  /tmp/project.tar.xz' | sha256sum -c -
-          mkdir -p wa-vault-v035-project
-          tar -xJf /tmp/project.tar.xz -C wa-vault-v035-project
+          mkdir -p wa-vault-v034-project
+          tar -xJf /tmp/project.tar.xz -C wa-vault-v034-project
 
           cat wa-vault-build-v034/patch-0.b64 wa-vault-build-v034/patch-1.b64 > /tmp/v034.patch.b64
           base64 -d /tmp/v034.patch.b64 > /tmp/v034.patch.xz
           echo 'a0dda46d8de11d2bf341a49a5b4b083fceb7e00701f84b03e4aa5dfef628b9a0  /tmp/v034.patch.xz' | sha256sum -c -
           xz -dc /tmp/v034.patch.xz > /tmp/v034.patch
-          cd wa-vault-v035-project
+          cd wa-vault-v034-project
           patch -p4 -F3 --batch < /tmp/v034.patch || true
           cd ..
           python3 wa-vault-build-v034/postfix_v034.py
-          grep -q 'versionCode = 34' wa-vault-v035-project/app/build.gradle.kts
+          grep -q 'versionCode = 34' wa-vault-v034-project/app/build.gradle.kts
+          rm -f wa-vault-v034-project/app/src/main/java/com/fer/wavault/MainActivity.java.rej
+          mv wa-vault-v034-project wa-vault-v035-project
 
       - name: Apply v0.3.5 patch
         shell: bash
