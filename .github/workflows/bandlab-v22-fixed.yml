@@ -1,0 +1,111 @@
+name: BandLab 2.2 Fixed Verification
+on:
+  push:
+    branches: [ bandlab-v2 ]
+  workflow_dispatch:
+concurrency:
+  group: bandlab-v22-fixed
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      SOURCE_SHA256: 7d696773dea791c0637db14082e71f9e537799e84c46221f6c90b3e4d9455f5a
+      PATCH_SHA256: a18aba0039255ea2b19ae5cf5c4de286161c82dcd85f2c0b1867e6dd982e4b5b
+      KODO_COMMIT: 8152ffdd3f384e0563a39db7bf77a8b70d3a6e84
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct 2.1 and apply 2.2
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat src_chunks/00.b64 src_chunks/01a.b64 src_chunks/01b.b64 src_chunks/02.b64 src_chunks/03.b64 src_chunks/04.b64 src_chunks/05.b64 src_chunks/06.b64 | base64 -d > /tmp/base.tar.xz
+          echo "$SOURCE_SHA256  /tmp/base.tar.xz" | sha256sum -c -
+          mkdir work && tar -xJf /tmp/base.tar.xz -C work
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('work/app/build.gradle.kts'); p.write_text(p.read_text().replace('builtins { named("java") { option("lite") } }','builtins { maybeCreate("java").apply { option("lite") } }'))
+          p=Path('work/app/src/main/java/com/fer/bandlab/ui/BandLabApp.kt'); s=p.read_text()
+          if 'import androidx.compose.foundation.layout.RowScope' not in s: s=s.replace('import androidx.compose.foundation.layout.WindowInsets\n','import androidx.compose.foundation.layout.WindowInsets\nimport androidx.compose.foundation.layout.RowScope\n')
+          s=s.replace('private fun NavItem(current: AppTab, target: AppTab, icon: ImageVector, onClick: (AppTab) -> Unit) {','private fun RowScope.NavItem(current: AppTab, target: AppTab, icon: ImageVector, onClick: (AppTab) -> Unit) {'); p.write_text(s)
+          p=Path('work/app/src/main/java/com/fer/bandlab/ui/screens/HealthScreen.kt'); p.write_text(p.read_text().replace('import androidx.compose.material.icons.rounded.Walk\n',''))
+          PY
+          python3 ci/patch_v21.py work
+          cat ci/patch_v22_0*.txt > /tmp/patch_v22.py
+          echo "$PATCH_SHA256  /tmp/patch_v22.py" | sha256sum -c -
+          python3 /tmp/patch_v22.py work
+          grep -q 'versionName=2.2.0' work/bandlab-version.properties
+          grep -q 'WorkoutPrEngine' work/app/src/main/java/com/fer/bandlab/ui/screens/HistoryScreen.kt
+          grep -q 'VolumeBars' work/app/src/main/java/com/fer/bandlab/ui/screens/TrainingScreen.kt
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '17'}
+      - uses: android-actions/setup-android@v3
+      - name: Android SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools" "emulator" "system-images;android-30;default;x86_64"
+      - uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: '8.13'}
+      - name: Import pinned Xiaomi protocol
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none https://github.com/kidneyweakx/Kodo.git /tmp/Kodo
+          git -C /tmp/Kodo checkout "$KODO_COMMIT"
+          test "$(git -C /tmp/Kodo rev-parse HEAD)" = "$KODO_COMMIT"
+          X=/tmp/Kodo/android-port/src/main/java/com/kidneyweakx/miband9active/xiaomi
+          D=work/app/src/main/java/com/kidneyweakx/miband9active/xiaomi
+          mkdir -p "$D" "$D/services" work/app/src/main/proto work/third_party/Kodo
+          cp -R "$X/auth" "$X/protocol" "$X/activity" "$D/"
+          cp "$X/services/SystemCommands.kt" "$X/services/MiBand9DataUploader.kt" "$D/services/"
+          cp /tmp/Kodo/android-port/src/main/proto/xiaomi.proto work/app/src/main/proto/
+          cp /tmp/Kodo/LICENSE /tmp/Kodo/NOTICE.md work/third_party/Kodo/
+          echo "$KODO_COMMIT" > work/third_party/Kodo/COMMIT.txt
+      - name: Test and build 2.2
+        working-directory: work
+        run: gradle --no-daemon :app:assembleV21Debug :app:testV22DebugUnitTest :app:assembleV22Debug :app:assembleV22Release
+      - name: Validate metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          D=work/app/build/outputs/apk/v22/debug/app-v22-debug.apk
+          R=work/app/build/outputs/apk/v22/release/app-v22-release-unsigned.apk
+          unzip -t "$D" >/dev/null; unzip -t "$R" >/dev/null
+          "$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging "$D" > /tmp/badging
+          grep -q "package: name='com.fer.bandlab'" /tmp/badging
+          grep -q "versionCode='220'" /tmp/badging
+          grep -q "versionName='2.2.0'" /tmp/badging
+      - name: Upgrade 2.1 to 2.2 on Android
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/android-avd"; mkdir -p "$ANDROID_AVD_HOME" verification
+          echo no | avdmanager create avd -n bandlab_ci -k "system-images;android-30;default;x86_64" --device pixel_4 --force
+          nohup "$ANDROID_HOME/emulator/emulator" -avd bandlab_ci -no-window -noaudio -no-boot-anim -gpu swiftshader_indirect -accel off -no-snapshot -no-metrics -memory 2048 -cores 2 >/tmp/emulator.log 2>&1 &
+          timeout 180s adb wait-for-device
+          for i in $(seq 1 180); do [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] && break; sleep 2; done
+          test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = 1
+          V21=work/app/build/outputs/apk/v21/debug/app-v21-debug.apk; V22=work/app/build/outputs/apk/v22/debug/app-v22-debug.apk
+          timeout 240s adb install "$V21"; timeout 60s adb shell am start -n com.fer.bandlab/.MainActivity; sleep 5; test -n "$(adb shell pidof com.fer.bandlab | tr -d '\r')"
+          timeout 240s adb install -r "$V22"; adb shell am force-stop com.fer.bandlab; adb logcat -c; timeout 60s adb shell am start -n com.fer.bandlab/.MainActivity; sleep 8
+          test -n "$(adb shell pidof com.fer.bandlab | tr -d '\r')"
+          adb shell dumpsys package com.fer.bandlab | grep -E 'versionCode|versionName' > verification/package.txt
+          grep -q 'versionCode=220' verification/package.txt; grep -q 'versionName=2.2.0' verification/package.txt
+          adb logcat -d -t 1800 > verification/logcat.txt
+          ! grep -E 'FATAL EXCEPTION|Process: com\.fer\.bandlab.*has died|AndroidRuntime.*com\.fer\.bandlab' verification/logcat.txt
+          echo '2.1 -> 2.2 UPGRADE + STARTUP PASS' > verification/PASS.txt
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp work/app/build/outputs/apk/v22/debug/app-v22-debug.apk dist/BandLab9Active_v2.2_TRAINING_PRO_DEBUG_VERIFIED.apk
+          cp work/app/build/outputs/apk/v22/release/app-v22-release-unsigned.apk dist/BandLab9Active_v2.2_TRAINING_PRO_RELEASE_UNSIGNED.apk
+          cp -R verification dist/verification
+          (cd work && zip -qr ../dist/BandLab9Active_v2.2_SOURCE_COMPLETE.zip . -x 'app/build/*' '.gradle/*' 'build/*')
+          sha256sum dist/*.apk dist/*.zip > dist/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BandLab-v2.2-training-pro-fixed
+          path: dist/
+          if-no-files-found: error
