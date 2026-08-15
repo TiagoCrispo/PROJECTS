@@ -1,0 +1,322 @@
+-            val activeMinutes = (latest.activeMs + activeDelta) / 60_000.0
+-            latest.type.met * 3.5 * weightKg / 200.0 * activeMinutes
+-        } else 0.0
+-
+-        _state.value = latest.copy(
+-            elapsedMs = latest.elapsedMs + delta,
+-            activeMs = latest.activeMs + activeDelta,
+-            pausedMs = latest.pausedMs + pausedDelta,
+-            caloriesKcal = calories
+-        )
+-
+-        if (now - lastNotificationAt > 5_000L) {
+-            lastNotificationAt = now
+-            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+-            nm.notify(701, buildNotification(_state.value))
++        val latest = _state.value; val activeDelta = if (latest.status == WorkoutStatus.ACTIVE) delta else 0L; val pausedDelta = if (latest.status == WorkoutStatus.PAUSED) delta else 0L
++        val weightKg = prefs.getWeightKg(); val calories = if (weightKg != null && latest.type != null) latest.type.met * 3.5 * weightKg / 200.0 * ((latest.activeMs + activeDelta) / 60_000.0) else 0.0
++        val goalReached = latest.goalReached || when (latest.goal.type) {
++            WorkoutGoalType.TIME -> latest.goal.timeMinutes > 0 && latest.activeMs + activeDelta >= latest.goal.timeMinutes * 60_000L
++            WorkoutGoalType.DISTANCE -> latest.goal.distanceMeters > 0 && latest.distanceMeters >= latest.goal.distanceMeters
++            WorkoutGoalType.NONE -> false
+         }
++        _state.value = latest.copy(elapsedMs = latest.elapsedMs + delta, activeMs = latest.activeMs + activeDelta, pausedMs = latest.pausedMs + pausedDelta, caloriesKcal = calories, goalReached = goalReached)
++
++        if (now - lastNotificationAt > 5_000L) { lastNotificationAt = now; (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(701, buildNotification(_state.value)) }
+     }
+ 
+     override fun onLocationChanged(location: Location) {
+-        val current = _state.value
+-        val type = current.type ?: return
++        val current = _state.value; val type = current.type ?: return
+         if (type == WorkoutType.ROPE || current.status == WorkoutStatus.IDLE) return
+-
+         lastGpsFixElapsed = SystemClock.elapsedRealtime()
+-        val recovering = current.gpsSignalLost
+-        val previous = if (recovering) null else previousLocation
+-        val dtSeconds = previous?.let { (location.elapsedRealtimeNanos - it.elapsedRealtimeNanos) / 1_000_000_000.0 }
+-            ?.takeIf { it > 0.2 } ?: 1.0
++        val recovering = current.gpsSignalLost; val previous = if (recovering) null else previousLocation
++        val dtSeconds = previous?.let { (location.elapsedRealtimeNanos - it.elapsedRealtimeNanos) / 1_000_000_000.0 }?.takeIf { it > 0.2 } ?: 1.0
+         val segment = previous?.distanceTo(location)?.toDouble() ?: 0.0
+-        val distanceSpeed = segment / dtSeconds
+-        val reportedSpeed = if (location.hasSpeed()) location.speed.toDouble() else 0.0
+-        val computedSpeed = maxOf(reportedSpeed, distanceSpeed).coerceAtLeast(0.0)
+-        val accuracy = if (location.hasAccuracy()) location.accuracy else null
+-
++        val distanceSpeed = segment / dtSeconds; val reportedSpeed = if (location.hasSpeed()) location.speed.toDouble() else 0.0
++        val computedSpeed = maxOf(reportedSpeed, distanceSpeed).coerceAtLeast(0.0); val accuracy = if (location.hasAccuracy()) location.accuracy else null
+         val maxSpeed = when (type) { WorkoutType.WALK -> 4.5; WorkoutType.RUN -> 9.0; WorkoutType.CYCLE -> 25.0; WorkoutType.ROPE -> 0.0 }
+         val plausibleSegment = segment in 0.0..75.0 && (accuracy == null || accuracy <= 35f) && distanceSpeed <= maxSpeed
+-        val movementFloor = when (type) {
+-            WorkoutType.WALK -> 0.22
+-            WorkoutType.RUN -> 0.45
+-            WorkoutType.CYCLE -> 0.75
+-            WorkoutType.ROPE -> 0.0
+-        }
+-        val newDistance = if (
+-            previous != null &&
+-            plausibleSegment &&
+-            computedSpeed >= movementFloor &&
+-            current.status == WorkoutStatus.ACTIVE &&
+-            !current.autoPaused &&
+-            !manuallyPaused
+-        ) current.distanceMeters + segment else current.distanceMeters
++        val movementFloor = when (type) { WorkoutType.WALK -> 0.22; WorkoutType.RUN -> 0.45; WorkoutType.CYCLE -> 0.75; WorkoutType.ROPE -> 0.0 }
++        val movingAccepted = previous != null && plausibleSegment && computedSpeed >= movementFloor && current.status == WorkoutStatus.ACTIVE && !current.autoPaused && !manuallyPaused
++        val newDistance = if (movingAccepted) current.distanceMeters + segment else current.distanceMeters
+ 
+-        var newSplits = current.splits
+-        var splitTarget = nextSplitMeters
++        var newSplits = current.splits; var splitTarget = nextSplitMeters
+         while (newDistance >= splitTarget && splitTarget > 0) {
+-            val activeAtSplit = current.activeMs
+-            newSplits = newSplits + SplitRecord(splitTarget, activeAtSplit, (activeAtSplit - lastSplitActiveMs).coerceAtLeast(0L))
+-            lastSplitActiveMs = activeAtSplit
+-            nextSplitMeters += prefs.getSplitMeters()
+-            splitTarget = nextSplitMeters
+-        }
+-        _state.value = current.copy(
+-            distanceMeters = newDistance,
+-            currentSpeedMps = computedSpeed.coerceAtLeast(0.0),
+-            gpsAccuracyMeters = accuracy,
+-            gpsSignalLost = false,
+-            splits = newSplits
+-        )
+-
+-        if (!manuallyPaused) {
+-            when (autoPauseDetector?.update(computedSpeed, accuracy, SystemClock.elapsedRealtime())) {
+-                AutoPauseDetector.Event.PAUSE -> pauseWorkout(manual = false)
+-                AutoPauseDetector.Event.RESUME -> resumeWorkout(manual = false)
+-                else -> Unit
+-            }
++            val activeAtSplit = current.activeMs; newSplits = newSplits + SplitRecord(splitTarget, activeAtSplit, (activeAtSplit - lastSplitActiveMs).coerceAtLeast(0L))
++            lastSplitActiveMs = activeAtSplit; nextSplitMeters += prefs.getSplitMeters(); splitTarget = nextSplitMeters
+         }
+ 
++        val verticalOk = !location.hasAltitude() || Build.VERSION.SDK_INT < 26 || !location.hasVerticalAccuracy() || location.verticalAccuracyMeters <= 20f
++        val altitude = location.altitude.takeIf { location.hasAltitude() && verticalOk }
++        var ascent = current.ascentMeters; var descent = current.descentMeters
++        val previousAltitude = current.route.lastOrNull()?.takeIf { !recovering }?.altitudeMeters
++        if (movingAccepted && altitude != null && previousAltitude != null && segment >= 3.0) {
++            val d = altitude - previousAltitude
++            if (d >= 1.5) ascent += d else if (d <= -1.5) descent += -d
++        }
++
++        var route = current.route
++        val elapsed = current.elapsedMs
++        val shouldRoute = (accuracy == null || accuracy <= 35f) && (route.isEmpty() || recovering || elapsed - lastRouteElapsedMs >= 1_500L || segment >= 5.0)
++        if (shouldRoute && route.size < 6000) {
++            route = route + RoutePoint(location.latitude, location.longitude, altitude, accuracy, elapsed, computedSpeed, route.isEmpty() || recovering)
++            lastRouteElapsedMs = elapsed
++        }
++        val goalReached = current.goalReached || (current.goal.type == WorkoutGoalType.DISTANCE && current.goal.distanceMeters > 0 && newDistance >= current.goal.distanceMeters)
++        _state.value = current.copy(distanceMeters = newDistance, currentSpeedMps = computedSpeed, gpsAccuracyMeters = accuracy, gpsSignalLost = false, splits = newSplits,
++            route = route, ascentMeters = ascent, descentMeters = descent, goalReached = goalReached, gpsProviderEnabled = true)
++
++        if (!manuallyPaused && prefs.isAutoPauseEnabled()) when (autoPauseDetector?.update(computedSpeed, accuracy, SystemClock.elapsedRealtime())) {
++            AutoPauseDetector.Event.PAUSE -> pauseWorkout(manual = false)
++            AutoPauseDetector.Event.RESUME -> resumeWorkout(manual = false)
++            else -> Unit
++        }
+         previousLocation = location
+     }
+ 
+-    private fun pauseWorkout(manual: Boolean) {
+-        val current = _state.value
+-        if (current.status != WorkoutStatus.ACTIVE) {
+-            if (manual) manuallyPaused = true
+-            return
+-        }
+-        if (manual) manuallyPaused = true
+-        _state.value = current.copy(
+-            status = WorkoutStatus.PAUSED,
+-            pauseCount = current.pauseCount + 1,
+-            autoPaused = !manual
+-        )
+-    }
++    override fun onProviderDisabled(provider: String) { if (provider == LocationManager.GPS_PROVIDER) _state.value = _state.value.copy(gpsProviderEnabled = false, gpsSignalLost = true, currentSpeedMps = 0.0) }
++    override fun onProviderEnabled(provider: String) { if (provider == LocationManager.GPS_PROVIDER) _state.value = _state.value.copy(gpsProviderEnabled = true) }
+ 
+-    private fun resumeWorkout(manual: Boolean) {
+-        val current = _state.value
+-        if (manual) manuallyPaused = false
+-        if (current.status != WorkoutStatus.PAUSED) return
+-        _state.value = current.copy(
+-            status = WorkoutStatus.ACTIVE,
+-            autoPaused = false
+-        )
+-        if (manual) autoPauseDetector?.reset()
++    private fun recordManualLap() {
++        val current = _state.value; if (current.status == WorkoutStatus.IDLE) return
++        val lapMs = (current.activeMs - lastLapActiveMs).coerceAtLeast(0L); val lapDistance = (current.distanceMeters - lastLapDistanceMeters).coerceAtLeast(0.0)
++        _state.value = current.copy(manualLaps = current.manualLaps + ManualLapRecord(current.activeMs, current.distanceMeters, lapMs, lapDistance))
++        lastLapActiveMs = current.activeMs; lastLapDistanceMeters = current.distanceMeters
+     }
+ 
++    private fun pauseWorkout(manual: Boolean) { val c=_state.value; if(c.status!=WorkoutStatus.ACTIVE){ if(manual)manuallyPaused=true; return }; if(manual)manuallyPaused=true; _state.value=c.copy(status=WorkoutStatus.PAUSED,pauseCount=c.pauseCount+1,autoPaused=!manual) }
++    private fun resumeWorkout(manual: Boolean) { val c=_state.value; if(manual)manuallyPaused=false; if(c.status!=WorkoutStatus.PAUSED)return; _state.value=c.copy(status=WorkoutStatus.ACTIVE,autoPaused=false); if(manual)autoPauseDetector?.reset() }
++
+     private fun stopWorkout(save: Boolean) {
+-        val current = _state.value
+-        if (current.type != null && current.status != WorkoutStatus.IDLE && save) {
+-            prefs.saveWorkout(
+-                WorkoutSummary(
+-                    type = current.type,
+-                    startedAtEpochMs = current.startedAtEpochMs,
+-                    elapsedMs = current.elapsedMs,
+-                    activeMs = current.activeMs,
+-                    pausedMs = current.pausedMs,
+-                    pauseCount = current.pauseCount,
+-                    distanceMeters = current.distanceMeters,
+-                    caloriesKcal = current.caloriesKcal,
+-                    gpsLossCount = current.gpsLossCount,
+-                    splits = current.splits
+-                )
+-            )
++        val c=_state.value
++        if(c.type!=null && c.status!=WorkoutStatus.IDLE && save) {
++            val avgCadence = if (c.stepCount > 0 && c.activeMs > 10_000L) (c.stepCount / (c.activeMs / 60_000.0)).roundToInt() else null
++            prefs.saveWorkout(WorkoutSummary(type=c.type,startedAtEpochMs=c.startedAtEpochMs,elapsedMs=c.elapsedMs,activeMs=c.activeMs,pausedMs=c.pausedMs,pauseCount=c.pauseCount,
++                distanceMeters=c.distanceMeters,caloriesKcal=c.caloriesKcal,gpsLossCount=c.gpsLossCount,splits=c.splits,route=c.route,ascentMeters=c.ascentMeters,descentMeters=c.descentMeters,
++                averageCadenceSpm=avgCadence,totalSteps=c.stepCount,manualLaps=c.manualLaps,goal=c.goal,goalReached=c.goalReached))
+         }
+-        stopTrackingOnly()
+-        _state.value = WorkoutLiveState()
+-        stopForeground(STOP_FOREGROUND_REMOVE)
+-        stopSelf()
++        stopTrackingOnly(); _state.value=WorkoutLiveState(); stopForeground(STOP_FOREGROUND_REMOVE); stopSelf()
+     }
+ 
+-    private fun stopTrackingOnly() {
+-        tickerJob?.cancel()
+-        tickerJob = null
+-        runCatching { locationManager.removeUpdates(this) }
+-        runCatching { sensorManager.unregisterListener(this) }
+-    }
++    private fun stopTrackingOnly() { tickerJob?.cancel(); tickerJob=null; runCatching { locationManager.removeUpdates(this) }; runCatching { sensorManager.unregisterListener(this) } }
+ 
+     override fun onSensorChanged(event: SensorEvent?) {
+-        val current = _state.value
+-        if (current.type != WorkoutType.ROPE || event == null) return
+-        val x = event.values[0]
+-        val y = event.values[1]
+-        val z = event.values[2]
+-        val magnitude = kotlin.math.sqrt((x * x + y * y + z * z).toDouble())
+-        if (abs(magnitude - 9.81) > 1.35) {
+-            val now = SystemClock.elapsedRealtime()
+-            lastRopeMotionAt = now
+-            if (!manuallyPaused && current.status == WorkoutStatus.PAUSED && current.autoPaused) {
+-                if (ropeResumeMotionSince == null) ropeResumeMotionSince = now
+-                if (now - (ropeResumeMotionSince ?: now) >= 1_500L) {
+-                    resumeWorkout(manual = false)
+-                    ropeResumeMotionSince = null
+-                }
+-            }
+-        }
+-    }
+-
+-    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+-
+-    private fun createNotificationChannel() {
+-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+-            val channel = NotificationChannel(
+-                "bandlab_workout",
+-                "Entrenamientos",
+-                NotificationManager.IMPORTANCE_LOW
+-            ).apply { description = "Mantiene el entrenamiento activo con la pantalla apagada" }
+-            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+-                .createNotificationChannel(channel)
+-        }
+-    }
+-
+-    private fun buildNotification(state: WorkoutLiveState) = NotificationCompat.Builder(this, "bandlab_workout")
+-        .setSmallIcon(android.R.drawable.ic_media_play)
+-        .setContentTitle(state.type?.title ?: "BandLab")
+-        .setContentText(
+-            if (state.status == WorkoutStatus.PAUSED) "Pausado · ${formatDuration(state.elapsedMs)}"
+-            else "${"%.2f".format(state.distanceKm)} km · ${formatDuration(state.activeMs)} activo"
+-        )
+-        .setOngoing(true)
+-        .setOnlyAlertOnce(true)
+-        .build()
+-
+-    private fun formatDuration(ms: Long): String {
+-        val totalSeconds = ms / 1000
+-        val hours = totalSeconds / 3600
+-        val minutes = (totalSeconds % 3600) / 60
+-        val seconds = totalSeconds % 60
+-        return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, seconds)
+-        else "%02d:%02d".format(minutes, seconds)
+-    }
+-
+-    override fun onDestroy() {
+-        stopTrackingOnly()
+-        scope.cancel()
+-        super.onDestroy()
+-    }
+-
+-    override fun onBind(intent: Intent?): IBinder? = null
++        val c=_state.value; if(event==null)return
++        if(event.sensor.type == Sensor.TYPE_STEP_DETECTOR && (c.type==WorkoutType.WALK || c.type==WorkoutType.RUN) && c.status==WorkoutStatus.ACTIVE) {
++            val now=SystemClock.elapsedRealtime(); stepTimes.addLast(now); while(stepTimes.isNotEmpty() && now-stepTimes.first()>60_000L) stepTimes.removeFirst()
++            val windowMs=(now-(stepTimes.firstOrNull()?:now)).coerceAtLeast(10_000L); val cadence=((stepTimes.size * 60_000.0)/windowMs).roundToInt().coerceIn(0,250)
++            _state.value=c.copy(stepCount=c.stepCount+1,cadenceSpm=cadence); return
++        }
++        if(c.type!=WorkoutType.ROPE || event.sensor.type!=Sensor.TYPE_ACCELEROMETER)return
++        val x=event.values[0]; val y=event.values[1]; val z=event.values[2]; val magnitude=kotlin.math.sqrt((x*x+y*y+z*z).toDouble())
++        if(abs(magnitude-9.81)>1.35){ val now=SystemClock.elapsedRealtime(); lastRopeMotionAt=now; if(!manuallyPaused && c.status==WorkoutStatus.PAUSED && c.autoPaused){ if(ropeResumeMotionSince==null)ropeResumeMotionSince=now; if(now-(ropeResumeMotionSince?:now)>=1_500L){resumeWorkout(false);ropeResumeMotionSince=null} } }
++    }
++    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int)=Unit
++
++    private fun createNotificationChannel(){ if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.O){ val channel=NotificationChannel("bandlab_workout","Entrenamientos",NotificationManager.IMPORTANCE_LOW).apply{description="Mantiene el entrenamiento activo con la pantalla apagada"}; (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(channel) } }
++    private fun buildNotification(state:WorkoutLiveState)=NotificationCompat.Builder(this,"bandlab_workout").setSmallIcon(android.R.drawable.ic_media_play).setContentTitle(state.type?.title?:"BandLab").setContentText(
++        when { !state.gpsProviderEnabled && state.type!=WorkoutType.ROPE -> "GPS del teléfono desactivado"; state.status==WorkoutStatus.PAUSED -> "Pausado · ${formatDuration(state.elapsedMs)}"; else -> "${"%.2f".format(state.distanceKm)} km · ${formatDuration(state.activeMs)} activo" }
++    ).setOngoing(true).setOnlyAlertOnce(true).build()
++    private fun formatDuration(ms:Long):String{val t=ms/1000;val h=t/3600;val m=(t%3600)/60;val s=t%60;return if(h>0)"%d:%02d:%02d".format(h,m,s) else "%02d:%02d".format(m,s)}
++    override fun onDestroy(){stopTrackingOnly();scope.cancel();super.onDestroy()}
++    override fun onBind(intent:Intent?):IBinder?=null
+ }
+diff -ruN '--exclude=.kotlin' '--exclude=build' '--exclude=dist' bandlab_v23_base/app/src/main/java/com/fer/bandlab/ui/BandLabApp.kt bandlab_v24/app/src/main/java/com/fer/bandlab/ui/BandLabApp.kt
+--- bandlab_v23_base/app/src/main/java/com/fer/bandlab/ui/BandLabApp.kt	2026-08-15 21:30:28.000000000 +0000
++++ bandlab_v24/app/src/main/java/com/fer/bandlab/ui/BandLabApp.kt	2026-08-15 22:09:34.787580594 +0000
+@@ -12,6 +12,7 @@
+ import androidx.compose.material.icons.rounded.Favorite
+ import androidx.compose.material.icons.rounded.History
+ import androidx.compose.material.icons.rounded.Watch
++import androidx.compose.material.icons.rounded.Settings
+ import androidx.compose.material3.Icon
+ import androidx.compose.material3.MaterialTheme
+ import androidx.compose.material3.NavigationBar
+@@ -37,6 +38,7 @@
+ import com.fer.bandlab.ui.screens.HealthScreen
+ import com.fer.bandlab.ui.screens.HistoryScreen
+ import com.fer.bandlab.ui.screens.TrainingScreen
++import com.fer.bandlab.ui.screens.SettingsScreen
+ 
+ @Composable
+ fun BandLabApp(vm: BandLabViewModel) {
+@@ -61,6 +63,7 @@
+                 NavItem(tab, AppTab.TRAIN, Icons.Rounded.DirectionsRun) { tab = it }
+                 NavItem(tab, AppTab.HISTORY, Icons.Rounded.History) { tab = it }
+                 NavItem(tab, AppTab.DEVICE, Icons.Rounded.Watch) { tab = it }
++                if (BuildConfig.FEATURE_STAGE >= 24) NavItem(tab, AppTab.SETTINGS, Icons.Rounded.Settings) { tab = it }
+             }
+         }
+     ) { innerPadding ->
+@@ -76,6 +79,7 @@
+                     AppTab.TRAIN -> TrainingScreen(vm, modifier)
+                     AppTab.HISTORY -> HistoryScreen(vm, modifier)
+                     AppTab.DEVICE -> DeviceScreen(vm, modifier)
++                    AppTab.SETTINGS -> SettingsScreen(vm, modifier)
+                 }
+             }
+         } else {
+@@ -84,6 +88,7 @@
+                 AppTab.TRAIN -> TrainingScreen(vm, modifier)
+                 AppTab.HISTORY -> HistoryScreen(vm, modifier)
+                 AppTab.DEVICE -> DeviceScreen(vm, modifier)
++                AppTab.SETTINGS -> SettingsScreen(vm, modifier)
+             }
+         }
+     }
