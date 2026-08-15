@@ -1,0 +1,118 @@
+name: WA Vault v0.4.1 stability build
+
+on:
+  push:
+    branches: [wa-vault-build-v041]
+    paths:
+      - 'wa-vault-build-v041/**'
+      - '.github/workflows/wa-vault-build-v041.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Restore verified v0.3.9 source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir wa-vault-v041-project
+          gh run download 31868903955 -n WA-Vault-v0.3.9-source-for-v040 -D wa-vault-v041-project
+          grep -q 'versionCode = 39' wa-vault-v041-project/app/build.gradle.kts
+
+      - name: Apply v0.4.0 base
+        run: |
+          set -euo pipefail
+          cat wa-vault-build-v040/patch-00.b64 wa-vault-build-v040/patch-01.b64 wa-vault-build-v040/patch-02.b64 wa-vault-build-v040/patch-03.b64 > /tmp/v040.patch.b64
+          base64 -d /tmp/v040.patch.b64 > /tmp/v040.patch.xz
+          echo '214fa8fc4739a0f9b17f3274975c4a69423ca4e182d75ef3cac5e88d67375713  /tmp/v040.patch.xz' | sha256sum -c -
+          xz -dc /tmp/v040.patch.xz > /tmp/v040.patch
+          cd wa-vault-v041-project
+          patch -p1 --batch < /tmp/v040.patch
+          sed -i 's/showAppLockDelayDialog()/showLockDelayDialog()/g' app/src/main/java/com/fer/wavault/MainActivity.java
+          grep -q 'versionName = "0.4.0"' app/build.gradle.kts
+
+      - name: Apply v0.4.1 stability patch
+        run: |
+          set -euo pipefail
+          base64 -d wa-vault-build-v041/patch.b64 > /tmp/v041.patch.xz
+          echo 'df6f5924fa96abcaf2369cbaa699e8f7709fb27b0b9109b7c0b62e23ae0abf38  /tmp/v041.patch.xz' | sha256sum -c -
+          xz -dc /tmp/v041.patch.xz > /tmp/v041.patch
+          cd wa-vault-v041-project
+          patch -p1 --batch < /tmp/v041.patch
+          find app -name '*.rej' -print -quit | grep -q . && { find app -name '*.rej' -print; exit 1; } || true
+          grep -q 'versionCode = 41' app/build.gradle.kts
+          grep -q 'versionName = "0.4.1"' app/build.gradle.kts
+          grep -q 'super(c, "wa_vault.db", null, 11)' app/src/main/java/com/fer/wavault/VaultDb.java
+          grep -q 'refreshMessagesInPlace' app/src/main/java/com/fer/wavault/MainActivity.java
+          grep -q 'listMessageContextsForMedia' app/src/main/java/com/fer/wavault/VaultDb.java
+          grep -q 'media_migration_cursor' app/src/main/java/com/fer/wavault/MediaCrypto.java
+
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK 35
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Compile release
+        working-directory: wa-vault-v041-project
+        run: gradle :app:assembleRelease --stacktrace --console=plain
+
+      - name: Restore v0.4.0 signing key
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p signing
+          gh run download 31869556369 -n WA-Vault-v0.4.0-signing-backup-fixed -D signing
+          test -s signing/WA-Vault-v0.4.0-signing-backup.jks
+          grep -q 'WAVault-v040-2026' signing/SIGNING_BACKUP_PASSWORD.txt
+
+      - name: Sign and verify v0.4.1
+        run: |
+          set -euo pipefail
+          UNSIGNED=wa-vault-v041-project/app/build/outputs/apk/release/app-release-unsigned.apk
+          mkdir -p wa-vault-v041-output
+          PASS='WAVault-v040-2026'
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign \
+            --ks signing/WA-Vault-v0.4.0-signing-backup.jks \
+            --ks-key-alias wavault \
+            --ks-pass pass:"$PASS" \
+            --key-pass pass:"$PASS" \
+            --out wa-vault-v041-output/WA-Vault-v0.4.1.apk "$UNSIGNED"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs wa-vault-v041-output/WA-Vault-v0.4.1.apk > wa-vault-v041-output/APK_SIGNATURE.txt
+          sha256sum wa-vault-v041-output/WA-Vault-v0.4.1.apk > wa-vault-v041-output/APK_SHA256.txt
+          cp wa-vault-v041-project/V041_NOTES.md wa-vault-v041-output/
+          cp wa-vault-v041-project/TEST_MATRIX.md wa-vault-v041-output/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WA-Vault-v0.4.1-release
+          path: |
+            wa-vault-v041-output/WA-Vault-v0.4.1.apk
+            wa-vault-v041-output/APK_SHA256.txt
+            wa-vault-v041-output/APK_SIGNATURE.txt
+            wa-vault-v041-output/V041_NOTES.md
+            wa-vault-v041-output/TEST_MATRIX.md
+          retention-days: 90
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WA-Vault-v0.4.1-source
+          path: wa-vault-v041-project
+          retention-days: 30
