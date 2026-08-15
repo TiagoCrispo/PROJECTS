@@ -1,4 +1,4 @@
-name: WA Vault v0.3.2 build
+name: WA Vault v0.3.3 build
 
 on:
   push:
@@ -48,10 +48,12 @@ jobs:
           grep -q 'versionCode = 32' wa-vault-build-v032-project/app/build.gradle.kts
           grep -q 'pending_manual_media' wa-vault-build-v032-project/app/src/main/java/com/fer/wavault/VaultDb.java
 
-      - name: Apply compile fixes
+      - name: Apply v0.3.3 fixes
         run: |
           python3 wa-vault-build-v032-small/compile_fix.py wa-vault-build-v032-project
           python3 wa-vault-build-v032-small/compile_fix2.py wa-vault-build-v032-project
+          grep -q 'versionCode = 33' wa-vault-build-v032-project/app/build.gradle.kts
+          grep -q 'versionName = "0.3.3"' wa-vault-build-v032-project/app/build.gradle.kts
 
       - uses: android-actions/setup-android@v3
       - name: Install Android SDK 35
@@ -62,14 +64,14 @@ jobs:
         with:
           gradle-version: '8.13'
 
-      - name: Build debug APK and capture compiler log
+      - name: Build APK and capture compiler log
         id: android_build
         working-directory: wa-vault-build-v032-project
         shell: bash
         run: |
           set +e
           set -o pipefail
-          gradle :app:assembleDebug --stacktrace --console=plain 2>&1 | tee /tmp/wa-vault-v032-gradle.log
+          gradle :app:assembleDebug --stacktrace --console=plain 2>&1 | tee /tmp/wa-vault-v033-gradle.log
           rc=${PIPESTATUS[0]}
           echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
           exit 0
@@ -79,16 +81,16 @@ jobs:
         run: |
           mkdir -p ci-logs
           {
-            echo "WA Vault v0.3.2 Gradle failure"
+            echo "WA Vault v0.3.3 Gradle failure"
             echo "run: $GITHUB_RUN_ID"
             echo "commit: $GITHUB_SHA"
             echo
-            tail -n 1200 /tmp/wa-vault-v032-gradle.log
-          } > ci-logs/wa-vault-v032-gradle-failure.log
+            tail -n 1200 /tmp/wa-vault-v033-gradle.log
+          } > ci-logs/wa-vault-v033-gradle-failure.log
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add ci-logs/wa-vault-v032-gradle-failure.log
-          git commit -m "Record WA Vault v0.3.2 compiler failure" || true
+          git add ci-logs/wa-vault-v033-gradle-failure.log
+          git commit -m "Record WA Vault v0.3.3 compiler failure" || true
           git push origin HEAD:wa-vault-build-v032
 
       - name: Fail after preserving compiler log
@@ -106,7 +108,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: steps.android_build.outputs.exit_code == '0'
         with:
-          name: WA-Vault-v0.3.2-debug
+          name: WA-Vault-v0.3.3-debug
           path: |
             wa-vault-build-v032-project/app/build/outputs/apk/debug/app-debug.apk
             wa-vault-build-v032-project/APK_SHA256.txt
