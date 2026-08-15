@@ -1,0 +1,301 @@
++    fun addSet(exerciseId: String, weightKg: Double, reps: Int, rpe: Double? = null, rir: Int? = null, setType: StrengthSetType = StrengthSetType.NORMAL, supersetTag: String? = null): StrengthSetRecord {
++        require(weightKg in 0.0..1000.0) { "Peso fuera de rango" }; require(reps in 1..200) { "Repeticiones fuera de rango" }
++        require(rpe == null || rpe in 1.0..10.0) { "RPE fuera de rango" }; require(rir == null || rir in 0..10) { "RIR fuera de rango" }
++        val record=StrengthSetRecord(exerciseId=exerciseId,weightKg=weightKg,reps=reps,rpe=rpe,rir=rir,setType=setType,supersetTag=supersetTag)
++        val arr=JSONArray(prefs.getString("sets","[]")); val next=JSONArray().put(toJson(record)); for(i in 0 until minOf(arr.length(),3999))next.put(arr.getJSONObject(i)); prefs.edit().putString("sets",next.toString()).apply(); return record
++    }
++    fun history(exerciseId:String)=loadAll().filter{it.exerciseId==exerciseId}
++    fun stats(exerciseId:String):StrengthExerciseStats{
++        val e=exercise(exerciseId); val h=history(exerciseId); val latest=h.firstOrNull(); val now=LocalDate.now(); val weekStart=now.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)); val prevStart=weekStart.minusWeeks(1)
++        fun date(r:StrengthSetRecord)=Instant.ofEpochMilli(r.timestampEpochMs).atZone(ZoneId.systemDefault()).toLocalDate()
++        val current=h.filter{date(it)>=weekStart}.sumOf{it.volume}; val previous=h.filter{val d=date(it); d>=prevStart && d<weekStart}.sumOf{it.volume}
++        val delta=previous.takeIf{it>0}?.let{(current-it)/it*100.0}
++        return StrengthExerciseStats(e,h,h.maxOfOrNull{it.weightKg},h.maxOfOrNull{it.reps},h.filter{it.setType!=StrengthSetType.WARMUP}.maxOfOrNull{it.e1rm},h.sumOf{it.volume},latest?.let{StrengthMath.suggestedWeight(it)},current,previous,delta,isFavorite(exerciseId))
++    }
++    fun muscleVolumeLast7Days():Map<String,Double>{ val cutoff=System.currentTimeMillis()-7L*86400000L; return loadAll().filter{it.timestampEpochMs>=cutoff}.groupBy{exercise(it.exerciseId).muscleGroup}.mapValues{(_,v)->v.sumOf{it.volume}}.toList().sortedByDescending{it.second}.toMap() }
++    fun lastSessionTemplate():List<StrengthSetRecord>{ val all=loadAll(); val id=all.firstOrNull()?.sessionId?:return emptyList(); return all.filter{it.sessionId==id}.reversed() }
++
++    fun isFavorite(id:String)=id in prefs.getStringSet("favorites",emptySet()).orEmpty()
++    fun toggleFavorite(id:String):Boolean{ val set=prefs.getStringSet("favorites",emptySet()).orEmpty().toMutableSet(); if(id in set)set-=id else set+=id; prefs.edit().putStringSet("favorites",set).apply(); return id in set }
++    fun favorites():List<StrengthExercise>{val f=prefs.getStringSet("favorites",emptySet()).orEmpty();return catalog.filter{it.id in f}}
++    fun getRoutineId():String=prefs.getString("routine_id","A")?.takeIf{id->routines.any{it.id==id}}?:"A"
++    fun setRoutineId(id:String){if(routines.any{it.id==id})prefs.edit().putString("routine_id",id).apply()}
++
++    fun clear()=prefs.edit().clear().apply()
++    private fun loadAll():List<StrengthSetRecord>{val arr=JSONArray(prefs.getString("sets","[]"));return buildList{for(i in 0 until arr.length())runCatching{fromJson(arr.getJSONObject(i))}.getOrNull()?.let(::add)}}
++    private fun toJson(r:StrengthSetRecord)=JSONObject().apply{put("id",r.id);put("exerciseId",r.exerciseId);put("ts",r.timestampEpochMs);put("weight",r.weightKg);put("reps",r.reps);put("rpe",r.rpe?:JSONObject.NULL);put("rir",r.rir?:JSONObject.NULL);put("setType",r.setType.name);put("session",r.sessionId);put("superset",r.supersetTag?:JSONObject.NULL)}
++    private fun fromJson(o:JSONObject)=StrengthSetRecord(id=o.getString("id"),exerciseId=o.getString("exerciseId"),timestampEpochMs=o.getLong("ts"),weightKg=o.getDouble("weight"),reps=o.getInt("reps"),rpe=if(o.isNull("rpe"))null else o.getDouble("rpe"),rir=if(o.isNull("rir"))null else o.getInt("rir"),setType=runCatching{StrengthSetType.valueOf(o.optString("setType","NORMAL"))}.getOrDefault(StrengthSetType.NORMAL),sessionId=o.optString("session",Instant.ofEpochMilli(o.getLong("ts")).atZone(ZoneId.systemDefault()).toLocalDate().toString()),supersetTag=if(o.isNull("superset"))null else o.optString("superset").takeIf{it.isNotBlank()})
++
++    fun getRestPresetSeconds():Int=prefs.getInt("rest_preset_seconds",90).takeIf{it in setOf(60,90,120)}?:90
++    fun setRestPresetSeconds(seconds:Int){prefs.edit().putInt("rest_preset_seconds",if(seconds in setOf(60,90,120))seconds else 90).apply()}
++    fun getRestEndEpochMs():Long=prefs.getLong("rest_end_epoch_ms",0L); fun setRestEndEpochMs(value:Long){prefs.edit().putLong("rest_end_epoch_ms",value.coerceAtLeast(0L)).apply()}; fun clearRestEnd(){prefs.edit().remove("rest_end_epoch_ms").apply()}
++    fun hasSetToday():Boolean{val start=LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();return loadAll().any{it.timestampEpochMs>=start}}
+ }
+diff -ruN '--exclude=.kotlin' '--exclude=build' '--exclude=dist' bandlab_v23_base/app/src/main/java/com/fer/bandlab/training/WorkoutExporter.kt bandlab_v24/app/src/main/java/com/fer/bandlab/training/WorkoutExporter.kt
+--- bandlab_v23_base/app/src/main/java/com/fer/bandlab/training/WorkoutExporter.kt	1970-01-01 00:00:00.000000000 +0000
++++ bandlab_v24/app/src/main/java/com/fer/bandlab/training/WorkoutExporter.kt	2026-08-15 22:08:09.110914695 +0000
+@@ -0,0 +1,72 @@
++package com.fer.bandlab.training
++
++import android.content.Context
++import com.fer.bandlab.model.WorkoutSummary
++import java.io.File
++import java.time.Instant
++import java.util.Locale
++import kotlin.math.*
++
++object WorkoutExporter {
++    data class Files(val gpx: File, val tcx: File, val csv: File)
++
++    fun export(context: Context, workout: WorkoutSummary): Files {
++        val dir = File(context.cacheDir, "exports").apply { mkdirs() }
++        val base = "BandLab-${workout.type.name.lowercase(Locale.US)}-${workout.startedAtEpochMs}"
++        val gpx = File(dir, "$base.gpx")
++        val tcx = File(dir, "$base.tcx")
++        val csv = File(dir, "$base.csv")
++        gpx.writeText(toGpx(workout)); tcx.writeText(toTcx(workout)); csv.writeText(toCsv(workout))
++        return Files(gpx, tcx, csv)
++    }
++
++    private fun esc(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
++    private fun iso(epochMs: Long) = Instant.ofEpochMilli(epochMs).toString()
++
++    fun toGpx(w: WorkoutSummary): String = buildString {
++        appendLine("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
++        appendLine("<gpx version=\"1.1\" creator=\"BandLab 2.4\" xmlns=\"http://www.topografix.com/GPX/1/1\">")
++        appendLine("  <trk><name>${esc(w.type.title)}</name><trkseg>")
++        var first = true
++        w.route.forEach { p ->
++            if (p.segmentStart && !first) appendLine("  </trkseg><trkseg>")
++            append("    <trkpt lat=\"${p.latitude}\" lon=\"${p.longitude}\">")
++            p.altitudeMeters?.let { append("<ele>${"%.2f".format(Locale.US, it)}</ele>") }
++            append("<time>${iso(w.startedAtEpochMs + p.elapsedMs)}</time></trkpt>\n")
++            first = false
++        }
++        appendLine("  </trkseg></trk>")
++        appendLine("</gpx>")
++    }
++
++    fun toTcx(w: WorkoutSummary): String = buildString {
++        appendLine("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
++        appendLine("<TrainingCenterDatabase xmlns=\"http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2\">")
++        appendLine("<Activities><Activity Sport=\"${if (w.type.name == "CYCLE") "Biking" else "Running"}\"><Id>${iso(w.startedAtEpochMs)}</Id>")
++        appendLine("<Lap StartTime=\"${iso(w.startedAtEpochMs)}\"><TotalTimeSeconds>${w.activeMs / 1000.0}</TotalTimeSeconds><DistanceMeters>${w.distanceMeters}</DistanceMeters><Track>")
++        var cumulative = 0.0
++        var previous: com.fer.bandlab.model.RoutePoint? = null
++        w.route.forEach { p ->
++            val prev = previous
++            if (prev != null && !p.segmentStart) cumulative += haversineMeters(prev.latitude, prev.longitude, p.latitude, p.longitude)
++            append("<Trackpoint><Time>${iso(w.startedAtEpochMs + p.elapsedMs)}</Time><Position><LatitudeDegrees>${p.latitude}</LatitudeDegrees><LongitudeDegrees>${p.longitude}</LongitudeDegrees></Position>")
++            p.altitudeMeters?.let { append("<AltitudeMeters>${"%.2f".format(Locale.US, it)}</AltitudeMeters>") }
++            append("<DistanceMeters>${"%.2f".format(Locale.US, cumulative)}</DistanceMeters></Trackpoint>\n")
++            previous = p
++        }
++        appendLine("</Track></Lap></Activity></Activities></TrainingCenterDatabase>")
++    }
++
++    private fun haversineMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
++        val r = 6_371_000.0
++        val p1 = Math.toRadians(lat1); val p2 = Math.toRadians(lat2)
++        val dp = Math.toRadians(lat2 - lat1); val dl = Math.toRadians(lon2 - lon1)
++        val a = sin(dp / 2).pow(2) + cos(p1) * cos(p2) * sin(dl / 2).pow(2)
++        return 2 * r * asin(sqrt(a.coerceIn(0.0, 1.0)))
++    }
++
++    fun toCsv(w: WorkoutSummary): String = buildString {
++        appendLine("timestamp_utc,elapsed_ms,latitude,longitude,altitude_m,accuracy_m,speed_mps,segment_start")
++        w.route.forEach { p -> appendLine(listOf(iso(w.startedAtEpochMs + p.elapsedMs), p.elapsedMs, p.latitude, p.longitude, p.altitudeMeters ?: "", p.accuracyMeters ?: "", p.speedMps, p.segmentStart).joinToString(",")) }
++    }
++}
+diff -ruN '--exclude=.kotlin' '--exclude=build' '--exclude=dist' bandlab_v23_base/app/src/main/java/com/fer/bandlab/training/WorkoutService.kt bandlab_v24/app/src/main/java/com/fer/bandlab/training/WorkoutService.kt
+--- bandlab_v23_base/app/src/main/java/com/fer/bandlab/training/WorkoutService.kt	2026-08-15 08:28:46.000000000 +0000
++++ bandlab_v24/app/src/main/java/com/fer/bandlab/training/WorkoutService.kt	2026-08-15 22:05:47.037345329 +0000
+@@ -22,8 +22,11 @@
+ import androidx.core.app.NotificationCompat
+ import androidx.core.app.ServiceCompat
+ import com.fer.bandlab.data.UserPrefs
+-import com.fer.bandlab.model.WorkoutLiveState
++import com.fer.bandlab.model.ManualLapRecord
++import com.fer.bandlab.model.RoutePoint
+ import com.fer.bandlab.model.SplitRecord
++import com.fer.bandlab.model.WorkoutGoalType
++import com.fer.bandlab.model.WorkoutLiveState
+ import com.fer.bandlab.model.WorkoutStatus
+ import com.fer.bandlab.model.WorkoutSummary
+ import com.fer.bandlab.model.WorkoutType
+@@ -38,6 +41,7 @@
+ import kotlinx.coroutines.flow.asStateFlow
+ import kotlinx.coroutines.launch
+ import kotlin.math.abs
++import kotlin.math.roundToInt
+ 
+ class WorkoutService : Service(), LocationListener, SensorEventListener {
+ 
+@@ -46,19 +50,14 @@
+         const val ACTION_PAUSE = "com.fer.bandlab.PAUSE_WORKOUT"
+         const val ACTION_RESUME = "com.fer.bandlab.RESUME_WORKOUT"
+         const val ACTION_STOP = "com.fer.bandlab.STOP_WORKOUT"
++        const val ACTION_LAP = "com.fer.bandlab.MANUAL_LAP"
+         const val EXTRA_TYPE = "workout_type"
+ 
+         private val _state = MutableStateFlow(WorkoutLiveState())
+         val state: StateFlow<WorkoutLiveState> = _state.asStateFlow()
+ 
+-        fun startIntent(context: Context, type: WorkoutType) = Intent(context, WorkoutService::class.java).apply {
+-            action = ACTION_START
+-            putExtra(EXTRA_TYPE, type.name)
+-        }
+-
+-        fun actionIntent(context: Context, actionName: String) = Intent(context, WorkoutService::class.java).apply {
+-            action = actionName
+-        }
++        fun startIntent(context: Context, type: WorkoutType) = Intent(context, WorkoutService::class.java).apply { action = ACTION_START; putExtra(EXTRA_TYPE, type.name) }
++        fun actionIntent(context: Context, actionName: String) = Intent(context, WorkoutService::class.java).apply { action = actionName }
+     }
+ 
+     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+@@ -77,6 +76,10 @@
+     private var lastGpsFixElapsed: Long = 0L
+     private var nextSplitMeters: Int = 1000
+     private var lastSplitActiveMs: Long = 0L
++    private var lastRouteElapsedMs: Long = -10_000L
++    private var lastLapActiveMs: Long = 0L
++    private var lastLapDistanceMeters: Double = 0.0
++    private val stepTimes = ArrayDeque<Long>()
+ 
+     override fun onCreate() {
+         super.onCreate()
+@@ -88,13 +91,11 @@
+ 
+     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+         when (intent?.action) {
+-            ACTION_START -> {
+-                val type = intent.getStringExtra(EXTRA_TYPE)?.let { runCatching { WorkoutType.valueOf(it) }.getOrNull() }
+-                if (type != null) startWorkout(type)
+-            }
++            ACTION_START -> intent.getStringExtra(EXTRA_TYPE)?.let { runCatching { WorkoutType.valueOf(it) }.getOrNull() }?.let(::startWorkout)
+             ACTION_PAUSE -> pauseWorkout(manual = true)
+             ACTION_RESUME -> resumeWorkout(manual = true)
+             ACTION_STOP -> stopWorkout(save = true)
++            ACTION_LAP -> recordManualLap()
+         }
+         return START_STICKY
+     }
+@@ -102,285 +103,161 @@
+     private fun startWorkout(type: WorkoutType) {
+         stopTrackingOnly()
+         autoPauseDetector = AutoPauseDetector(type)
+-        manuallyPaused = false
+-        previousLocation = null
+-        val nowEpoch = System.currentTimeMillis()
+-        val nowElapsed = SystemClock.elapsedRealtime()
+-        lastTickElapsed = nowElapsed
+-        lastRopeMotionAt = nowElapsed
+-        ropeResumeMotionSince = null
+-        lastGpsFixElapsed = nowElapsed
+-        nextSplitMeters = prefs.getSplitMeters()
+-        lastSplitActiveMs = 0L
+-
+-        _state.value = WorkoutLiveState(
+-            type = type,
+-            status = WorkoutStatus.ACTIVE,
+-            startedAtEpochMs = nowEpoch
+-        )
++        manuallyPaused = false; previousLocation = null; stepTimes.clear()
++        val nowEpoch = System.currentTimeMillis(); val nowElapsed = SystemClock.elapsedRealtime()
++        lastTickElapsed = nowElapsed; lastRopeMotionAt = nowElapsed; ropeResumeMotionSince = null; lastGpsFixElapsed = nowElapsed
++        nextSplitMeters = prefs.getSplitMeters(); lastSplitActiveMs = 0L; lastRouteElapsedMs = -10_000L
++        lastLapActiveMs = 0L; lastLapDistanceMeters = 0.0
++        val fine = ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
++        val gpsEnabled = runCatching { locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) }.getOrDefault(false)
++
++        _state.value = WorkoutLiveState(type = type, status = WorkoutStatus.ACTIVE, startedAtEpochMs = nowEpoch,
++            gpsProviderEnabled = type == WorkoutType.ROPE || gpsEnabled, fineLocationGranted = type == WorkoutType.ROPE || fine,
++            goal = prefs.getWorkoutGoal())
+ 
+-        val foregroundType = if (type == WorkoutType.ROPE) {
+-            ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH
+-        } else {
+-            ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+-        }
+-        ServiceCompat.startForeground(
+-            this,
+-            701,
+-            buildNotification(_state.value),
+-            foregroundType
+-        )
++        val foregroundType = if (type == WorkoutType.ROPE) ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH else ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
++        ServiceCompat.startForeground(this, 701, buildNotification(_state.value), foregroundType)
+         startTracking(type)
+-
+-        tickerJob = scope.launch {
+-            while (_state.value.status != WorkoutStatus.IDLE) {
+-                tick()
+-                delay(1_000L)
+-            }
+-        }
++        tickerJob = scope.launch { while (_state.value.status != WorkoutStatus.IDLE) { tick(); delay(1_000L) } }
+     }
+ 
+     private fun startTracking(type: WorkoutType) {
+         if (type != WorkoutType.ROPE) {
+             val fine = ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+-            val coarse = ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+-            if (fine || coarse) {
+-                runCatching {
+-                    locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1_000L, 0f, this)
+-                }
++            if (fine) runCatching { locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1_000L, 0f, this) }
++            if (type == WorkoutType.WALK || type == WorkoutType.RUN) {
++                val activityOk = Build.VERSION.SDK_INT < 29 || ActivityCompat.checkSelfPermission(this, Manifest.permission.ACTIVITY_RECOGNITION) == PackageManager.PERMISSION_GRANTED
++                if (activityOk) sensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL) }
+             }
+         } else {
+-            sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let {
+-                sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
+-            }
++            sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
+         }
+     }
+ 
+     private fun tick() {
+-        val now = SystemClock.elapsedRealtime()
+-        val delta = (now - lastTickElapsed).coerceIn(0L, 2_500L)
+-        lastTickElapsed = now
+-        val current = _state.value
+-        if (current.status == WorkoutStatus.IDLE) return
++        val now = SystemClock.elapsedRealtime(); val delta = (now - lastTickElapsed).coerceIn(0L, 2_500L); lastTickElapsed = now
++        val current = _state.value; if (current.status == WorkoutStatus.IDLE) return
+ 
+         if (current.type == WorkoutType.ROPE && !manuallyPaused) {
+             val idleFor = now - lastRopeMotionAt
+-            if (current.status == WorkoutStatus.ACTIVE && idleFor >= 8_000L) {
+-                pauseWorkout(manual = false)
+-            }
+-            if (current.status == WorkoutStatus.PAUSED && current.autoPaused && idleFor > 700L) {
+-                // Exige movimiento continuado para reanudar; un único golpe no alcanza.
+-                ropeResumeMotionSince = null
+-            }
++            if (current.status == WorkoutStatus.ACTIVE && idleFor >= 8_000L) pauseWorkout(manual = false)
++            if (current.status == WorkoutStatus.PAUSED && current.autoPaused && idleFor > 700L) ropeResumeMotionSince = null
+         }
+-
+-        if (current.type != null && current.type != WorkoutType.ROPE && current.status != WorkoutStatus.IDLE) {
++        if (current.type != null && current.type != WorkoutType.ROPE) {
++            val gpsEnabled = runCatching { locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) }.getOrDefault(false)
++            if (gpsEnabled != current.gpsProviderEnabled) _state.value = current.copy(gpsProviderEnabled = gpsEnabled)
+             val lost = now - lastGpsFixElapsed >= 10_000L
+-            if (lost && !current.gpsSignalLost) {
+-                previousLocation = null // nunca unimos los extremos de un túnel/pérdida
+-                _state.value = current.copy(gpsSignalLost = true, gpsLossCount = current.gpsLossCount + 1)
++            if (lost && !_state.value.gpsSignalLost) {
++                previousLocation = null
++                _state.value = _state.value.copy(gpsSignalLost = true, gpsLossCount = _state.value.gpsLossCount + 1, currentSpeedMps = 0.0)
+             }
+         }
+ 
+-        val latest = _state.value
+-        val activeDelta = if (latest.status == WorkoutStatus.ACTIVE) delta else 0L
+-        val pausedDelta = if (latest.status == WorkoutStatus.PAUSED) delta else 0L
+-        val weightKg = prefs.getWeightKg()
+-        val calories = if (weightKg != null && latest.type != null) {
