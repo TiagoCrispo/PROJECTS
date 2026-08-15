@@ -14,12 +14,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: Reconstruct source
         run: |
-          test "$(wc -c < mendoza_v4_native_source.part1)" -eq 9530
-          test "$(wc -c < mendoza_v4_native_source.part2)" -eq 9530
-          test "$(wc -c < mendoza_v4_native_source.part3)" -eq 9530
-          test "$(wc -c < mendoza_v4_native_source.part4)" -eq 9530
+          wc -c mendoza_v4_native_source.part1 mendoza_v4_native_source.part2 mendoza_v4_native_source.part3 mendoza_v4_native_source.part4
+          sha256sum mendoza_v4_native_source.part1 mendoza_v4_native_source.part2 mendoza_v4_native_source.part3 mendoza_v4_native_source.part4
+          test "$(sha256sum mendoza_v4_native_source.part1 | cut -d' ' -f1)" = "843732b5ad7b5624ffd2501e2d0697fe6d8aea8fbe545994ae3181c4729081a3"
+          test "$(sha256sum mendoza_v4_native_source.part2 | cut -d' ' -f1)" = "fa9fdeb8de6578c14d7ce211cec8755c899a5699dd2ea7eb026ae2d75d9f3f17"
+          test "$(sha256sum mendoza_v4_native_source.part3 | cut -d' ' -f1)" = "229e44f22ad3db3c1236a5a8346cce530130bfbd86c6ed71fd53a5fe91baa85e"
+          test "$(sha256sum mendoza_v4_native_source.part4 | cut -d' ' -f1)" = "fc642872c8142f1869de5b16699b3d34979e25449bcb636b2c8e54e04ab623bd"
           cat mendoza_v4_native_source.part1 mendoza_v4_native_source.part2 mendoza_v4_native_source.part3 mendoza_v4_native_source.part4 | base64 -d > source.zip
-          test "$(wc -c < source.zip)" -eq 28588
+          sha256sum source.zip
+          test "$(sha256sum source.zip | cut -d' ' -f1)" = "c40d24e34be38891a04a1d29aaacae8ec376da48693491edd7e8ccbbb19f0996"
           unzip -t source.zip
           unzip -q source.zip
           test -f mendoza_v4_native/app/src/main/java/com/mendozameteo/pro/MainActivity.java
