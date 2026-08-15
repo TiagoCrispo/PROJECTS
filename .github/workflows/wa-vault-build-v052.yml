@@ -1,0 +1,108 @@
+name: WA Vault v0.5.2 deleted-message visibility hotfix
+
+on:
+  push:
+    branches: [wa-vault-build-v052]
+    paths:
+      - 'wa-vault-build-v052/**'
+      - '.github/workflows/wa-vault-build-v052.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Restore verified v0.5.1 source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir wa-vault-v052-project
+          gh run download 31872776508 -n WA-Vault-v0.5.1-source -D wa-vault-v052-project
+          grep -q 'versionCode = 51' wa-vault-v052-project/app/build.gradle.kts
+          grep -q 'versionName = "0.5.1"' wa-vault-v052-project/app/build.gradle.kts
+          grep -q 'android.useAndroidX=true' wa-vault-v052-project/gradle.properties
+
+      - name: Apply verified v0.5.2 patch
+        run: |
+          set -euo pipefail
+          base64 -d wa-vault-build-v052/patch.b64 > /tmp/v052.patch.xz
+          echo 'c4b5cca5741ce1150b407044ff99587dadaf2bf9acd22c627a99e228862556d1  /tmp/v052.patch.xz' | sha256sum -c -
+          xz -dc /tmp/v052.patch.xz > /tmp/v052.patch
+          cd wa-vault-v052-project
+          patch -p1 --batch < /tmp/v052.patch
+          find . -name '*.rej' -print -quit | grep -q . && { find . -name '*.rej' -print; exit 1; } || true
+          grep -q 'versionCode = 52' app/build.gradle.kts
+          grep -q 'versionName = "0.5.2"' app/build.gradle.kts
+          grep -q 'ensureDeletionPlaceholder' app/src/main/java/com/fer/wavault/VaultDb.java
+          grep -q 'MENSAJE BORRADO' app/src/main/java/com/fer/wavault/MainActivity.java
+          grep -q 'never let an explicit WhatsApp deletion signal exist only in diagnostics' app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java
+          test -s V052_NOTES.md
+
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK 35
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Compile release
+        working-directory: wa-vault-v052-project
+        run: gradle :app:assembleRelease --stacktrace --console=plain
+
+      - name: Restore signing key
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p signing
+          gh run download 31869556369 -n WA-Vault-v0.4.0-signing-backup-fixed -D signing
+          test -s signing/WA-Vault-v0.4.0-signing-backup.jks
+          grep -q 'WAVault-v040-2026' signing/SIGNING_BACKUP_PASSWORD.txt
+
+      - name: Sign and verify v0.5.2
+        run: |
+          set -euo pipefail
+          UNSIGNED=wa-vault-v052-project/app/build/outputs/apk/release/app-release-unsigned.apk
+          mkdir -p wa-vault-v052-output
+          PASS='WAVault-v040-2026'
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign \
+            --ks signing/WA-Vault-v0.4.0-signing-backup.jks \
+            --ks-key-alias wavault \
+            --ks-pass pass:"$PASS" \
+            --key-pass pass:"$PASS" \
+            --out wa-vault-v052-output/WA-Vault-v0.5.2.apk "$UNSIGNED"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs wa-vault-v052-output/WA-Vault-v0.5.2.apk > wa-vault-v052-output/APK_SIGNATURE.txt
+          sha256sum wa-vault-v052-output/WA-Vault-v0.5.2.apk > wa-vault-v052-output/APK_SHA256.txt
+          cp wa-vault-v052-project/V052_NOTES.md wa-vault-v052-output/
+          cp wa-vault-v052-project/TEST_MATRIX.md wa-vault-v052-output/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WA-Vault-v0.5.2-release
+          path: |
+            wa-vault-v052-output/WA-Vault-v0.5.2.apk
+            wa-vault-v052-output/APK_SHA256.txt
+            wa-vault-v052-output/APK_SIGNATURE.txt
+            wa-vault-v052-output/V052_NOTES.md
+            wa-vault-v052-output/TEST_MATRIX.md
+          retention-days: 90
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WA-Vault-v0.5.2-source
+          path: wa-vault-v052-project
+          retention-days: 30
