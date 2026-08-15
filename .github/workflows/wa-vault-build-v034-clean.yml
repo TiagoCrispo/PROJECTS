@@ -1,0 +1,73 @@
+name: WA Vault v0.3.4 clean build
+
+on:
+  push:
+    branches: [wa-vault-build-v034]
+    paths:
+      - 'wa-vault-build-v034/**'
+      - '.github/workflows/wa-vault-build-v034-clean.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Reconstruct base and apply v0.3.4
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat wa-vault-build-v032-small/part-000.b64 wa-vault-build-v032-small/part-001.b64 wa-vault-build-v032-small/part-002.b64 wa-vault-build-v032-small/part-003.b64 wa-vault-build-v032-small/part-004.b64 wa-vault-build-v032-small/part-005.b64 wa-vault-build-v032-small/part-006.b64 wa-vault-build-v032-small/part-007a.b64 wa-vault-build-v032-small/part-007b.b64 wa-vault-build-v032-small/part-008a.b64 wa-vault-build-v032-small/part-008b.b64 > /tmp/project.b64
+          base64 -d /tmp/project.b64 > /tmp/project.tar.xz
+          echo 'a5933b2452ec76b37f552a8bb42bb14045de3c3d8b80d5aee27a9526981ac90b  /tmp/project.tar.xz' | sha256sum -c -
+          mkdir -p wa-vault-v034-project
+          tar -xJf /tmp/project.tar.xz -C wa-vault-v034-project
+
+          cat wa-vault-build-v034/patch-0.b64 wa-vault-build-v034/patch-1.b64 > /tmp/v034.patch.b64
+          base64 -d /tmp/v034.patch.b64 > /tmp/v034.patch.xz
+          echo 'a0dda46d8de11d2bf341a49a5b4b083fceb7e00701f84b03e4aa5dfef628b9a0  /tmp/v034.patch.xz' | sha256sum -c -
+          xz -dc /tmp/v034.patch.xz > /tmp/v034.patch
+          cd wa-vault-v034-project
+          patch -p4 -F3 --batch < /tmp/v034.patch || true
+          cd ..
+          python3 wa-vault-build-v034/postfix_v034.py
+          grep -q 'versionCode = 34' wa-vault-v034-project/app/build.gradle.kts
+          grep -q 'ingestGrowingDirectMedia' wa-vault-v034-project/app/src/main/java/com/fer/wavault/MediaArchiver.java
+
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK 35
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Build release
+        working-directory: wa-vault-v034-project
+        run: gradle :app:assembleRelease --stacktrace --console=plain
+
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          APK=wa-vault-v034-project/app/build/outputs/apk/release/app-release-unsigned.apk
+          test -s "$APK"
+          sha256sum "$APK" > wa-vault-v034-project/APK_SHA256.txt
+          cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" wa-vault-v034-project/apksigner.jar
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WA-Vault-v0.3.4-unsigned-clean
+          path: |
+            wa-vault-v034-project/app/build/outputs/apk/release/app-release-unsigned.apk
+            wa-vault-v034-project/apksigner.jar
+            wa-vault-v034-project/APK_SHA256.txt
