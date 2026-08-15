@@ -1,0 +1,46 @@
+name: Build Mendoza Meteo v4.2 APK
+
+on:
+  push:
+    branches: ["chatgpt/mendoza-meteo-v4-2"]
+    paths:
+      - ".github/workflows/build-mendoza-v42-apk.yml"
+      - "v42src.part*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct v4.2 source
+        run: |
+          cat v42src.part00 v42src.part01 v42src.part02 v42src.part03 v42src.part04 v42src.part05 v42src.part06 v42src.part07 | base64 -d > source.zip
+          test "$(sha256sum source.zip | cut -d' ' -f1)" = "5de6c41599bac5486885369e59e417e8b2f8c5b635770cf8e93ce7aa99cc5fbc"
+          unzip -t source.zip
+          unzip -q source.zip
+          mv mendoza_v42_src mendoza_v4_native
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: yes | sdkmanager "platforms;android-35" "build-tools;35.0.0" || true
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Verify weather API contract
+        run: curl -fS --retry 3 'https://api.open-meteo.com/v1/forecast?latitude=-32.8895&longitude=-68.8458&current=temperature_2m,weather_code&timezone=auto' | head -c 500
+      - name: Build APK
+        working-directory: mendoza_v4_native
+        run: gradle :app:assembleDebug --stacktrace
+      - name: Verify APK
+        working-directory: mendoza_v4_native
+        run: |
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose app/build/outputs/apk/debug/app-debug.apk
+          cp app/build/outputs/apk/debug/app-debug.apk ../MendozaMeteo_PRO_v4.2_Minimal.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MendozaMeteo-PRO-v4.2-Minimal-APK
+          path: MendozaMeteo_PRO_v4.2_Minimal.apk
