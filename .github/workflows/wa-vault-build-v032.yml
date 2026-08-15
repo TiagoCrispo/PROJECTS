@@ -37,7 +37,7 @@ jobs:
             wa-vault-build-v032-small/part-008a.b64 \
             wa-vault-build-v032-small/part-008b.b64 > /tmp/project.b64
           base64 -d /tmp/project.b64 > /tmp/project.tar.xz
-          echo '3de5ae483616191f012cdbfc57d2bdd94678133f94c96050f30cbb1a186815a2  /tmp/project.tar.xz' | sha256sum -c -
+          echo 'a5933b2452ec76b37f552a8bb42bb14045de3c3d8b80d5aee27a9526981ac90b  /tmp/project.tar.xz' | sha256sum -c -
           xz -t /tmp/project.tar.xz
           rm -rf wa-vault-build-v032-project
           mkdir -p wa-vault-build-v032-project
