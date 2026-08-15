@@ -1,0 +1,75 @@
+name: WA Vault v0.4.0 source prep
+
+on:
+  push:
+    branches: [wa-vault-build-v040]
+    paths:
+      - '.github/workflows/wa-vault-v040-source.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct v0.3.9 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat wa-vault-build-v032-small/part-000.b64 wa-vault-build-v032-small/part-001.b64 wa-vault-build-v032-small/part-002.b64 wa-vault-build-v032-small/part-003.b64 wa-vault-build-v032-small/part-004.b64 wa-vault-build-v032-small/part-005.b64 wa-vault-build-v032-small/part-006.b64 wa-vault-build-v032-small/part-007a.b64 wa-vault-build-v032-small/part-007b.b64 wa-vault-build-v032-small/part-008a.b64 wa-vault-build-v032-small/part-008b.b64 > /tmp/project.b64
+          base64 -d /tmp/project.b64 > /tmp/project.tar.xz
+          echo 'a5933b2452ec76b37f552a8bb42bb14045de3c3d8b80d5aee27a9526981ac90b  /tmp/project.tar.xz' | sha256sum -c -
+          mkdir -p wa-vault-v040-project
+          tar -xJf /tmp/project.tar.xz -C wa-vault-v040-project
+
+          cat wa-vault-build-v034/patch-0.b64 wa-vault-build-v034/patch-1.b64 > /tmp/v034.patch.b64
+          base64 -d /tmp/v034.patch.b64 > /tmp/v034.patch.xz
+          xz -dc /tmp/v034.patch.xz > /tmp/v034.patch
+          cd wa-vault-v040-project
+          patch -p4 -F3 --batch < /tmp/v034.patch || true
+          cd ..
+          python3 wa-vault-build-v034/postfix_v034.py
+          rm -f wa-vault-v040-project/app/src/main/java/com/fer/wavault/MainActivity.java.rej
+
+          base64 -d wa-vault-build-v035/patch.b64 > /tmp/v035.patch.xz
+          xz -dc /tmp/v035.patch.xz > /tmp/v035.patch
+          cd wa-vault-v040-project && patch -p1 --batch < /tmp/v035.patch && cd ..
+
+          base64 -d wa-vault-build-v036/patch.b64 > /tmp/v036.patch.xz
+          xz -dc /tmp/v036.patch.xz > /tmp/v036.patch
+          cd wa-vault-v040-project && patch -p1 --batch < /tmp/v036.patch && cd ..
+
+          cat wa-vault-build-v037/patch-0.b64 wa-vault-build-v037/patch-1.b64 > /tmp/v037.patch.b64
+          base64 -d /tmp/v037.patch.b64 > /tmp/v037.patch.xz
+          xz -dc /tmp/v037.patch.xz > /tmp/v037.patch
+          cd wa-vault-v040-project
+          patch -p1 --batch < /tmp/v037.patch || true
+          rm -f CHANGELOG.md.rej
+          cd ..
+
+          base64 -d wa-vault-build-v037/download-hotfix.b64 > /tmp/v037hotfix.xz
+          xz -dc /tmp/v037hotfix.xz > /tmp/v037hotfix.patch
+          cd wa-vault-v040-project && patch -p1 --batch < /tmp/v037hotfix.patch && cd ..
+
+          cat wa-vault-build-v038/patch-0.b64 wa-vault-build-v038/patch-1.b64 > /tmp/v038.patch.b64
+          base64 -d /tmp/v038.patch.b64 > /tmp/v038.patch.xz
+          xz -dc /tmp/v038.patch.xz > /tmp/v038.patch
+          cd wa-vault-v040-project && patch -p1 --batch < /tmp/v038.patch && cd ..
+
+          cat wa-vault-build-v039/patch-00.b64 wa-vault-build-v039/patch-01.b64 wa-vault-build-v039/patch-02.b64 wa-vault-build-v039/patch-03.b64 > /tmp/v039.patch.b64
+          base64 -d /tmp/v039.patch.b64 > /tmp/v039.patch.xz
+          xz -dc /tmp/v039.patch.xz > /tmp/v039.patch
+          cd wa-vault-v040-project
+          patch -p1 --batch < /tmp/v039.patch || true
+          find app -name '*.rej' -print -quit | grep -q . && { find app -name '*.rej' -print; exit 1; } || true
+          rm -f BUILD_INFO.md.rej CHANGELOG.md.rej README.md.rej V039_NOTES.md.rej
+          grep -q 'versionName = "0.3.9"' app/build.gradle.kts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WA-Vault-v0.3.9-source-for-v040
+          path: wa-vault-v040-project
+          retention-days: 1
