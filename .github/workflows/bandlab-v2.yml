@@ -95,7 +95,7 @@ jobs:
         run: |
           set -euo pipefail
           echo no | avdmanager create avd -n bandlab_ci -k "system-images;android-30;default;x86_64" --device "pixel_4" --force
-          nohup emulator -avd bandlab_ci -no-window -noaudio -no-boot-anim -gpu swiftshader_indirect -accel off -no-snapshot -no-metrics -memory 2048 -cores 2 > /tmp/bandlab-emulator.log 2>&1 &
+          nohup "$ANDROID_HOME/emulator/emulator" -avd bandlab_ci -no-window -noaudio -no-boot-anim -gpu swiftshader_indirect -accel off -no-snapshot -no-metrics -memory 2048 -cores 2 > /tmp/bandlab-emulator.log 2>&1 &
           if ! timeout 180s adb wait-for-device; then
             echo 'ADB device did not appear'; cat /tmp/bandlab-emulator.log; exit 1
           fi
