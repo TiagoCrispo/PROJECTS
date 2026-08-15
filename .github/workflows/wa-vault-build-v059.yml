@@ -1,0 +1,105 @@
+name: WA Vault v0.5.9 confirmed-only messages
+
+on:
+  push:
+    branches: [wa-vault-build-v059]
+    paths:
+      - 'wa-vault-build-v059/**'
+      - '.github/workflows/wa-vault-build-v059.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Restore verified v0.5.8 source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir wa-vault-v059-project
+          gh run download 31889648586 -n WA-Vault-v0.5.8-source -D wa-vault-v059-project
+          grep -q 'versionCode = 58' wa-vault-v059-project/app/build.gradle.kts
+          grep -q 'versionName = "0.5.8"' wa-vault-v059-project/app/build.gradle.kts
+
+      - name: Apply verified v0.5.9 patch
+        run: |
+          set -euo pipefail
+          base64 -d wa-vault-build-v059/v059.patch.gz.b64 | gzip -dc > /tmp/v059.patch
+          echo '810b905ec06f3f54e0eff07185b95c861803ae2aba5b8c4bedf5533284998791  /tmp/v059.patch' | sha256sum -c -
+          cd wa-vault-v059-project
+          patch -p1 --batch < /tmp/v059.patch
+          find . -name '*.rej' -print -quit | grep -q . && { find . -name '*.rej' -print; exit 1; } || true
+          grep -q 'versionCode = 59' app/build.gradle.kts
+          grep -q 'versionName = "0.5.9"' app/build.gradle.kts
+          grep -q 'listConfirmedDeletedMessages' app/src/main/java/com/fer/wavault/VaultDb.java
+          grep -q 'MENSAJE BORRADO' app/src/main/java/com/fer/wavault/MainActivity.java
+          ! grep -q 'BORRADO PROBABLE' app/src/main/java/com/fer/wavault/MainActivity.java
+          test -s V059_NOTES.md
+
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK 35
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Compile release
+        working-directory: wa-vault-v059-project
+        run: gradle :app:assembleRelease --stacktrace --console=plain
+
+      - name: Restore signing key
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p signing
+          gh run download 31869556369 -n WA-Vault-v0.4.0-signing-backup-fixed -D signing
+          test -s signing/WA-Vault-v0.4.0-signing-backup.jks
+
+      - name: Sign and verify v0.5.9
+        run: |
+          set -euo pipefail
+          UNSIGNED=wa-vault-v059-project/app/build/outputs/apk/release/app-release-unsigned.apk
+          mkdir -p wa-vault-v059-output
+          PASS='WAVault-v040-2026'
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign \
+            --ks signing/WA-Vault-v0.4.0-signing-backup.jks \
+            --ks-key-alias wavault \
+            --ks-pass pass:"$PASS" \
+            --key-pass pass:"$PASS" \
+            --out wa-vault-v059-output/WA-Vault-v0.5.9.apk "$UNSIGNED"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs wa-vault-v059-output/WA-Vault-v0.5.9.apk > wa-vault-v059-output/APK_SIGNATURE.txt
+          sha256sum wa-vault-v059-output/WA-Vault-v0.5.9.apk > wa-vault-v059-output/APK_SHA256.txt
+          cp wa-vault-v059-project/V059_NOTES.md wa-vault-v059-output/
+          cp wa-vault-v059-project/TEST_MATRIX.md wa-vault-v059-output/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WA-Vault-v0.5.9-release
+          path: |
+            wa-vault-v059-output/WA-Vault-v0.5.9.apk
+            wa-vault-v059-output/APK_SHA256.txt
+            wa-vault-v059-output/APK_SIGNATURE.txt
+            wa-vault-v059-output/V059_NOTES.md
+            wa-vault-v059-output/TEST_MATRIX.md
+          retention-days: 90
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WA-Vault-v0.5.9-source
+          path: wa-vault-v059-project
+          retention-days: 30
