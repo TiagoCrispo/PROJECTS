@@ -18,8 +18,9 @@ jobs:
           test "$(sha256sum source.zip | cut -d' ' -f1)" = "c40d24e34be38891a04a1d29aaacae8ec376da48693491edd7e8ccbbb19f0996"
           unzip -t source.zip
           unzip -q source.zip
-          cp patches/MainActivity.java mendoza_v4_native/app/src/main/java/com/mendozameteo/pro/MainActivity.java
           cp patches/gradle.properties mendoza_v4_native/gradle.properties
+          grep -n "public static String weatherText" mendoza_v4_native/app/src/main/java/com/mendozameteo/pro/MainActivity.java
+          grep -n "refreshWithSavedLocation" mendoza_v4_native/app/src/main/java/com/mendozameteo/pro/MainActivity.java
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -59,4 +60,4 @@ jobs:
           name: MendozaMeteo-PRO-v4.0-Native-APK
           path: MendozaMeteo_PRO_v4.0_Native.apk
 
-# build-trigger: androidx-fix-v1
+# build-trigger: source-mainactivity-v1
