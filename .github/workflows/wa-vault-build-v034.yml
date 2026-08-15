@@ -56,7 +56,7 @@ jobs:
           xz -t /tmp/v034.patch.xz
           xz -dc /tmp/v034.patch.xz > /tmp/v034.patch
           cd wa-vault-v034-project
-          patch -p3 --batch < /tmp/v034.patch
+          patch -p4 --batch < /tmp/v034.patch
           grep -q 'versionCode = 34' app/build.gradle.kts
           grep -q 'versionName = "0.3.4"' app/build.gradle.kts
           grep -q 'class VaultUiNotifier' app/src/main/java/com/fer/wavault/VaultUiNotifier.java
