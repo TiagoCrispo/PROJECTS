@@ -1,6 +1,5 @@
 name: WA Vault v0.3.2 build
 
-# Rebuild after all verified payload chunks were uploaded.
 on:
   push:
     branches: [wa-vault-build-v032]
@@ -9,12 +8,14 @@ on:
       - '.github/workflows/wa-vault-build-v032.yml'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -51,21 +52,49 @@ jobs:
         run: python3 wa-vault-build-v032-small/compile_fix.py wa-vault-build-v032-project
 
       - uses: android-actions/setup-android@v3
-
       - name: Install Android SDK 35
         run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-35" "build-tools;35.0.0"
-
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
 
-      - name: Build debug APK
+      - name: Build debug APK and capture compiler log
+        id: android_build
         working-directory: wa-vault-build-v032-project
-        run: gradle :app:assembleDebug --stacktrace --console=plain
+        shell: bash
+        run: |
+          set +e
+          set -o pipefail
+          gradle :app:assembleDebug --stacktrace --console=plain 2>&1 | tee /tmp/wa-vault-v032-gradle.log
+          rc=${PIPESTATUS[0]}
+          echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Persist compiler failure log
+        if: steps.android_build.outputs.exit_code != '0'
+        run: |
+          mkdir -p ci-logs
+          {
+            echo "WA Vault v0.3.2 Gradle failure"
+            echo "run: $GITHUB_RUN_ID"
+            echo "commit: $GITHUB_SHA"
+            echo
+            tail -n 1200 /tmp/wa-vault-v032-gradle.log
+          } > ci-logs/wa-vault-v032-gradle-failure.log
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ci-logs/wa-vault-v032-gradle-failure.log
+          git commit -m "Record WA Vault v0.3.2 compiler failure" || true
+          git push origin HEAD:wa-vault-build-v032
+
+      - name: Fail after preserving compiler log
+        if: steps.android_build.outputs.exit_code != '0'
+        run: exit 1
 
       - name: Verify APK
+        if: steps.android_build.outputs.exit_code == '0'
         shell: bash
         run: |
           APK=wa-vault-build-v032-project/app/build/outputs/apk/debug/app-debug.apk
@@ -73,6 +102,7 @@ jobs:
           sha256sum "$APK" | tee wa-vault-build-v032-project/APK_SHA256.txt
 
       - uses: actions/upload-artifact@v4
+        if: steps.android_build.outputs.exit_code == '0'
         with:
           name: WA-Vault-v0.3.2-debug
           path: |
