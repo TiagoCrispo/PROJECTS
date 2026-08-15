@@ -1,0 +1,24 @@
+name: Extract Mendoza Meteo v4 Source
+
+on:
+  push:
+    branches: ["chatgpt/mendoza-meteo-v4-1"]
+    paths:
+      - ".github/workflows/extract-mendoza-v4-source.yml"
+  workflow_dispatch:
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct source
+        run: |
+          cat mendoza_v4_native_source.part1 mendoza_v4_native_source.part2 mendoza_v4_native_source.part3 mendoza_v4_native_source.part4a mendoza_v4_native_source.part4b | base64 -d > source.zip
+          test "$(sha256sum source.zip | cut -d' ' -f1)" = "c40d24e34be38891a04a1d29aaacae8ec376da48693491edd7e8ccbbb19f0996"
+          unzip -t source.zip
+          unzip -q source.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MendozaMeteo-v4-native-source
+          path: mendoza_v4_native
