@@ -5,6 +5,10 @@ on:
     branches: [ bandlab-v2 ]
   workflow_dispatch:
 
+concurrency:
+  group: bandlab-v2-sequential
+  cancel-in-progress: true
+
 jobs:
   verify:
     runs-on: ubuntu-24.04
@@ -27,19 +31,18 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           p=Path('work/app/build.gradle.kts')
-          s=p.read_text()
-          s=s.replace('builtins { named("java") { option("lite") } }', 'builtins { maybeCreate("java").apply { option("lite") } }')
+          s=p.read_text().replace('builtins { named("java") { option("lite") } }', 'builtins { maybeCreate("java").apply { option("lite") } }')
           p.write_text(s)
 
           p=Path('work/app/src/main/java/com/fer/bandlab/ui/BandLabApp.kt')
           s=p.read_text()
-          if 'import androidx.compose.material3.NavigationBarItem' not in s:
-              s=s.replace('import androidx.compose.material3.NavigationBar\n', 'import androidx.compose.material3.NavigationBar\nimport androidx.compose.material3.NavigationBarItem\n')
+          if 'import androidx.compose.foundation.layout.RowScope' not in s:
+              s=s.replace('import androidx.compose.foundation.layout.WindowInsets\n', 'import androidx.compose.foundation.layout.WindowInsets\nimport androidx.compose.foundation.layout.RowScope\n')
+          s=s.replace('private fun NavItem(current: AppTab, target: AppTab, icon: ImageVector, onClick: (AppTab) -> Unit) {', 'private fun RowScope.NavItem(current: AppTab, target: AppTab, icon: ImageVector, onClick: (AppTab) -> Unit) {')
           p.write_text(s)
 
           p=Path('work/app/src/main/java/com/fer/bandlab/ui/screens/HealthScreen.kt')
-          s=p.read_text().replace('import androidx.compose.material.icons.rounded.Walk\n','')
-          p.write_text(s)
+          p.write_text(p.read_text().replace('import androidx.compose.material.icons.rounded.Walk\n',''))
           PY
 
       - uses: actions/setup-java@v5
