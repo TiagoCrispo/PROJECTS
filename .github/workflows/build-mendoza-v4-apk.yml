@@ -1,0 +1,49 @@
+name: Build Mendoza Meteo v4 APK
+
+on:
+  push:
+    branches: ["chatgpt/mendoza-meteo-apk-build"]
+    paths:
+      - ".github/workflows/build-mendoza-v4-apk.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct source
+        run: |
+          test "$(wc -c < mendoza_v4_native_source.part1)" -eq 9530
+          test "$(wc -c < mendoza_v4_native_source.part2)" -eq 9530
+          test "$(wc -c < mendoza_v4_native_source.part3)" -eq 9530
+          test "$(wc -c < mendoza_v4_native_source.part4)" -eq 9530
+          cat mendoza_v4_native_source.part1 mendoza_v4_native_source.part2 mendoza_v4_native_source.part3 mendoza_v4_native_source.part4 | base64 -d > source.zip
+          test "$(wc -c < source.zip)" -eq 28588
+          unzip -t source.zip
+          unzip -q source.zip
+          test -f mendoza_v4_native/app/src/main/java/com/mendozameteo/pro/MainActivity.java
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: yes | sdkmanager "platforms;android-35" "build-tools;35.0.0" || true
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Verify weather endpoint
+        run: curl -fS --retry 3 'https://api.open-meteo.com/v1/forecast?latitude=-32.8895&longitude=-68.8458&current=temperature_2m,weather_code&timezone=auto' | head -c 500
+      - name: Build debug APK
+        working-directory: mendoza_v4_native
+        run: gradle :app:assembleDebug --stacktrace
+      - name: Verify APK
+        working-directory: mendoza_v4_native
+        run: |
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose app/build/outputs/apk/debug/app-debug.apk
+          cp app/build/outputs/apk/debug/app-debug.apk ../MendozaMeteo_PRO_v4.0_Native.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MendozaMeteo-PRO-v4.0-Native-APK
+          path: MendozaMeteo_PRO_v4.0_Native.apk
