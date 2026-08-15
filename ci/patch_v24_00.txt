@@ -1,0 +1,307 @@
+diff -ruN '--exclude=.kotlin' '--exclude=build' '--exclude=dist' bandlab_v23_base/app/build.gradle.kts bandlab_v24/app/build.gradle.kts
+--- bandlab_v23_base/app/build.gradle.kts	2026-08-15 21:30:28.000000000 +0000
++++ bandlab_v24/app/build.gradle.kts	2026-08-15 22:03:54.402185514 +0000
+@@ -45,6 +45,12 @@
+             versionName = "2.3.0"
+             buildConfigField("int", "FEATURE_STAGE", "23")
+         }
++        create("v24") {
++            dimension = "stage"
++            versionCode = 240
++            versionName = "2.4.0"
++            buildConfigField("int", "FEATURE_STAGE", "24")
++        }
+     }
+ 
+     buildTypes {
+diff -ruN '--exclude=.kotlin' '--exclude=build' '--exclude=dist' bandlab_v23_base/app/src/main/java/com/fer/bandlab/BandLabViewModel.kt bandlab_v24/app/src/main/java/com/fer/bandlab/BandLabViewModel.kt
+--- bandlab_v23_base/app/src/main/java/com/fer/bandlab/BandLabViewModel.kt	2026-08-15 21:30:28.000000000 +0000
++++ bandlab_v24/app/src/main/java/com/fer/bandlab/BandLabViewModel.kt	2026-08-15 22:10:29.344507132 +0000
+@@ -10,6 +10,7 @@
+ import com.fer.bandlab.data.UserPrefs
+ import com.fer.bandlab.device.BandSyncStore
+ import com.fer.bandlab.device.DiagnosticsExporter
++import com.fer.bandlab.device.DeviceDiagnostics
+ import com.fer.bandlab.device.PhotoProcessor
+ import com.fer.bandlab.device.WatchfaceTransport
+ import com.fer.bandlab.device.XiaomiBandManager
+@@ -24,12 +25,17 @@
+ import com.fer.bandlab.model.DailyHealthTrend
+ import com.fer.bandlab.model.ReadinessInfo
+ import com.fer.bandlab.model.TodayDashboard
++import com.fer.bandlab.model.TodayCardKind
++import com.fer.bandlab.model.DiagnosticReport
++import com.fer.bandlab.model.WorkoutGoal
+ import com.fer.bandlab.health.ReadinessEngine
+ import com.fer.bandlab.health.TodayDashboardEngine
+ import com.fer.bandlab.training.WorkoutService
++import com.fer.bandlab.training.WorkoutExporter
+ import com.fer.bandlab.training.StrengthStore
+ import com.fer.bandlab.model.StrengthExerciseStats
+ import com.fer.bandlab.model.StrengthUiState
++import com.fer.bandlab.model.StrengthSetType
+ import kotlinx.coroutines.delay
+ import kotlinx.coroutines.flow.MutableStateFlow
+ import kotlinx.coroutines.flow.StateFlow
+@@ -65,12 +71,24 @@
+     val watchfaces: StateFlow<WatchfaceUiState> = _watchfaces.asStateFlow()
+     private val _snackbar = MutableStateFlow<String?>(null)
+     val snackbar: StateFlow<String?> = _snackbar.asStateFlow()
+-    private val _strength = MutableStateFlow(StrengthUiState(restPresetSeconds = strengthStore.getRestPresetSeconds()))
++    private val _strength = MutableStateFlow(StrengthUiState(restPresetSeconds = strengthStore.getRestPresetSeconds(), selectedRoutineId = strengthStore.getRoutineId()))
+     val strength: StateFlow<StrengthUiState> = _strength.asStateFlow()
+     private val _strengthStats = MutableStateFlow(strengthStore.stats(_strength.value.selectedExerciseId))
+     val strengthStats: StateFlow<StrengthExerciseStats> = _strengthStats.asStateFlow()
+     private val _splitMeters = MutableStateFlow(prefs.getSplitMeters())
+     val splitMeters: StateFlow<Int> = _splitMeters.asStateFlow()
++    private val _diagnostics = MutableStateFlow(DiagnosticReport())
++    val diagnostics: StateFlow<DiagnosticReport> = _diagnostics.asStateFlow()
++    private val _autoPauseEnabled = MutableStateFlow(prefs.isAutoPauseEnabled())
++    val autoPauseEnabled: StateFlow<Boolean> = _autoPauseEnabled.asStateFlow()
++    private val _workoutGoal = MutableStateFlow(prefs.getWorkoutGoal())
++    val workoutGoal: StateFlow<WorkoutGoal> = _workoutGoal.asStateFlow()
++    private val _dashboardOrder = MutableStateFlow(prefs.getDashboardOrder())
++    val dashboardOrder: StateFlow<List<TodayCardKind>> = _dashboardOrder.asStateFlow()
++    private val _dashboardHidden = MutableStateFlow(prefs.getHiddenDashboardCards())
++    val dashboardHidden: StateFlow<Set<TodayCardKind>> = _dashboardHidden.asStateFlow()
++    private val _dashboardPinned = MutableStateFlow(prefs.getPinnedDashboardCards())
++    val dashboardPinned: StateFlow<Set<TodayCardKind>> = _dashboardPinned.asStateFlow()
+     private var restTimerJob: kotlinx.coroutines.Job? = null
+ 
+     init {
+@@ -103,7 +121,8 @@
+                 spo2Percent = band.spo2Percent,
+                 sleepMinutes = band.sleepMinutes,
+                 weightKg = weight ?: hc.weightKg,
+-                source = when { bandHas && hc.source == "Health Connect" -> "Band + Health Connect (sin duplicar)"; bandHas -> "Band directa"; else -> hc.source }
++                source = when { bandHas && hc.source.startsWith("Health Connect") -> "Band directa + HC reconciliado"; bandHas -> "Band directa"; else -> hc.source },
++                healthConnectDedupedRecords = hc.healthConnectDedupedRecords,
+             )
+             val trend = bandStore.readDailyTrends(7).map { it.copy(weightKg = prefs.weightForDay(it.dateIso)) }
+             _trends.value = trend
+@@ -115,14 +134,31 @@
+ 
+     fun addWater(amountMl: Int = 250) { prefs.addWaterMl(amountMl); refreshTodayDashboard() }
+     private fun refreshTodayDashboard() {
+-        _todayDashboard.value = TodayDashboardEngine.build(
++        val base = TodayDashboardEngine.build(
+             health = _health.value,
+             readiness = _readiness.value,
+             waterMl = prefs.getWaterTodayMl(),
+             hasStrengthSetToday = strengthStore.hasSetToday(),
+             latestWorkout = prefs.loadWorkouts().firstOrNull(),
+         )
++        val hidden = prefs.getHiddenDashboardCards()
++        val pinned = prefs.getPinnedDashboardCards()
++        val order = prefs.getDashboardOrder().withIndex().associate { it.value to it.index }
++        _todayDashboard.value = TodayDashboard(base.cards
++            .filterNot { it.kind in hidden }
++            .map { it.copy(pinned = it.kind in pinned) }
++            .sortedWith(compareByDescending<com.fer.bandlab.model.TodayCard> { it.pinned }.thenBy { order[it.kind] ?: 999 }.thenByDescending { it.priority }))
++        _dashboardOrder.value = prefs.getDashboardOrder(); _dashboardHidden.value = hidden; _dashboardPinned.value = pinned
++    }
++
++    fun toggleDashboardPinned(kind: TodayCardKind) { prefs.toggleDashboardPinned(kind); refreshTodayDashboard() }
++    fun setDashboardHidden(kind: TodayCardKind, hidden: Boolean) { prefs.setDashboardCardHidden(kind, hidden); refreshTodayDashboard() }
++    fun moveDashboardCard(kind: TodayCardKind, direction: Int) {
++        val order = prefs.getDashboardOrder().toMutableList(); val i = order.indexOf(kind); val j = (i + direction).coerceIn(0, order.lastIndex)
++        if (i >= 0 && i != j) { val item = order.removeAt(i); order.add(j, item); prefs.setDashboardOrder(order); refreshTodayDashboard() }
+     }
++    fun setAutoPauseEnabled(enabled: Boolean) { prefs.setAutoPauseEnabled(enabled); _autoPauseEnabled.value = enabled }
++    fun setWorkoutGoal(goal: WorkoutGoal) { prefs.setWorkoutGoal(goal); _workoutGoal.value = prefs.getWorkoutGoal() }
+ 
+     fun setWeight(value: Double?) { prefs.setWeightKg(value); loadHealth(); _snackbar.value = "Peso actualizado" }
+     fun startScan() = bandManager.startScan()
+@@ -132,15 +168,14 @@
+     fun syncBand() { viewModelScope.launch { runCatching { bandManager.syncNow() }.onSuccess { loadHealth(); _snackbar.value = "Sincronización Xiaomi completada ($it archivos)" }.onFailure { _snackbar.value = it.message ?: "Error de sincronización" } } }
+     fun requestBattery() = bandManager.requestBattery()
+ 
+-    fun exportDiagnostics() {
+-        val file = DiagnosticsExporter.create(app, bandManager)
++    fun refreshDiagnostics() { viewModelScope.launch { _diagnostics.value = DeviceDiagnostics.collect(app, bandManager, healthRepository) } }
++    fun exportDiagnostics() { viewModelScope.launch {
++        val report = DeviceDiagnostics.collect(app, bandManager, healthRepository); _diagnostics.value = report
++        val file = DiagnosticsExporter.create(app, bandManager, report)
+         val uri = FileProvider.getUriForFile(app, "${app.packageName}.files", file)
+-        val intent = Intent(Intent.ACTION_SEND).apply {
+-            type = "application/zip"; putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+-        }
+-        runCatching { app.startActivity(Intent.createChooser(intent, "Compartir diagnóstico BandLab").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+-            .onFailure { _snackbar.value = "ZIP creado: ${file.absolutePath}" }
+-    }
++        val intent = Intent(Intent.ACTION_SEND).apply { type = "application/zip"; putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK) }
++        runCatching { app.startActivity(Intent.createChooser(intent, "Compartir diagnóstico BandLab").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.onFailure { _snackbar.value = "ZIP creado: ${file.absolutePath}" }
++    } }
+ 
+ 
+     private fun mapWatchfaces(faces: List<XiaomiBandManager.WatchfaceInfo>): List<WatchfaceUiItem> =
+@@ -248,8 +283,14 @@
+     }
+     fun strengthCatalog() = strengthStore.catalog
+     fun strengthSubstitutes() = strengthStore.substitutes(_strength.value.selectedExerciseId)
+-    fun addStrengthSet(weightKg: Double, reps: Int, restSeconds: Int = _strength.value.restPresetSeconds) {
+-        runCatching { strengthStore.addSet(_strength.value.selectedExerciseId, weightKg, reps) }
++    fun strengthRoutines() = strengthStore.routines
++    fun strengthRoutineExercises() = strengthStore.routine(_strength.value.selectedRoutineId).exerciseIds.map(strengthStore::exercise)
++    fun setStrengthRoutine(id: String) { strengthStore.setRoutineId(id); _strength.value = _strength.value.copy(selectedRoutineId = strengthStore.getRoutineId()) }
++    fun toggleStrengthFavorite() { strengthStore.toggleFavorite(_strength.value.selectedExerciseId); _strengthStats.value = strengthStore.stats(_strength.value.selectedExerciseId) }
++    fun strengthMuscleVolume() = strengthStore.muscleVolumeLast7Days()
++    fun lastStrengthSessionTemplate() = strengthStore.lastSessionTemplate()
++    fun addStrengthSet(weightKg: Double, reps: Int, rpe: Double? = null, rir: Int? = null, setType: StrengthSetType = StrengthSetType.NORMAL, supersetTag: String? = null, restSeconds: Int = _strength.value.restPresetSeconds) {
++        runCatching { strengthStore.addSet(_strength.value.selectedExerciseId, weightKg, reps, rpe, rir, setType, supersetTag) }
+             .onSuccess {
+                 _strengthStats.value = strengthStore.stats(_strength.value.selectedExerciseId)
+                 _strength.value = _strength.value.copy(lastMessage = "Serie guardada · ${weightKg} kg × $reps")
+@@ -294,6 +335,7 @@
+     fun startWorkout(type: WorkoutType) { ContextCompat.startForegroundService(app, WorkoutService.startIntent(app, type)) }
+     fun pauseWorkout() { app.startService(WorkoutService.actionIntent(app, WorkoutService.ACTION_PAUSE)) }
+     fun resumeWorkout() { app.startService(WorkoutService.actionIntent(app, WorkoutService.ACTION_RESUME)) }
++    fun addManualLap() { app.startService(WorkoutService.actionIntent(app, WorkoutService.ACTION_LAP)) }
+     fun stopWorkout() {
+         app.startService(WorkoutService.actionIntent(app, WorkoutService.ACTION_STOP))
+         viewModelScope.launch {
+@@ -303,6 +345,12 @@
+             }
+         }
+     }
++    fun exportWorkout(workout: WorkoutSummary) {
++        val files = WorkoutExporter.export(app, workout)
++        val uris = arrayListOf(files.gpx, files.tcx, files.csv).map { FileProvider.getUriForFile(app, "${app.packageName}.files", it) }.let(::ArrayList)
++        val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply { type = "*/*"; putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK) }
++        runCatching { app.startActivity(Intent.createChooser(intent, "Exportar entrenamiento GPX / TCX / CSV").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.onFailure { _snackbar.value = "Archivos creados en caché de BandLab" }
++    }
+     fun refreshHistory() { _workouts.value = prefs.loadWorkouts(); refreshTodayDashboard() }
+     fun clearHistory() { prefs.clearWorkouts(); refreshHistory(); _snackbar.value = "Historial eliminado" }
+     override fun onCleared() { bandManager.close(); super.onCleared() }
+diff -ruN '--exclude=.kotlin' '--exclude=build' '--exclude=dist' bandlab_v23_base/app/src/main/java/com/fer/bandlab/data/UserPrefs.kt bandlab_v24/app/src/main/java/com/fer/bandlab/data/UserPrefs.kt
+--- bandlab_v23_base/app/src/main/java/com/fer/bandlab/data/UserPrefs.kt	2026-08-15 08:29:56.000000000 +0000
++++ bandlab_v24/app/src/main/java/com/fer/bandlab/data/UserPrefs.kt	2026-08-15 22:05:04.031948490 +0000
+@@ -1,119 +1,123 @@
+ package com.fer.bandlab.data
+ 
+ import android.content.Context
++import com.fer.bandlab.model.ManualLapRecord
++import com.fer.bandlab.model.RoutePoint
++import com.fer.bandlab.model.TodayCardKind
++import com.fer.bandlab.model.WorkoutGoal
++import com.fer.bandlab.model.WorkoutGoalType
+ import com.fer.bandlab.model.WorkoutSummary
+ import com.fer.bandlab.model.WorkoutType
+ import com.fer.bandlab.model.SplitRecord
+ import org.json.JSONArray
+ import org.json.JSONObject
++import java.io.File
+ 
+-class UserPrefs(context: Context) {
++class UserPrefs(private val context: Context) {
+     private val prefs = context.getSharedPreferences("bandlab_prefs", Context.MODE_PRIVATE)
++    private val routeDir = File(context.filesDir, "workout_routes").apply { mkdirs() }
+ 
+-    fun getWeightKg(): Double? {
+-        val raw = prefs.getString("weight_kg", null) ?: return null
+-        return raw.toDoubleOrNull()
+-    }
+-
++    fun getWeightKg(): Double? = prefs.getString("weight_kg", null)?.toDoubleOrNull()
+     fun setWeightKg(value: Double?) {
+         prefs.edit().apply {
+             if (value == null) remove("weight_kg") else {
+                 putString("weight_kg", value.toString())
+                 val day = java.time.LocalDate.now().toString()
+                 val root = runCatching { JSONObject(prefs.getString("weight_history", "{}")) }.getOrElse { JSONObject() }
+-                root.put(day, value)
+-                putString("weight_history", root.toString())
++                root.put(day, value); putString("weight_history", root.toString())
+             }
+         }.apply()
+     }
+-
+     fun weightForDay(dayIso: String): Double? = runCatching { JSONObject(prefs.getString("weight_history", "{}")).optDouble(dayIso).takeIf { !it.isNaN() && it > 0 } }.getOrNull()
+     fun weightHistory(days: Int = 30): List<Pair<String, Double>> {
+         val root = runCatching { JSONObject(prefs.getString("weight_history", "{}")) }.getOrElse { JSONObject() }
+         return (days - 1 downTo 0).mapNotNull { back -> val d = java.time.LocalDate.now().minusDays(back.toLong()).toString(); root.optDouble(d).takeIf { !it.isNaN() && it > 0 }?.let { d to it } }
+     }
+ 
+-    fun getWaterTodayMl(): Int {
+-        val day = java.time.LocalDate.now().toString()
+-        return if (prefs.getString("water_day", null) == day) prefs.getInt("water_ml", 0) else 0
+-    }
+-    fun addWaterMl(amount: Int): Int {
+-        val day = java.time.LocalDate.now().toString(); val next = (getWaterTodayMl() + amount).coerceIn(0, 10000)
+-        prefs.edit().putString("water_day", day).putInt("water_ml", next).apply(); return next
+-    }
+-
++    fun getWaterTodayMl(): Int { val day = java.time.LocalDate.now().toString(); return if (prefs.getString("water_day", null) == day) prefs.getInt("water_ml", 0) else 0 }
++    fun addWaterMl(amount: Int): Int { val day = java.time.LocalDate.now().toString(); val next = (getWaterTodayMl() + amount).coerceIn(0, 10000); prefs.edit().putString("water_day", day).putInt("water_ml", next).apply(); return next }
+ 
+     fun getSelectedBandAddress(): String? = prefs.getString("band_address", null)
+     fun getSelectedBandName(): String? = prefs.getString("band_name", null)
+-
+-    fun setSelectedBand(name: String, address: String) {
+-        prefs.edit()
+-            .putString("band_name", name)
+-            .putString("band_address", address)
+-            .apply()
+-    }
++    fun setSelectedBand(name: String, address: String) { prefs.edit().putString("band_name", name).putString("band_address", address).apply() }
+ 
+     fun getSplitMeters(): Int = prefs.getInt("split_meters", 1000).takeIf { it == 500 || it == 1000 } ?: 1000
+     fun setSplitMeters(value: Int) { prefs.edit().putInt("split_meters", if (value == 500) 500 else 1000).apply() }
++    fun isAutoPauseEnabled(): Boolean = prefs.getBoolean("auto_pause_enabled", true)
++    fun setAutoPauseEnabled(enabled: Boolean) { prefs.edit().putBoolean("auto_pause_enabled", enabled).apply() }
++
++    fun getWorkoutGoal(): WorkoutGoal {
++        val type = runCatching { WorkoutGoalType.valueOf(prefs.getString("goal_type", "NONE") ?: "NONE") }.getOrDefault(WorkoutGoalType.NONE)
++        return WorkoutGoal(type, prefs.getInt("goal_distance_m", 5000).coerceIn(500, 100_000), prefs.getInt("goal_time_min", 30).coerceIn(5, 600))
++    }
++    fun setWorkoutGoal(goal: WorkoutGoal) { prefs.edit().putString("goal_type", goal.type.name).putInt("goal_distance_m", goal.distanceMeters.coerceIn(500,100_000)).putInt("goal_time_min", goal.timeMinutes.coerceIn(5,600)).apply() }
+ 
+     fun getNormalFaceLabel(): String = prefs.getString("normal_face_label", "Esfera normal") ?: "Esfera normal"
++    fun setNormalFaceLabel(label: String) { prefs.edit().putString("normal_face_label", label).apply() }
+ 
+-    fun setNormalFaceLabel(label: String) {
+-        prefs.edit().putString("normal_face_label", label).apply()
+-    }
++    private fun routeFile(id: String) = File(routeDir, "$id.json")
++    private fun saveRoute(w: WorkoutSummary) {
++        if (w.route.isEmpty()) return
++        val arr = JSONArray()
++        w.route.forEach { p -> arr.put(JSONObject().apply {
++            put("lat", p.latitude); put("lon", p.longitude); put("alt", p.altitudeMeters ?: JSONObject.NULL)
++            put("acc", p.accuracyMeters ?: JSONObject.NULL); put("e", p.elapsedMs); put("s", p.speedMps); put("start", p.segmentStart)
++        }) }
++        routeFile(w.id).writeText(arr.toString())
++    }
++    private fun loadRoute(id: String): List<RoutePoint> = runCatching {
++        val file = routeFile(id); if (!file.exists()) return emptyList()
++        val arr = JSONArray(file.readText())
++        buildList { for (i in 0 until arr.length()) { val x=arr.getJSONObject(i); add(RoutePoint(
++            x.getDouble("lat"), x.getDouble("lon"), if(x.isNull("alt")) null else x.getDouble("alt"),
++            if(x.isNull("acc")) null else x.getDouble("acc").toFloat(), x.optLong("e"), x.optDouble("s"), x.optBoolean("start", i==0)
++        )) } }
++    }.getOrDefault(emptyList())
+ 
+     fun saveWorkout(summary: WorkoutSummary) {
+-        val current = JSONArray(prefs.getString("workouts", "[]"))
+-        val next = JSONArray()
+-        next.put(toJson(summary))
+-        for (i in 0 until minOf(current.length(), 199)) next.put(current.getJSONObject(i))
++        saveRoute(summary)
++        val current = JSONArray(prefs.getString("workouts", "[]")); val next = JSONArray(); next.put(toJson(summary))
++        for (i in 0 until minOf(current.length(), 99)) next.put(current.getJSONObject(i))
+         prefs.edit().putString("workouts", next.toString()).apply()
+     }
+-
+     fun loadWorkouts(): List<WorkoutSummary> {
+         val array = JSONArray(prefs.getString("workouts", "[]"))
+-        return buildList {
+-            for (i in 0 until array.length()) {
+-                runCatching { fromJson(array.getJSONObject(i)) }.getOrNull()?.let(::add)
+-            }
+-        }
+-    }
+-
+-    fun clearWorkouts() {
+-        prefs.edit().remove("workouts").apply()
++        return buildList { for (i in 0 until array.length()) runCatching { fromJson(array.getJSONObject(i)) }.getOrNull()?.let(::add) }
+     }
