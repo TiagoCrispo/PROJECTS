@@ -1,0 +1,38 @@
+from pathlib import Path
+import sys
+root=Path(sys.argv[1] if len(sys.argv)>1 else 'work')
+
+# Version metadata
+p=root/'bandlab-version.properties'
+p.write_text('versionName=2.2.0\nversionCode=220\nstage=TrainingPro\n')
+
+# Strength models: preset + pure math
+p=root/'app/src/main/java/com/fer/bandlab/model/StrengthModels.kt'
+s=p.read_text()
+s=s.replace('package com.fer.bandlab.model\n\nimport java.util.UUID\n', 'package com.fer.bandlab.model\n\nimport com.fer.bandlab.training.StrengthMath\nimport java.util.UUID\n')
+s=s.replace('    val e1rm: Double get() = if (reps <= 1) weightKg else weightKg * (1.0 + reps / 30.0)\n', '    val e1rm: Double get() = StrengthMath.e1rm(weightKg, reps)\n')
+s=s.replace('''data class StrengthUiState(\n    val selectedExerciseId: String = "bench_press",\n    val restSecondsRemaining: Int = 0,\n    val restRunning: Boolean = false,\n    val lastMessage: String = "",\n)\n''','''data class StrengthUiState(\n    val selectedExerciseId: String = "bench_press",\n    val restSecondsRemaining: Int = 0,\n    val restRunning: Boolean = false,\n    val restPresetSeconds: Int = 90,\n    val lastMessage: String = "",\n)\n''')
+p.write_text(s)
+
+# Pure strength math helper
+p=root/'app/src/main/java/com/fer/bandlab/training/StrengthMath.kt'
+p.write_text('''package com.fer.bandlab.training\n\nimport com.fer.bandlab.model.StrengthSetRecord\nimport kotlin.math.round\n\n/** Deterministic training math only. No fabricated measurements. */\nobject StrengthMath {\n    fun e1rm(weightKg: Double, reps: Int): Double {\n        require(weightKg >= 0.0)\n        require(reps >= 1)\n        return if (reps <= 1) weightKg else weightKg * (1.0 + reps / 30.0)\n    }\n\n    fun suggestedWeight(latest: StrengthSetRecord, plateStepKg: Double = 0.5): Double {\n        val multiplier = when {\n            latest.reps >= 12 -> 1.05\n            latest.reps >= 8 -> 1.025\n            latest.reps <= 4 -> 0.975\n            else -> 1.0\n        }\n        return roundToPlate(latest.weightKg * multiplier, plateStepKg)\n    }\n\n    fun roundToPlate(value: Double, step: Double): Double {\n        require(step > 0.0)\n        return round(value / step) * step\n    }\n}\n''')
+
+# Strength store: use math + persist rest preset/end time
+p=root/'app/src/main/java/com/fer/bandlab/training/StrengthStore.kt'
+s=p.read_text()
+s=s.replace('import kotlin.math.round\n','')
+old='''        val latest = h.firstOrNull()\n        val suggested = latest?.let {\n            val multiplier = when {\n                it.reps >= 12 -> 1.05\n                it.reps >= 8 -> 1.025\n                it.reps <= 4 -> 0.975\n                else -> 1.0\n            }\n            roundToPlate(it.weightKg * multiplier, 0.5)\n        }\n'''
+new='''        val latest = h.firstOrNull()\n        val suggested = latest?.let { StrengthMath.suggestedWeight(it) }\n'''
+if old not in s: raise SystemExit('strength suggested anchor missing')
+s=s.replace(old,new,1)
+s=s.replace('    private fun roundToPlate(value: Double, step: Double): Double = round(value / step) * step\n\n', '')
+insert='''\n    fun getRestPresetSeconds(): Int = prefs.getInt("rest_preset_seconds", 90).takeIf { it in setOf(60, 90, 120) } ?: 90\n    fun setRestPresetSeconds(seconds: Int) {\n        val safe = if (seconds in setOf(60, 90, 120)) seconds else 90\n        prefs.edit().putInt("rest_preset_seconds", safe).apply()\n    }\n    fun getRestEndEpochMs(): Long = prefs.getLong("rest_end_epoch_ms", 0L)\n    fun setRestEndEpochMs(value: Long) { prefs.edit().putLong("rest_end_epoch_ms", value.coerceAtLeast(0L)).apply() }\n    fun clearRestEnd() { prefs.edit().remove("rest_end_epoch_ms").apply() }\n'''
+anchor='''    fun hasSetToday(): Boolean {\n'''
+if anchor not in s: raise SystemExit('rest insert anchor missing')
+s=s.replace(anchor,insert+'\n'+anchor,1)
+p.write_text(s)
+
+# Workout PR engine
+p=root/'app/src/main/java/com/fer/bandlab/training/WorkoutPrEngine.kt'
+p.write_text('''package com.fer.bandlab.training\n\nimport com.fer.bandlab.model.WorkoutSummary\n\n/** Calculates PRs only when stored split checkpoints actually bracket the requested distance. */\nobject WorkoutPrEngine {\n    fun bestSegmentMs(workouts: List<WorkoutSummary>, targetMeters: Int): Long? {\n        require(targetMeters > 0)\n        return workouts.asSequence().mapNotNull { bestSegmentMs(it, targetMeters) }.minOrNull()\n    }\n\n    fun bestSegmentMs(workout: WorkoutSummary, targetMeters: Int): Long? {\n        if (workout.splits.isEmpty()) retu
