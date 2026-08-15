@@ -2,7 +2,7 @@ name: A53 Performance v1.15 Minimal Cleaner
 
 on:
   push:
-    branches: [a53-work-v1.15]
+    branches: [a53-build-v1.10]
     paths:
       - 'v115part-*'
       - '.github/workflows/a53-v115-build.yml'
