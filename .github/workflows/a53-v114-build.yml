@@ -41,10 +41,10 @@ jobs:
         shell: bash
         run: |
           cat a53v1141patch-part-* > v1141patch.b64
-          test "$(wc -c < v1141patch.b64)" -eq 5744
+          test "$(wc -c < v1141patch.b64)" -eq 6128
           base64 -d v1141patch.b64 > v1141.patch.xz
-          test "$(wc -c < v1141.patch.xz)" -eq 4308
-          echo "a23280462cf84befc1bf0ad8285ce3861fb9a2d5ae4bd3e88e6882a0b1f338b3  v1141.patch.xz" | sha256sum -c -
+          test "$(wc -c < v1141.patch.xz)" -eq 4596
+          echo "0e82f7c8a153ced921ab57e88795424df63f06ae12b8a547bca86bf4c5c82e11  v1141.patch.xz" | sha256sum -c -
           xz -dc v1141.patch.xz > v1141.patch
           patch --batch --forward -p1 -d a53v114 < v1141.patch
           mv a53v114 a53v1141
@@ -53,6 +53,7 @@ jobs:
           grep -q "addRequestPermissionResultListener" a53v1141/app/src/main/java/com/fer/a53performance/MainActivity.java
           grep -q "addBinderReceivedListener" a53v1141/app/src/main/java/com/fer/a53performance/MainActivity.java
           grep -q "autoAuthorizeShizuku" a53v1141/app/src/main/java/com/fer/a53performance/MainActivity.java
+          grep -q "rikka.shizuku.ShizukuProvider" a53v1141/app/src/main/AndroidManifest.xml
 
       - uses: actions/setup-java@v4
         with:
@@ -105,6 +106,7 @@ jobs:
           grep -q "package: name='com.fer.a53performance' versionCode='21' versionName='1.14.1'" "$OUT/BADGING.txt"
           "$BT/aapt" dump xmltree "$APK" AndroidManifest.xml | tee "$OUT/MANIFEST_TREE.txt"
           grep -q "rikka.shizuku.ShizukuProvider" "$OUT/MANIFEST_TREE.txt"
+          grep -q "com.fer.a53performance.shizuku" "$OUT/MANIFEST_TREE.txt"
           cp SIGNING_CERT.txt "$OUT/SIGNING_CERT.txt"
           unzip -t "$APK" > "$OUT/ZIP_TEST.txt"
           "$BT/zipalign" -v -c -P 16 4 "$APK" > "$OUT/ZIPALIGN_16KB.txt"
