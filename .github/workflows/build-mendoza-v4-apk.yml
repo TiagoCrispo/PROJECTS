@@ -19,8 +19,6 @@ jobs:
           unzip -t source.zip
           unzip -q source.zip
           cp patches/MainActivity.java mendoza_v4_native/app/src/main/java/com/mendozameteo/pro/MainActivity.java
-          grep -n "private void addTab" mendoza_v4_native/app/src/main/java/com/mendozameteo/pro/MainActivity.java
-          grep -n "foregroundRefresh" mendoza_v4_native/app/src/main/java/com/mendozameteo/pro/MainActivity.java
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -33,9 +31,23 @@ jobs:
           gradle-version: '8.9'
       - name: Verify weather endpoint
         run: curl -fS --retry 3 'https://api.open-meteo.com/v1/forecast?latitude=-32.8895&longitude=-68.8458&current=temperature_2m,weather_code&timezone=auto' | head -c 500
-      - name: Build debug APK
+      - name: Build debug APK and capture diagnostics
         working-directory: mendoza_v4_native
-        run: gradle :app:assembleDebug --stacktrace
+        run: |
+          set +e
+          gradle :app:assembleDebug --stacktrace > ../gradle-build.log 2>&1
+          echo $? > ../gradle-exit.txt
+          tail -n 200 ../gradle-build.log
+          exit 0
+      - name: Upload build diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: MendozaMeteo-v4-build-diagnostics
+          path: |
+            gradle-build.log
+            gradle-exit.txt
+      - name: Check build result
+        run: test "$(cat gradle-exit.txt)" -eq 0
       - name: Verify APK
         working-directory: mendoza_v4_native
         run: |
@@ -46,4 +58,4 @@ jobs:
           name: MendozaMeteo-PRO-v4.0-Native-APK
           path: MendozaMeteo_PRO_v4.0_Native.apk
 
-# build-trigger: v4-native-patched
+# build-trigger: diagnostics-v1
