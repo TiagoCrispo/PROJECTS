@@ -55,6 +55,7 @@ jobs:
           cd wa-vault-v0512-project
           patch -p1 --batch < /tmp/v0512.patch
           find . -name '*.rej' -print -quit | grep -q . && { find . -name '*.rej' -print; exit 1; } || true
+          grep -q 'import java.util.Locale;' app/src/main/java/com/fer/wavault/VaultDb.java || sed -i '/import java.util.List;/a import java.util.Locale;' app/src/main/java/com/fer/wavault/VaultDb.java
           grep -q 'versionCode = 62' app/build.gradle.kts
           grep -q 'versionName = "0.5.12"' app/build.gradle.kts
           grep -q 'APP_CANCEL_PERSISTENT_REPOST' app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java
