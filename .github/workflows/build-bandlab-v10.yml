@@ -36,6 +36,9 @@ jobs:
           gzip -dc /tmp/v10patch.gz > /tmp/v10.patch
           cd BandLabNative_v09
           patch -p1 < /tmp/v10.patch
+          mkdir -p app/src/main/res/drawable
+          cp ../v10/band_hero.xml app/src/main/res/drawable/band_hero.xml
+          cp ../v10/band_normal_preview.xml app/src/main/res/drawable/band_normal_preview.xml
           grep -q "1.0.0-test" app/build.gradle
       - name: Build APK
         working-directory: BandLabNative_v09
