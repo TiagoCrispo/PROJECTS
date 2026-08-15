@@ -38,6 +38,7 @@ jobs:
           echo '70b2c091691005a7fbb769e60dc7a8dafca2cbf60a9ec6bf20e2029b9991c6ed  wa-vault-build-v0512/chunks/part00' | sha256sum -c -
           echo '8f4add6ec844ac02e4d38af5ef2f60c9175dbd853a74832674a44f670bb5f0a4  wa-vault-build-v0512/chunks/part01' | sha256sum -c -
           echo '442d0ba5c77b0e6aaf6a4ce65835578e2f3a716e90dfbfc55e4d7a83c467b56e  wa-vault-build-v0512/chunks/part02' | sha256sum -c -
+          echo '0628bf148962dba854d7cde749082a8c1d54172971e6d5f190121acdb1a2c46a  wa-vault-build-v0512/chunks/p3_0' | sha256sum -c -
           echo '3b2b38a10fe5ac68d1fbbd5468d898427b2a5628ce90f43000e62eefbfa72a4d  wa-vault-build-v0512/chunks/p31_00' | sha256sum -c -
           echo 'be8a0b7a4aeaff86aa6c2e6fbcfb1b5ce52a41b56afd5536b236ef17b94ae1cf  wa-vault-build-v0512/chunks/p31_01' | sha256sum -c -
           echo '2a91e2f1530048402d2bbcfb992dc1c7b8f1c64c112fe588f84596097bd31d3e  wa-vault-build-v0512/chunks/p31_02' | sha256sum -c -
@@ -48,7 +49,7 @@ jobs:
           echo '0757af2a75de37eb7489b88b8cbb7a05b2a8f6c58c47238e13f41820c6d04cd9  wa-vault-build-v0512/chunks/p32_03' | sha256sum -c -
           echo 'c6f9e9479afd66303f19f6f98c9841e5c149bd39d54e2549ff0ae2bab4489082  wa-vault-build-v0512/chunks/part04' | sha256sum -c -
           echo '56bb0146af041db59a29b051fb38122a9ab6db7fb1e0830e9096fcabd8e3a480  wa-vault-build-v0512/chunks/part05' | sha256sum -c -
-          cat wa-vault-build-v0512/chunks/part00 wa-vault-build-v0512/chunks/part01 wa-vault-build-v0512/chunks/part02 wa-vault-build-v0512/chunks/p31_00 wa-vault-build-v0512/chunks/p31_01 wa-vault-build-v0512/chunks/p31_02 wa-vault-build-v0512/chunks/p31_03 wa-vault-build-v0512/chunks/p32_00 wa-vault-build-v0512/chunks/p32_01 wa-vault-build-v0512/chunks/p32_02 wa-vault-build-v0512/chunks/p32_03 wa-vault-build-v0512/chunks/part04 wa-vault-build-v0512/chunks/part05 | tr -d '\r\n' > /tmp/v0512.patch.gz.b64
+          cat wa-vault-build-v0512/chunks/part00 wa-vault-build-v0512/chunks/part01 wa-vault-build-v0512/chunks/part02 wa-vault-build-v0512/chunks/p3_0 wa-vault-build-v0512/chunks/p31_00 wa-vault-build-v0512/chunks/p31_01 wa-vault-build-v0512/chunks/p31_02 wa-vault-build-v0512/chunks/p31_03 wa-vault-build-v0512/chunks/p32_00 wa-vault-build-v0512/chunks/p32_01 wa-vault-build-v0512/chunks/p32_02 wa-vault-build-v0512/chunks/p32_03 wa-vault-build-v0512/chunks/part04 wa-vault-build-v0512/chunks/part05 | tr -d '\r\n' > /tmp/v0512.patch.gz.b64
           base64 -d /tmp/v0512.patch.gz.b64 | gzip -dc > /tmp/v0512.patch
           echo 'ffafcea04767d742c5be4f15ae662901d1cd51e2ccab666d492d72a1f71ecaee  /tmp/v0512.patch' | sha256sum -c -
           cd wa-vault-v0512-project
