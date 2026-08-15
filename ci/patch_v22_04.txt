@@ -1,0 +1,22 @@
+x('\nprivate fun volumeSparkline')
+s=s[:start]+'''\n\n@Composable\nprivate fun VolumeBars(values: List<Double>) {\n    if (values.isEmpty()) {\n        Text("Sin series todavía", style = MaterialTheme.typography.bodyMedium, color = TextSecondary, modifier = Modifier.padding(top = 6.dp))\n        return\n    }\n    val max = values.maxOrNull()?.takeIf { it > 0.0 } ?: 1.0\n    Canvas(modifier = Modifier.fillMaxWidth().height(72.dp).padding(top = 8.dp)) {\n        val gap = 4.dp.toPx()\n        val count = values.size.coerceAtLeast(1)\n        val barWidth = ((size.width - gap * (count - 1)) / count).coerceAtLeast(2.dp.toPx())\n        values.forEachIndexed { index, value ->\n            val ratio = (value / max).toFloat().coerceIn(0f, 1f)\n            val h = (size.height * ratio).coerceAtLeast(2.dp.toPx())\n            val x = index * (barWidth + gap)\n            drawRect(color = AccentBlue, topLeft = Offset(x, size.height - h), size = Size(barWidth, h))\n        }\n    }\n}\n'''
+p.write_text(s)
+
+# History PR engine
+p=root/'app/src/main/java/com/fer/bandlab/ui/screens/HistoryScreen.kt'
+s=p.read_text()
+if 'import com.fer.bandlab.training.WorkoutPrEngine' not in s:
+    s=s.replace('import com.fer.bandlab.util.formatPace\n','import com.fer.bandlab.util.formatPace\nimport com.fer.bandlab.training.WorkoutPrEngine\n')
+old='''                val allSplits = workouts.flatMap { it.splits }\n                val best500 = allSplits.filter { it.distanceMeters % 500 == 0 }.minOfOrNull { it.splitMs }\n                val best1k = allSplits.filter { it.distanceMeters % 1000 == 0 }.minOfOrNull { it.splitMs }\n'''
+new='''                val best500 = WorkoutPrEngine.bestSegmentMs(workouts, 500)\n                val best1k = WorkoutPrEngine.bestSegmentMs(workouts, 1000)\n'''
+if old not in s: raise SystemExit('history PR anchor missing')
+s=s.replace(old,new,1)
+s=s.replace('''                        DetailRow("Pérdidas GPS", workout.gpsLossCount.toString())\n                        workout.splits.takeLast(5).forEach { split -> DetailRow("Split ${split.distanceMeters} m", formatDuration(split.splitMs)) }\n''','''                        DetailRow("Pérdidas GPS", workout.gpsLossCount.toString())\n                        workout.splits.takeLast(5).forEachIndexed { index, split ->\n                            val absoluteIndex = workout.splits.size - workout.splits.takeLast(5).size + index\n                            val previousDistance = workout.splits.getOrNull(absoluteIndex - 1)?.distanceMeters ?: 0\n                            DetailRow("Split ${split.distanceMeters - previousDistance} m", formatDuration(split.splitMs))\n                        }\n''')
+p.write_text(s)
+
+# Tests
+p=root/'app/src/test/java/com/fer/bandlab/training/StrengthMathTest.kt'
+p.write_text('''package com.fer.bandlab.training\n\nimport com.fer.bandlab.model.StrengthSetRecord\nimport org.junit.Assert.assertEquals\nimport org.junit.Test\n\nclass StrengthMathTest {\n    @Test fun e1rmUsesEpleyForMultipleReps() {\n        assertEquals(133.333, StrengthMath.e1rm(100.0, 10), 0.01)\n    }\n\n    @Test fun recommendationProgressesAfterTwelveReps() {\n        val set = StrengthSetRecord(exerciseId = "bench_press", weightKg = 100.0, reps = 12)\n        assertEquals(105.0, StrengthMath.suggestedWeight(set), 0.001)\n    }\n\n    @Test fun recommendationDeloadsAfterVeryLowReps() {\n        val set = StrengthSetRecord(exerciseId = "bench_press", weightKg = 100.0, reps = 3)\n        assertEquals(97.5, StrengthMath.suggestedWeight(set), 0.001)\n    }\n}\n''')
+
+p=root/'app/src/test/java/com/fer/bandlab/training/WorkoutPrEngineTest.kt'
+p.write_text('''package com.fer.bandlab.training\n\nimport com.fer.bandlab.model.SplitRecord\nimport com.fer.bandlab.model.WorkoutSummary\nimport com.fer.bandlab.model.WorkoutType\nimport org.junit.Assert.assertEquals\nimport org.junit.Assert.assertNull\nimport org.junit.Test\n\nclass WorkoutPrEngineTest {\n    private fun workout(vararg splits: SplitRecord) = WorkoutSummary(\n        type = WorkoutType.RUN, startedAtEpochMs = 1L, elapsedMs = 400_000L, activeMs = 400_000L,\n        pausedMs = 0L, pauseCount = 0, distanceMeters = splits.lastOrNull()?.distanceMeters?.toDouble() ?: 0.0,\n        caloriesKcal = 100.0, splits = splits.toList()\n    )\n\n    @Test fun oneKmPrWorksFromTwo500mCheckpoints() {\n        val w = workout(\n            SplitRecord(500, 120_000L, 120_000L),\n            SplitRecord(1000, 235_000L, 115_000L),\n            SplitRecord(
