@@ -1,0 +1,288 @@
++    fun clearWorkouts() { prefs.edit().remove("workouts").apply(); routeDir.listFiles()?.forEach { it.delete() } }
+ 
+     private fun toJson(w: WorkoutSummary) = JSONObject().apply {
+-        put("id", w.id)
+-        put("type", w.type.name)
+-        put("startedAt", w.startedAtEpochMs)
+-        put("elapsed", w.elapsedMs)
+-        put("active", w.activeMs)
+-        put("paused", w.pausedMs)
+-        put("pauseCount", w.pauseCount)
+-        put("distance", w.distanceMeters)
+-        put("calories", w.caloriesKcal)
+-        put("avgHr", w.averageHeartRateBpm ?: JSONObject.NULL)
+-        put("maxHr", w.maxHeartRateBpm ?: JSONObject.NULL)
+-        put("gpsLossCount", w.gpsLossCount)
++        put("id", w.id); put("type", w.type.name); put("startedAt", w.startedAtEpochMs); put("elapsed", w.elapsedMs); put("active", w.activeMs)
++        put("paused", w.pausedMs); put("pauseCount", w.pauseCount); put("distance", w.distanceMeters); put("calories", w.caloriesKcal)
++        put("avgHr", w.averageHeartRateBpm ?: JSONObject.NULL); put("maxHr", w.maxHeartRateBpm ?: JSONObject.NULL); put("gpsLossCount", w.gpsLossCount)
++        put("ascent", w.ascentMeters); put("descent", w.descentMeters); put("cadence", w.averageCadenceSpm ?: JSONObject.NULL); put("steps", w.totalSteps)
++        put("goalType", w.goal.type.name); put("goalDistance", w.goal.distanceMeters); put("goalTime", w.goal.timeMinutes); put("goalReached", w.goalReached)
+         put("splits", JSONArray().apply { w.splits.forEach { s -> put(JSONObject().apply { put("d", s.distanceMeters); put("active", s.activeMs); put("split", s.splitMs) }) } })
++        put("laps", JSONArray().apply { w.manualLaps.forEach { l -> put(JSONObject().apply { put("active",l.activeMs); put("distance",l.distanceMeters); put("lapMs",l.lapMs); put("lapDistance",l.lapDistanceMeters) }) } })
+     }
+ 
+-    private fun fromJson(o: JSONObject) = WorkoutSummary(
+-        id = o.getString("id"),
+-        type = WorkoutType.valueOf(o.getString("type")),
+-        startedAtEpochMs = o.getLong("startedAt"),
+-        elapsedMs = o.getLong("elapsed"),
+-        activeMs = o.getLong("active"),
+-        pausedMs = o.getLong("paused"),
+-        pauseCount = o.getInt("pauseCount"),
+-        distanceMeters = o.getDouble("distance"),
+-        caloriesKcal = o.getDouble("calories"),
+-        averageHeartRateBpm = if (o.isNull("avgHr")) null else o.getInt("avgHr"),
+-        maxHeartRateBpm = if (o.isNull("maxHr")) null else o.getInt("maxHr"),
+-        gpsLossCount = o.optInt("gpsLossCount", 0),
+-        splits = o.optJSONArray("splits")?.let { arr -> buildList { for (i in 0 until arr.length()) { val x = arr.getJSONObject(i); add(SplitRecord(x.getInt("d"), x.getLong("active"), x.getLong("split"))) } } } ?: emptyList()
+-    )
++    private fun fromJson(o: JSONObject): WorkoutSummary {
++        val id = o.getString("id")
++        val goal = WorkoutGoal(runCatching { WorkoutGoalType.valueOf(o.optString("goalType","NONE")) }.getOrDefault(WorkoutGoalType.NONE), o.optInt("goalDistance",0), o.optInt("goalTime",0))
++        return WorkoutSummary(
++            id=id, type=WorkoutType.valueOf(o.getString("type")), startedAtEpochMs=o.getLong("startedAt"), elapsedMs=o.getLong("elapsed"), activeMs=o.getLong("active"), pausedMs=o.getLong("paused"), pauseCount=o.getInt("pauseCount"), distanceMeters=o.getDouble("distance"), caloriesKcal=o.getDouble("calories"),
++            averageHeartRateBpm=if(o.isNull("avgHr")) null else o.getInt("avgHr"), maxHeartRateBpm=if(o.isNull("maxHr")) null else o.getInt("maxHr"), gpsLossCount=o.optInt("gpsLossCount",0),
++            splits=o.optJSONArray("splits")?.let { arr -> buildList { for(i in 0 until arr.length()){ val x=arr.getJSONObject(i); add(SplitRecord(x.getInt("d"),x.getLong("active"),x.getLong("split"))) } } } ?: emptyList(),
++            route=loadRoute(id), ascentMeters=o.optDouble("ascent",0.0), descentMeters=o.optDouble("descent",0.0), averageCadenceSpm=if(o.isNull("cadence")) null else o.optInt("cadence").takeIf{it>0}, totalSteps=o.optInt("steps",0),
++            manualLaps=o.optJSONArray("laps")?.let { arr -> buildList { for(i in 0 until arr.length()){ val x=arr.getJSONObject(i); add(ManualLapRecord(x.getLong("active"),x.getDouble("distance"),x.getLong("lapMs"),x.getDouble("lapDistance"))) } } } ?: emptyList(),
++            goal=goal, goalReached=o.optBoolean("goalReached",false)
++        )
++    }
++
++    fun getDashboardOrder(): List<TodayCardKind> {
++        val saved = prefs.getString("dashboard_order", null)?.split(',')?.mapNotNull { runCatching { TodayCardKind.valueOf(it) }.getOrNull() }.orEmpty()
++        return (saved + TodayCardKind.entries).distinct()
++    }
++    fun setDashboardOrder(order: List<TodayCardKind>) { prefs.edit().putString("dashboard_order", order.distinct().joinToString(",") { it.name }).apply() }
++    fun getHiddenDashboardCards(): Set<TodayCardKind> = prefs.getStringSet("dashboard_hidden", emptySet()).orEmpty().mapNotNull { runCatching { TodayCardKind.valueOf(it) }.getOrNull() }.toSet()
++    fun setDashboardCardHidden(kind: TodayCardKind, hidden: Boolean) { val set=getHiddenDashboardCards().toMutableSet(); if(hidden)set+=kind else set-=kind; prefs.edit().putStringSet("dashboard_hidden",set.map{it.name}.toSet()).apply() }
++    fun getPinnedDashboardCards(): Set<TodayCardKind> = prefs.getStringSet("dashboard_pinned", emptySet()).orEmpty().mapNotNull { runCatching { TodayCardKind.valueOf(it) }.getOrNull() }.toSet()
++    fun toggleDashboardPinned(kind: TodayCardKind) { val set=getPinnedDashboardCards().toMutableSet(); if(kind in set)set-=kind else set+=kind; prefs.edit().putStringSet("dashboard_pinned",set.map{it.name}.toSet()).apply() }
+ 
+     fun setPreviousFace(id: String, name: String?) { prefs.edit().putString("previous_face_id", id).putString("previous_face_name", name).apply() }
+     fun getPreviousFaceId(): String? = prefs.getString("previous_face_id", null)
+diff -ruN '--exclude=.kotlin' '--exclude=build' '--exclude=dist' bandlab_v23_base/app/src/main/java/com/fer/bandlab/device/DeviceDiagnostics.kt bandlab_v24/app/src/main/java/com/fer/bandlab/device/DeviceDiagnostics.kt
+--- bandlab_v23_base/app/src/main/java/com/fer/bandlab/device/DeviceDiagnostics.kt	1970-01-01 00:00:00.000000000 +0000
++++ bandlab_v24/app/src/main/java/com/fer/bandlab/device/DeviceDiagnostics.kt	2026-08-15 22:06:23.471477308 +0000
+@@ -0,0 +1,43 @@
++package com.fer.bandlab.device
++
++import android.Manifest
++import android.bluetooth.BluetoothManager
++import android.content.Context
++import android.content.pm.PackageManager
++import android.location.LocationManager
++import android.os.Build
++import androidx.core.content.ContextCompat
++import com.fer.bandlab.health.HealthConnectRepository
++import com.fer.bandlab.model.BandConnectionStatus
++import com.fer.bandlab.model.DiagnosticCheck
++import com.fer.bandlab.model.DiagnosticReport
++
++object DeviceDiagnostics {
++    suspend fun collect(context: Context, manager: XiaomiBandManager, health: HealthConnectRepository): DiagnosticReport {
++        val checks = mutableListOf<DiagnosticCheck>()
++        val bt = context.getSystemService(BluetoothManager::class.java)?.adapter
++        checks += DiagnosticCheck("bluetooth", "Bluetooth", bt?.isEnabled == true, if (bt == null) "Hardware Bluetooth no disponible" else if (bt.isEnabled) "Adaptador encendido" else "Bluetooth apagado")
++        checks += DiagnosticCheck("ble_perm", "Permisos BLE", manager.hasScanPermission() && manager.hasConnectPermission(), if (manager.hasScanPermission() && manager.hasConnectPermission()) "SCAN/CONNECT disponibles" else "Falta permiso Bluetooth")
++        checks += DiagnosticCheck("xiaomi_auth", "Xiaomi Auth", SecretStore.hasKey(context), if (SecretStore.hasKey(context)) "Clave cifrada disponible" else "No hay clave Xiaomi válida")
++        checks += DiagnosticCheck("keystore", "Android Keystore", SecretStore.hasKeystoreAlias(), if (SecretStore.hasKeystoreAlias()) "Alias bandlab_xiaomi_v1 presente" else "Alias no disponible")
++        val state = manager.state.value
++        checks += DiagnosticCheck("ble_session", "Sesión BLE", state.status == BandConnectionStatus.READY || state.status == BandConnectionStatus.SYNCING, "${state.status}: ${state.message}")
++        val activitySeen = manager.diagnostics.value.any { it.contains("health-sync") || it.contains("activity", ignoreCase = true) }
++        checks += DiagnosticCheck("activity", "Canal Activity", activitySeen, if (activitySeen) "Hay trazas de sincronización/actividad" else "Aún no hay una sincronización de actividad en esta sesión")
++
++        val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
++        val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
++        val gps = runCatching { lm.isProviderEnabled(LocationManager.GPS_PROVIDER) }.getOrDefault(false)
++        checks += DiagnosticCheck("gps_perm", "Ubicación precisa", fine, if (fine) "ACCESS_FINE_LOCATION concedido" else "Concedé ubicación precisa para GNSS")
++        checks += DiagnosticCheck("gps", "GNSS / GPS satelital", gps, if (gps) "Proveedor GPS activo; no requiere datos móviles" else "Activá Ubicación/GPS del teléfono")
++
++        val hcAvailable = health.isAvailable()
++        checks += DiagnosticCheck("hc", "Health Connect", hcAvailable, if (hcAvailable) "Servicio disponible" else "No disponible en este dispositivo")
++        val hcPerms = if (hcAvailable) runCatching { health.hasPermissions() }.getOrDefault(false) else false
++        checks += DiagnosticCheck("hc_perm", "Permisos Salud", hcPerms, if (hcPerms) "Permisos de lectura concedidos" else "Faltan uno o más permisos")
++
++        val wf = state.status == BandConnectionStatus.READY && manager.diagnostics.value.any { it.contains("watchface", ignoreCase = true) && it.contains("OK") }
++        checks += DiagnosticCheck("watchface", "Protocolo esferas", wf, if (wf) "Operación de esfera confirmada en esta sesión" else "Sin operación de esfera confirmada en esta sesión")
++        return DiagnosticReport(checks, System.currentTimeMillis())
++    }
++}
+diff -ruN '--exclude=.kotlin' '--exclude=build' '--exclude=dist' bandlab_v23_base/app/src/main/java/com/fer/bandlab/device/DiagnosticsExporter.kt bandlab_v24/app/src/main/java/com/fer/bandlab/device/DiagnosticsExporter.kt
+--- bandlab_v23_base/app/src/main/java/com/fer/bandlab/device/DiagnosticsExporter.kt	2026-08-15 08:14:55.000000000 +0000
++++ bandlab_v24/app/src/main/java/com/fer/bandlab/device/DiagnosticsExporter.kt	2026-08-15 22:06:35.103404742 +0000
+@@ -3,25 +3,29 @@
+ import android.content.Context
+ import android.os.Build
+ import com.fer.bandlab.BuildConfig
++import com.fer.bandlab.model.DiagnosticReport
+ import java.io.File
+ import java.util.zip.ZipEntry
+ import java.util.zip.ZipOutputStream
+ 
+ object DiagnosticsExporter {
+-    fun create(context: Context, manager: XiaomiBandManager): File {
++    fun create(context: Context, manager: XiaomiBandManager, report: DiagnosticReport? = null): File {
+         val dir = File(context.cacheDir, "diagnostics").apply { mkdirs() }
+         val out = File(dir, "BandLab-diagnostic-${System.currentTimeMillis()}.zip")
+         ZipOutputStream(out.outputStream().buffered()).use { zip ->
+-            fun text(name: String, content: String) {
+-                zip.putNextEntry(ZipEntry(name)); zip.write(content.toByteArray()); zip.closeEntry()
+-            }
++            fun text(name: String, content: String) { zip.putNextEntry(ZipEntry(name)); zip.write(content.toByteArray()); zip.closeEntry() }
+             text("summary.txt", buildString {
+                 appendLine("BandLab ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+                 appendLine("Android ${Build.VERSION.RELEASE} API ${Build.VERSION.SDK_INT}")
+                 appendLine("Device ${Build.MANUFACTURER} ${Build.MODEL}")
+                 appendLine("Band state: ${manager.state.value}")
+                 appendLine("Xiaomi key present: ${SecretStore.hasKey(context)}")
+-                appendLine("NOTE: auth key and encrypted key blob are intentionally excluded")
++                appendLine("Android Keystore alias present: ${SecretStore.hasKeystoreAlias()}")
++                report?.let { r ->
++                    appendLine("Checks: ${r.passed}/${r.total}")
++                    r.checks.forEach { appendLine("${if (it.ok) "PASS" else "FAIL"} | ${it.title} | ${it.detail}") }
++                }
++                appendLine("NOTE: auth key, encrypted blob and private signing material are intentionally excluded")
+             })
+             text("ble-trace.txt", manager.diagnostics.value.joinToString("\n"))
+         }
+diff -ruN '--exclude=.kotlin' '--exclude=build' '--exclude=dist' bandlab_v23_base/app/src/main/java/com/fer/bandlab/device/SecretStore.kt bandlab_v24/app/src/main/java/com/fer/bandlab/device/SecretStore.kt
+--- bandlab_v23_base/app/src/main/java/com/fer/bandlab/device/SecretStore.kt	2026-08-15 08:14:55.000000000 +0000
++++ bandlab_v24/app/src/main/java/com/fer/bandlab/device/SecretStore.kt	2026-08-15 22:06:23.343131880 +0000
+@@ -47,6 +47,10 @@
+ 
+     fun hasKey(context: Context): Boolean = get(context) != null
+ 
++    fun hasKeystoreAlias(): Boolean = runCatching {
++        KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.containsAlias(ALIAS)
++    }.getOrDefault(false)
++
+     fun clear(context: Context) {
+         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(BLOB).apply()
+     }
+diff -ruN '--exclude=.kotlin' '--exclude=build' '--exclude=dist' bandlab_v23_base/app/src/main/java/com/fer/bandlab/health/HealthConnectRepository.kt bandlab_v24/app/src/main/java/com/fer/bandlab/health/HealthConnectRepository.kt
+--- bandlab_v23_base/app/src/main/java/com/fer/bandlab/health/HealthConnectRepository.kt	2026-08-14 20:21:45.000000000 +0000
++++ bandlab_v24/app/src/main/java/com/fer/bandlab/health/HealthConnectRepository.kt	2026-08-15 22:04:30.893433604 +0000
+@@ -9,7 +9,6 @@
+ import androidx.health.connect.client.records.HeartRateRecord
+ import androidx.health.connect.client.records.StepsRecord
+ import androidx.health.connect.client.records.WeightRecord
+-import androidx.health.connect.client.request.AggregateRequest
+ import androidx.health.connect.client.request.ReadRecordsRequest
+ import androidx.health.connect.client.time.TimeRangeFilter
+ import com.fer.bandlab.model.HealthSnapshot
+@@ -28,9 +27,7 @@
+     )
+ 
+     fun sdkStatus(): Int = HealthConnectClient.getSdkStatus(context)
+-
+     fun isAvailable(): Boolean = sdkStatus() == HealthConnectClient.SDK_AVAILABLE
+-
+     fun permissionContract() = PermissionController.createRequestPermissionResultContract()
+ 
+     suspend fun hasPermissions(): Boolean {
+@@ -39,65 +36,69 @@
+         return client.permissionController.getGrantedPermissions().containsAll(permissions)
+     }
+ 
+-    suspend fun readToday(localWeightKg: Double?): HealthSnapshot {
+-        if (!isAvailable()) {
+-            return HealthSnapshot(weightKg = localWeightKg, source = "Health Connect no disponible")
+-        }
++    private suspend inline fun <reified T : androidx.health.connect.client.records.Record> readAll(
++        client: HealthConnectClient,
++        range: TimeRangeFilter,
++        ascending: Boolean = true,
++    ): List<T> {
++        val out = mutableListOf<T>()
++        var token: String? = null
++        do {
++            val response = client.readRecords(
++                ReadRecordsRequest<T>(
++                    timeRangeFilter = range,
++                    ascendingOrder = ascending,
++                    pageSize = 1000,
++                    pageToken = token,
++                )
++            )
++            out += response.records
++            token = response.pageToken
++        } while (token != null)
++        return out
++    }
+ 
++    suspend fun readToday(localWeightKg: Double?): HealthSnapshot {
++        if (!isAvailable()) return HealthSnapshot(weightKg = localWeightKg, source = "Health Connect no disponible")
+         val client = HealthConnectClient.getOrCreate(context)
+         val granted = client.permissionController.getGrantedPermissions()
+-        if (!granted.containsAll(permissions)) {
+-            return HealthSnapshot(weightKg = localWeightKg, source = "Faltan permisos de Salud")
+-        }
++        if (!granted.containsAll(permissions)) return HealthSnapshot(weightKg = localWeightKg, source = "Faltan permisos de Salud")
+ 
+         val zone = ZoneId.systemDefault()
+         val now = Instant.now()
+         val startOfDay = ZonedDateTime.now(zone).toLocalDate().atStartOfDay(zone).toInstant()
++        val today = TimeRangeFilter.between(startOfDay, now)
+ 
+-        val aggregate = client.aggregate(
+-            AggregateRequest(
+-                metrics = setOf(
+-                    StepsRecord.COUNT_TOTAL,
+-                    ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL,
+-                    DistanceRecord.DISTANCE_TOTAL
+-                ),
+-                timeRangeFilter = TimeRangeFilter.between(startOfDay, now)
+-            )
+-        )
++        val stepRecords = readAll<StepsRecord>(client, today)
++        val calorieRecords = readAll<ActiveCaloriesBurnedRecord>(client, today)
++        val distanceRecords = readAll<DistanceRecord>(client, today)
++
++        val stepsResult = HealthRecordDeduplicator.reconcile(stepRecords.map {
++            HealthRecordDeduplicator.Interval(it.startTime.toEpochMilli(), it.endTime.toEpochMilli(), it.count.toDouble(), it.metadata.dataOrigin.packageName)
++        })
++        val caloriesResult = HealthRecordDeduplicator.reconcile(calorieRecords.map {
++            HealthRecordDeduplicator.Interval(it.startTime.toEpochMilli(), it.endTime.toEpochMilli(), it.energy.inKilocalories, it.metadata.dataOrigin.packageName)
++        })
++        val distanceResult = HealthRecordDeduplicator.reconcile(distanceRecords.map {
++            HealthRecordDeduplicator.Interval(it.startTime.toEpochMilli(), it.endTime.toEpochMilli(), it.distance.inMeters, it.metadata.dataOrigin.packageName)
++        })
+ 
+-        val steps = aggregate[StepsRecord.COUNT_TOTAL] ?: 0L
+-        val calories = aggregate[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]?.inKilocalories ?: 0.0
+-        val distanceKm = aggregate[DistanceRecord.DISTANCE_TOTAL]?.inKilometers ?: 0.0
+-
+-        val hrRecords = client.readRecords(
+-            ReadRecordsRequest<HeartRateRecord>(
+-                timeRangeFilter = TimeRangeFilter.between(startOfDay, now),
+-                ascendingOrder = false,
+-                pageSize = 100
+-            )
+-        ).records
+-        val latestHr = hrRecords
+-            .flatMap { it.samples }
+-            .maxByOrNull { it.time }
+-            ?.beatsPerMinute
++        val hrRecords = readAll<HeartRateRecord>(client, today, ascending = false)
++        val latestHr = hrRecords.asSequence().flatMap { it.samples.asSequence() }.maxByOrNull { it.time }?.beatsPerMinute
+ 
+         val weightSince = now.minusSeconds(365L * 24L * 60L * 60L)
+-        val weightRecords = client.readRecords(
+-            ReadRecordsRequest<WeightRecord>(
+-                timeRangeFilter = TimeRangeFilter.between(weightSince, now),
+-                ascendingOrder = false,
+-                pageSize = 20
+-            )
+-        ).records
++        val weightRecords = readAll<WeightRecord>(client, TimeRangeFilter.between(weightSince, now), ascending = false)
+         val hcWeight = weightRecords.maxByOrNull { it.time }?.weight?.inKilograms
++        val suppressed = stepsResult.overlapSuppressedRecords + caloriesResult.overlapSuppressedRecords + distanceResult.overlapSuppressedRecords
+ 
+         return HealthSnapshot(
+-            steps = steps,
+-            activeCaloriesKcal = calories,
+-            distanceKm = distanceKm,
++            steps = stepsResult.value.toLong().coerceAtLeast(0L),
++            activeCaloriesKcal = caloriesResult.value.coerceAtLeast(0.0),
