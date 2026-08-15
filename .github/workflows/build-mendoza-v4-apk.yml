@@ -51,3 +51,5 @@ jobs:
         with:
           name: MendozaMeteo-PRO-v4.0-Native-APK
           path: MendozaMeteo_PRO_v4.0_Native.apk
+
+# build-trigger: v4-native-final
