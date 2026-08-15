@@ -7,7 +7,7 @@ on:
 
 jobs:
   verify:
-    runs-on: macos-15-intel
+    runs-on: macos-15
     timeout-minutes: 55
     env:
       KODO_COMMIT: 8152ffdd3f384e0563a39db7bf77a8b70d3a6e84
@@ -36,7 +36,7 @@ jobs:
         shell: bash
         run: |
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools" "emulator" "system-images;android-35;default;x86_64"
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools" "emulator" "system-images;android-35;default;arm64-v8a"
 
       - uses: gradle/actions/setup-gradle@v4
         with:
@@ -115,7 +115,7 @@ jobs:
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
-          arch: x86_64
+          arch: arm64-v8a
           profile: pixel_6
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save -no-metrics
