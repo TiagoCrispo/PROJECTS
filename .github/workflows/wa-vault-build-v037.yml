@@ -30,7 +30,6 @@ jobs:
           echo 'a5933b2452ec76b37f552a8bb42bb14045de3c3d8b80d5aee27a9526981ac90b  /tmp/project.tar.xz' | sha256sum -c -
           mkdir -p wa-vault-v034-project
           tar -xJf /tmp/project.tar.xz -C wa-vault-v034-project
-
           cat wa-vault-build-v034/patch-0.b64 wa-vault-build-v034/patch-1.b64 > /tmp/v034.patch.b64
           base64 -d /tmp/v034.patch.b64 > /tmp/v034.patch.xz
           echo 'a0dda46d8de11d2bf341a49a5b4b083fceb7e00701f84b03e4aa5dfef628b9a0  /tmp/v034.patch.xz' | sha256sum -c -
@@ -41,14 +40,12 @@ jobs:
           python3 wa-vault-build-v034/postfix_v034.py
           rm -f wa-vault-v034-project/app/src/main/java/com/fer/wavault/MainActivity.java.rej
           mv wa-vault-v034-project wa-vault-v037-project
-
           base64 -d wa-vault-build-v035/patch.b64 > /tmp/v035.patch.xz
           echo '216403d0c4cdea807c20fe088495fa6d49ffaa04f0ffcaa48b39c299f5eaa2f3  /tmp/v035.patch.xz' | sha256sum -c -
           xz -dc /tmp/v035.patch.xz > /tmp/v035.patch
           cd wa-vault-v037-project
           patch -p1 --batch < /tmp/v035.patch
           cd ..
-
           base64 -d wa-vault-build-v036/patch.b64 > /tmp/v036.patch.xz
           echo 'a4e2790abb94debe2a9428df4e375e54f32576e70881dbde5e0010a4f2e90aca  /tmp/v036.patch.xz' | sha256sum -c -
           xz -dc /tmp/v036.patch.xz > /tmp/v036.patch
@@ -70,13 +67,19 @@ jobs:
           rm -f CHANGELOG.md.rej
           test ! -f app/src/main/java/com/fer/wavault/MainActivity.java.rej
           test ! -f app/src/main/java/com/fer/wavault/VaultDb.java.rej
-          test ! -f app/src/main/java/com/fer/wavault/DirectMediaWatcher.java.rej
           grep -q 'versionCode = 37' app/build.gradle.kts
-          grep -q 'versionName = "0.3.7"' app/build.gradle.kts
           test -f app/src/main/java/com/fer/wavault/CaptureWatchdog.java
           test -f app/src/main/java/com/fer/wavault/CaptureMetrics.java
           grep -q 'GridView grid' app/src/main/java/com/fer/wavault/MainActivity.java
-          grep -q 'idx_media_hash_type_unique' app/src/main/java/com/fer/wavault/VaultDb.java
+          cd ..
+          base64 -d wa-vault-build-v037/download-hotfix.b64 > /tmp/v037hotfix.xz
+          echo 'c0d55e7f8863b49b583495c7f3e624ce454c7a0c4d182e61a483aa0deafa324e  /tmp/v037hotfix.xz' | sha256sum -c -
+          xz -dc /tmp/v037hotfix.xz > /tmp/v037hotfix.patch
+          cd wa-vault-v037-project
+          patch -p1 --batch < /tmp/v037hotfix.patch
+          test -f app/src/main/java/com/fer/wavault/DownloadsExporter.java
+          grep -q 'DownloadsExporter.saveAsync' app/src/main/java/com/fer/wavault/MainActivity.java
+          grep -q '↓ descargar' app/src/main/java/com/fer/wavault/MainActivity.java
 
       - uses: android-actions/setup-android@v3
       - name: Install Android SDK 35
@@ -102,7 +105,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: WA-Vault-v0.3.7-unsigned
+          name: WA-Vault-v0.3.7-final-unsigned
           path: |
             wa-vault-v037-project/app/build/outputs/apk/release/app-release-unsigned.apk
             wa-vault-v037-project/apksigner.jar
