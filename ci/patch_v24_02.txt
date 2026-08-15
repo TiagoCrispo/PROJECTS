@@ -1,0 +1,394 @@
++            distanceKm = (distanceResult.value / 1000.0).coerceAtLeast(0.0),
+             heartRateBpm = latestHr,
+             weightKg = localWeightKg ?: hcWeight,
+-            source = "Health Connect"
++            source = if (suppressed > 0) "Health Connect reconciliado" else "Health Connect",
++            healthConnectDedupedRecords = suppressed,
+         )
+     }
+ }
+diff -ruN '--exclude=.kotlin' '--exclude=build' '--exclude=dist' bandlab_v23_base/app/src/main/java/com/fer/bandlab/health/HealthRecordDeduplicator.kt bandlab_v24/app/src/main/java/com/fer/bandlab/health/HealthRecordDeduplicator.kt
+--- bandlab_v23_base/app/src/main/java/com/fer/bandlab/health/HealthRecordDeduplicator.kt	1970-01-01 00:00:00.000000000 +0000
++++ bandlab_v24/app/src/main/java/com/fer/bandlab/health/HealthRecordDeduplicator.kt	2026-08-15 22:04:30.892330787 +0000
+@@ -0,0 +1,60 @@
++package com.fer.bandlab.health
++
++import kotlin.math.max
++import kotlin.math.min
++
++/**
++ * Conservative cross-origin reconciliation for cumulative interval metrics.
++ * It divides time into one-minute buckets and keeps the largest contribution in
++ * every bucket instead of summing overlapping sources (watch + phone + app).
++ * Non-overlapping intervals are still fully accumulated.
++ */
++object HealthRecordDeduplicator {
++    data class Interval(
++        val startEpochMs: Long,
++        val endEpochMs: Long,
++        val value: Double,
++        val origin: String = "",
++    )
++
++    data class Result(
++        val value: Double,
++        val inputRecords: Int,
++        val overlapSuppressedRecords: Int,
++    )
++
++    private const val BUCKET_MS = 60_000L
++
++    fun reconcile(records: List<Interval>): Result {
++        val valid = records.filter { it.value >= 0.0 && it.endEpochMs > it.startEpochMs }
++        if (valid.isEmpty()) return Result(0.0, records.size, 0)
++
++        val bucketBest = mutableMapOf<Long, Double>()
++        valid.forEach { r ->
++            val duration = (r.endEpochMs - r.startEpochMs).toDouble()
++            var bucket = Math.floorDiv(r.startEpochMs, BUCKET_MS) * BUCKET_MS
++            while (bucket < r.endEpochMs) {
++                val bucketEnd = bucket + BUCKET_MS
++                val overlap = (min(r.endEpochMs, bucketEnd) - max(r.startEpochMs, bucket)).coerceAtLeast(0L)
++                if (overlap > 0) {
++                    val contribution = r.value * (overlap / duration)
++                    val old = bucketBest[bucket] ?: 0.0
++                    if (contribution > old) bucketBest[bucket] = contribution
++                }
++                bucket += BUCKET_MS
++            }
++        }
++
++        val suppressed = valid.count { r ->
++            valid.any { other ->
++                if (other === r || other.origin == r.origin) false
++                else {
++                    val overlap = (min(r.endEpochMs, other.endEpochMs) - max(r.startEpochMs, other.startEpochMs)).coerceAtLeast(0L)
++                    val minDuration = min(r.endEpochMs - r.startEpochMs, other.endEpochMs - other.startEpochMs).coerceAtLeast(1L)
++                    overlap.toDouble() / minDuration >= 0.80
++                }
++            }
++        }
++        return Result(bucketBest.values.sum(), records.size, suppressed)
++    }
++}
+diff -ruN '--exclude=.kotlin' '--exclude=build' '--exclude=dist' bandlab_v23_base/app/src/main/java/com/fer/bandlab/health/ReadinessEngine.kt bandlab_v24/app/src/main/java/com/fer/bandlab/health/ReadinessEngine.kt
+--- bandlab_v23_base/app/src/main/java/com/fer/bandlab/health/ReadinessEngine.kt	2026-08-15 21:30:28.000000000 +0000
++++ bandlab_v24/app/src/main/java/com/fer/bandlab/health/ReadinessEngine.kt	2026-08-15 22:04:02.529156161 +0000
+@@ -19,6 +19,7 @@
+                 validDays = valid.size,
+                 todaySleepMinutes = valid.lastOrNull()?.sleepMinutes,
+                 todayRestingHeartRateBpm = valid.lastOrNull()?.restingHeartRateBpm,
++                confidence = when (valid.size) { 0 -> "Sin datos"; in 1..2 -> "Baja"; else -> "Media" },
+             )
+         }
+ 
+@@ -32,6 +33,7 @@
+                 validDays = valid.size,
+                 todaySleepMinutes = today.sleepMinutes,
+                 todayRestingHeartRateBpm = today.restingHeartRateBpm,
++                confidence = "Media",
+             )
+         }
+ 
+@@ -69,6 +71,7 @@
+             baselineRestingHeartRateBpm = baseRhr.roundToInt().toLong(),
+             todayRestingHeartRateBpm = today.restingHeartRateBpm,
+             restingHeartRateDeltaBpm = rhrDelta.roundToInt().toLong(),
++            confidence = when { baseline.size >= 6 -> "Alta"; baseline.size >= 4 -> "Media-alta"; else -> "Media" },
+         )
+     }
+ }
+diff -ruN '--exclude=.kotlin' '--exclude=build' '--exclude=dist' bandlab_v23_base/app/src/main/java/com/fer/bandlab/model/Models.kt bandlab_v24/app/src/main/java/com/fer/bandlab/model/Models.kt
+--- bandlab_v23_base/app/src/main/java/com/fer/bandlab/model/Models.kt	2026-08-15 21:30:28.000000000 +0000
++++ bandlab_v24/app/src/main/java/com/fer/bandlab/model/Models.kt	2026-08-15 22:03:53.896530138 +0000
+@@ -2,16 +2,41 @@
+ 
+ import java.util.UUID
+ 
+-enum class AppTab(val label: String) { HEALTH("Hoy"), TRAIN("Entrenar"), HISTORY("Historial"), DEVICE("Band") }
++enum class AppTab(val label: String) { HEALTH("Hoy"), TRAIN("Entrenar"), HISTORY("Historial"), DEVICE("Band"), SETTINGS("Ajustes") }
+ 
+ enum class WorkoutType(val title: String, val subtitle: String, val met: Double) {
+-    WALK("Caminar", "GPS + auto-pausa", 3.8), RUN("Correr", "Ritmo, splits y GPS", 8.3),
+-    CYCLE("Ciclismo", "Velocidad, distancia y GPS", 7.5), ROPE("Saltar soga", "Tiempo activo y pausas", 11.8)
++    WALK("Caminar", "GNSS offline + auto-pausa", 3.8), RUN("Correr", "Ritmo, splits y GNSS offline", 8.3),
++    CYCLE("Ciclismo", "Velocidad, distancia y GNSS offline", 7.5), ROPE("Saltar soga", "Tiempo activo y pausas", 11.8)
+ }
+ enum class WorkoutStatus { IDLE, ACTIVE, PAUSED }
+ 
+ data class SplitRecord(val distanceMeters: Int, val activeMs: Long, val splitMs: Long)
+ 
++data class RoutePoint(
++    val latitude: Double,
++    val longitude: Double,
++    val altitudeMeters: Double? = null,
++    val accuracyMeters: Float? = null,
++    val elapsedMs: Long = 0L,
++    val speedMps: Double = 0.0,
++    val segmentStart: Boolean = false,
++)
++
++data class ManualLapRecord(
++    val activeMs: Long,
++    val distanceMeters: Double,
++    val lapMs: Long,
++    val lapDistanceMeters: Double,
++)
++
++enum class WorkoutGoalType { NONE, DISTANCE, TIME }
++
++data class WorkoutGoal(
++    val type: WorkoutGoalType = WorkoutGoalType.NONE,
++    val distanceMeters: Int = 0,
++    val timeMinutes: Int = 0,
++)
++
+ data class HealthSnapshot(
+     val steps: Long = 0,
+     val activeCaloriesKcal: Double = 0.0,
+@@ -23,7 +48,8 @@
+     val spo2Percent: Int? = null,
+     val sleepMinutes: Int? = null,
+     val weightKg: Double? = null,
+-    val source: String = "Sin sincronizar"
++    val source: String = "Sin sincronizar",
++    val healthConnectDedupedRecords: Int = 0,
+ )
+ 
+ data class WorkoutLiveState(
+@@ -32,17 +58,29 @@
+     val pausedMs: Long = 0L, val pauseCount: Int = 0, val distanceMeters: Double = 0.0,
+     val currentSpeedMps: Double = 0.0, val currentHeartRateBpm: Int? = null,
+     val caloriesKcal: Double = 0.0, val autoPaused: Boolean = false, val gpsAccuracyMeters: Float? = null,
+-    val gpsSignalLost: Boolean = false, val gpsLossCount: Int = 0, val splits: List<SplitRecord> = emptyList()
++    val gpsSignalLost: Boolean = false, val gpsLossCount: Int = 0, val splits: List<SplitRecord> = emptyList(),
++    val route: List<RoutePoint> = emptyList(), val ascentMeters: Double = 0.0, val descentMeters: Double = 0.0,
++    val cadenceSpm: Int? = null, val stepCount: Int = 0, val gpsProviderEnabled: Boolean = true,
++    val fineLocationGranted: Boolean = true, val manualLaps: List<ManualLapRecord> = emptyList(),
++    val goal: WorkoutGoal = WorkoutGoal(), val goalReached: Boolean = false,
+ ) {
+     val distanceKm get() = distanceMeters / 1000.0
+     val paceMinutesPerKm: Double? get() = if (distanceMeters >= 50 && activeMs > 0) (activeMs / 60000.0) / distanceKm else null
++    val goalProgress: Double? get() = when (goal.type) {
++        WorkoutGoalType.DISTANCE -> goal.distanceMeters.takeIf { it > 0 }?.let { (distanceMeters / it).coerceIn(0.0, 1.0) }
++        WorkoutGoalType.TIME -> goal.timeMinutes.takeIf { it > 0 }?.let { (activeMs / (it * 60_000.0)).coerceIn(0.0, 1.0) }
++        WorkoutGoalType.NONE -> null
++    }
+ }
+ 
+ data class WorkoutSummary(
+     val id: String = UUID.randomUUID().toString(), val type: WorkoutType, val startedAtEpochMs: Long,
+     val elapsedMs: Long, val activeMs: Long, val pausedMs: Long, val pauseCount: Int,
+     val distanceMeters: Double, val caloriesKcal: Double, val averageHeartRateBpm: Int? = null,
+-    val maxHeartRateBpm: Int? = null, val gpsLossCount: Int = 0, val splits: List<SplitRecord> = emptyList()
++    val maxHeartRateBpm: Int? = null, val gpsLossCount: Int = 0, val splits: List<SplitRecord> = emptyList(),
++    val route: List<RoutePoint> = emptyList(), val ascentMeters: Double = 0.0, val descentMeters: Double = 0.0,
++    val averageCadenceSpm: Int? = null, val totalSteps: Int = 0, val manualLaps: List<ManualLapRecord> = emptyList(),
++    val goal: WorkoutGoal = WorkoutGoal(), val goalReached: Boolean = false,
+ ) {
+     val distanceKm get() = distanceMeters / 1000.0
+     val paceMinutesPerKm: Double? get() = if (distanceMeters >= 50 && activeMs > 0) (activeMs / 60000.0) / distanceKm else null
+@@ -63,7 +101,6 @@
+     val statusText: String = "Elegí una foto para preparar el modo limpio"
+ )
+ 
+-
+ data class WatchfaceUiItem(
+     val id: String,
+     val name: String,
+@@ -100,6 +137,7 @@
+     val baselineRestingHeartRateBpm: Long? = null,
+     val todayRestingHeartRateBpm: Long? = null,
+     val restingHeartRateDeltaBpm: Long? = null,
++    val confidence: String = "Baja",
+ )
+ 
+ enum class TodayCardKind { RECOVERY, MOVEMENT, STRENGTH, HYDRATION, TRAINING }
+@@ -110,8 +148,24 @@
+     val value: String,
+     val detail: String,
+     val priority: Int = 0,
++    val pinned: Boolean = false,
+ )
+ 
+ data class TodayDashboard(
+     val cards: List<TodayCard> = emptyList()
+ )
++
++data class DiagnosticCheck(
++    val id: String,
++    val title: String,
++    val ok: Boolean,
++    val detail: String,
++)
++
++data class DiagnosticReport(
++    val checks: List<DiagnosticCheck> = emptyList(),
++    val generatedAtEpochMs: Long = 0L,
++) {
++    val passed: Int get() = checks.count { it.ok }
++    val total: Int get() = checks.size
++}
+diff -ruN '--exclude=.kotlin' '--exclude=build' '--exclude=dist' bandlab_v23_base/app/src/main/java/com/fer/bandlab/model/StrengthModels.kt bandlab_v24/app/src/main/java/com/fer/bandlab/model/StrengthModels.kt
+--- bandlab_v23_base/app/src/main/java/com/fer/bandlab/model/StrengthModels.kt	2026-08-15 21:30:28.000000000 +0000
++++ bandlab_v24/app/src/main/java/com/fer/bandlab/model/StrengthModels.kt	2026-08-15 22:10:19.439638396 +0000
+@@ -3,12 +3,9 @@
+ import com.fer.bandlab.training.StrengthMath
+ import java.util.UUID
+ 
+-data class StrengthExercise(
+-    val id: String,
+-    val name: String,
+-    val muscleGroup: String,
+-    val substitutionGroup: String,
+-)
++data class StrengthExercise(val id: String, val name: String, val muscleGroup: String, val substitutionGroup: String)
++enum class StrengthSetType(val label: String) { WARMUP("Calentamiento"), NORMAL("Trabajo"), DROP("Drop set") }
++data class StrengthRoutine(val id: String, val name: String, val exerciseIds: List<String>)
+ 
+ data class StrengthSetRecord(
+     val id: String = UUID.randomUUID().toString(),
+@@ -16,6 +13,11 @@
+     val timestampEpochMs: Long = System.currentTimeMillis(),
+     val weightKg: Double,
+     val reps: Int,
++    val rpe: Double? = null,
++    val rir: Int? = null,
++    val setType: StrengthSetType = StrengthSetType.NORMAL,
++    val sessionId: String = java.time.LocalDate.now().toString(),
++    val supersetTag: String? = null,
+ ) {
+     val volume: Double get() = weightKg * reps
+     val e1rm: Double get() = StrengthMath.e1rm(weightKg, reps)
+@@ -29,6 +31,10 @@
+     val bestE1rmKg: Double? = null,
+     val totalVolumeKg: Double = 0.0,
+     val suggestedWeightKg: Double? = null,
++    val weeklyVolumeKg: Double = 0.0,
++    val previousWeekVolumeKg: Double = 0.0,
++    val weeklyDeltaPercent: Double? = null,
++    val favorite: Boolean = false,
+ )
+ 
+ data class StrengthUiState(
+@@ -36,5 +42,6 @@
+     val restSecondsRemaining: Int = 0,
+     val restRunning: Boolean = false,
+     val restPresetSeconds: Int = 90,
++    val selectedRoutineId: String = "A",
+     val lastMessage: String = "",
+ )
+diff -ruN '--exclude=.kotlin' '--exclude=build' '--exclude=dist' bandlab_v23_base/app/src/main/java/com/fer/bandlab/training/StrengthStore.kt bandlab_v24/app/src/main/java/com/fer/bandlab/training/StrengthStore.kt
+--- bandlab_v23_base/app/src/main/java/com/fer/bandlab/training/StrengthStore.kt	2026-08-15 21:30:28.000000000 +0000
++++ bandlab_v24/app/src/main/java/com/fer/bandlab/training/StrengthStore.kt	2026-08-15 22:10:19.440385044 +0000
+@@ -3,92 +3,67 @@
+ import android.content.Context
+ import com.fer.bandlab.model.StrengthExercise
+ import com.fer.bandlab.model.StrengthExerciseStats
++import com.fer.bandlab.model.StrengthRoutine
+ import com.fer.bandlab.model.StrengthSetRecord
++import com.fer.bandlab.model.StrengthSetType
+ import org.json.JSONArray
+ import org.json.JSONObject
++import java.time.DayOfWeek
++import java.time.Instant
++import java.time.LocalDate
++import java.time.ZoneId
++import java.time.temporal.TemporalAdjusters
+ 
+ class StrengthStore(context: Context) {
+     private val prefs = context.getSharedPreferences("bandlab_strength_v2", Context.MODE_PRIVATE)
+ 
+     val catalog = listOf(
+-        StrengthExercise("bench_press", "Press banca", "Pecho", "horizontal_press"),
+-        StrengthExercise("incline_press", "Press inclinado", "Pecho", "horizontal_press"),
+-        StrengthExercise("push_up", "Flexiones", "Pecho", "horizontal_press"),
+-        StrengthExercise("back_squat", "Sentadilla", "Piernas", "squat"),
+-        StrengthExercise("leg_press", "Prensa", "Piernas", "squat"),
+-        StrengthExercise("deadlift", "Peso muerto", "Cadena posterior", "hinge"),
+-        StrengthExercise("rdl", "Peso muerto rumano", "Cadena posterior", "hinge"),
+-        StrengthExercise("overhead_press", "Press militar", "Hombros", "vertical_press"),
+-        StrengthExercise("lat_pulldown", "Jalón al pecho", "Espalda", "vertical_pull"),
+-        StrengthExercise("pull_up", "Dominadas", "Espalda", "vertical_pull"),
+-        StrengthExercise("barbell_row", "Remo con barra", "Espalda", "horizontal_pull"),
+-        StrengthExercise("cable_row", "Remo en polea", "Espalda", "horizontal_pull"),
++        StrengthExercise("bench_press", "Press banca", "Pecho", "horizontal_press"), StrengthExercise("incline_press", "Press inclinado", "Pecho", "horizontal_press"), StrengthExercise("push_up", "Flexiones", "Pecho", "horizontal_press"),
++        StrengthExercise("back_squat", "Sentadilla", "Piernas", "squat"), StrengthExercise("leg_press", "Prensa", "Piernas", "squat"), StrengthExercise("deadlift", "Peso muerto", "Cadena posterior", "hinge"), StrengthExercise("rdl", "Peso muerto rumano", "Cadena posterior", "hinge"),
++        StrengthExercise("overhead_press", "Press militar", "Hombros", "vertical_press"), StrengthExercise("lateral_raise", "Elevaciones laterales", "Hombros", "lateral_raise"),
++        StrengthExercise("lat_pulldown", "Jalón al pecho", "Espalda", "vertical_pull"), StrengthExercise("pull_up", "Dominadas", "Espalda", "vertical_pull"), StrengthExercise("barbell_row", "Remo con barra", "Espalda", "horizontal_pull"), StrengthExercise("cable_row", "Remo en polea", "Espalda", "horizontal_pull"),
++        StrengthExercise("biceps_curl", "Curl bíceps", "Bíceps", "elbow_flexion"), StrengthExercise("triceps_pushdown", "Extensión tríceps", "Tríceps", "elbow_extension"), StrengthExercise("calf_raise", "Gemelos", "Pantorrillas", "calf"),
++    )
++    val routines = listOf(
++        StrengthRoutine("A", "A · Empuje", listOf("bench_press", "incline_press", "overhead_press", "lateral_raise", "triceps_pushdown")),
++        StrengthRoutine("B", "B · Piernas", listOf("back_squat", "rdl", "leg_press", "calf_raise")),
++        StrengthRoutine("C", "C · Tirón", listOf("pull_up", "lat_pulldown", "barbell_row", "cable_row", "biceps_curl")),
+     )
+ 
+     fun exercise(id: String): StrengthExercise = catalog.firstOrNull { it.id == id } ?: catalog.first()
+-    fun substitutes(id: String): List<StrengthExercise> {
+-        val base = exercise(id)
+-        return catalog.filter { it.substitutionGroup == base.substitutionGroup && it.id != id }
+-    }
+-
+-    fun addSet(exerciseId: String, weightKg: Double, reps: Int): StrengthSetRecord {
+-        require(weightKg in 0.0..1000.0) { "Peso fuera de rango" }
+-        require(reps in 1..200) { "Repeticiones fuera de rango" }
+-        val record = StrengthSetRecord(exerciseId = exerciseId, weightKg = weightKg, reps = reps)
+-        val arr = JSONArray(prefs.getString("sets", "[]"))
+-        val next = JSONArray().put(toJson(record))
+-        for (i in 0 until minOf(arr.length(), 1999)) next.put(arr.getJSONObject(i))
+-        prefs.edit().putString("sets", next.toString()).apply()
+-        return record
+-    }
+-
+-    fun history(exerciseId: String): List<StrengthSetRecord> = loadAll().filter { it.exerciseId == exerciseId }
+-
+-    fun stats(exerciseId: String): StrengthExerciseStats {
+-        val e = exercise(exerciseId)
+-        val h = history(exerciseId)
+-        val latest = h.firstOrNull()
+-        val suggested = latest?.let { StrengthMath.suggestedWeight(it) }
+-        return StrengthExerciseStats(
+-            exercise = e,
+-            history = h,
+-            maxWeightKg = h.maxOfOrNull { it.weightKg },
+-            maxReps = h.maxOfOrNull { it.reps },
+-            bestE1rmKg = h.maxOfOrNull { it.e1rm },
+-            totalVolumeKg = h.sumOf { it.volume },
+-            suggestedWeightKg = suggested,
+-        )
+-    }
+-
+-    fun clear() = prefs.edit().clear().apply()
++    fun substitutes(id: String): List<StrengthExercise> { val base=exercise(id); return catalog.filter { it.substitutionGroup==base.substitutionGroup && it.id!=id } }
++    fun routine(id: String): StrengthRoutine = routines.firstOrNull { it.id == id } ?: routines.first()
+ 
+-    private fun loadAll(): List<StrengthSetRecord> {
+-        val arr = JSONArray(prefs.getString("sets", "[]"))
+-        return buildList {
+-            for (i in 0 until arr.length()) runCatching { fromJson(arr.getJSONObject(i)) }.getOrNull()?.let(::add)
+-        }
+-    }
+-
+-    private fun toJson(r: StrengthSetRecord) = JSONObject().apply {
+-        put("id", r.id); put("exerciseId", r.exerciseId); put("ts", r.timestampEpochMs)
+-        put("weight", r.weightKg); put("reps", r.reps)
+-    }
+-    private fun fromJson(o: JSONObject) = StrengthSetRecord(
+-        id = o.getString("id"), exerciseId = o.getString("exerciseId"), timestampEpochMs = o.getLong("ts"),
+-        weightKg = o.getDouble("weight"), reps = o.getInt("reps")
+-    )
+-
+-    fun getRestPresetSeconds(): Int = prefs.getInt("rest_preset_seconds", 90).takeIf { it in setOf(60, 90, 120) } ?: 90
+-    fun setRestPresetSeconds(seconds: Int) {
+-        val safe = if (seconds in setOf(60, 90, 120)) seconds else 90
+-        prefs.edit().putInt("rest_preset_seconds", safe).apply()
+-    }
+-    fun getRestEndEpochMs(): Long = prefs.getLong("rest_end_epoch_ms", 0L)
+-    fun setRestEndEpochMs(value: Long) { prefs.edit().putLong("rest_end_epoch_ms", value.coerceAtLeast(0L)).apply() }
+-    fun clearRestEnd() { prefs.edit().remove("rest_end_epoch_ms").apply() }
+-
+-    fun hasSetToday(): Boolean {
+-        val start = java.time.LocalDate.now().atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+-        return loadAll().any { it.timestampEpochMs >= start }
+-    }
