@@ -35,6 +35,7 @@ jobs:
       - name: Apply verified v0.5.12 patch
         run: |
           set -euo pipefail
+          sha256sum wa-vault-build-v0512/chunks/part*
           cat wa-vault-build-v0512/chunks/part* | tr -d '\r\n' > /tmp/v0512.patch.gz.b64
           base64 -d /tmp/v0512.patch.gz.b64 | gzip -dc > /tmp/v0512.patch
           echo 'ffafcea04767d742c5be4f15ae662901d1cd51e2ccab666d492d72a1f71ecaee  /tmp/v0512.patch' | sha256sum -c -
