@@ -56,12 +56,45 @@ jobs:
           xz -t /tmp/v034.patch.xz
           xz -dc /tmp/v034.patch.xz > /tmp/v034.patch
           cd wa-vault-v034-project
-          patch -p4 --batch < /tmp/v034.patch
+          patch -p4 -F3 --batch < /tmp/v034.patch
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/src/main/java/com/fer/wavault/MainActivity.java')
+          s=p.read_text()
+          s=s.replace('    private boolean openedBatterySettings = false;\n        openedSamsungSettings = false;\n    private boolean openedSamsungSettings = false;', '    private boolean openedBatterySettings = false;\n    private boolean openedSamsungSettings = false;')
+          s=s.replace('        openedBatterySettings = false;\n        if (cameBack) {', '        openedBatterySettings = false;\n        openedSamsungSettings = false;\n        if (cameBack) {')
+          s=s.replace('private TextView diagRow(String label,String value){return text(label+"\n"+(value==null||value.isEmpty()?"Sin datos":value),12,muted,false);}', 'private TextView diagRow(String label,String value){return text(label+"\\n"+(value==null||value.isEmpty()?"Sin datos":value),12,muted,false);}')
+          start=s.index('    private void showStorageManager(){')
+          end=s.index('    private void confirmDeleteUnlinkedMedia(){',start)
+          block='''    private void showStorageManager(){
+              VaultDb.Stats st;try{st=db.getStats();}catch(Throwable t){st=new VaultDb.Stats();}
+              String msg="WA Vault usa "+human(st.totalBytes)+"\\n\\n"
+                      +"Fotos  "+human(st.imageBytes)+"\\n"
+                      +"Videos  "+human(st.videoBytes)+"\\n"
+                      +"Audio  "+human(st.audioBytes)+"\\n\\n"
+                      +st.media+" archivos guardados"
+                      +(st.unlinkedMedia>0?"\\n"+st.unlinkedMedia+" sin mensaje asociado":"")
+                      +"\\n\\nEstas limpiezas solo borran copias de WA Vault; no modifican WhatsApp.";
+              String[] opts={"Borrar archivos sin mensaje asociado","Borrar archivos >30 días","Borrar archivos >90 días","Limpiar caché de miniaturas","Borrar todos los archivos"};
+              new AlertDialog.Builder(this).setTitle("Almacenamiento recuperado").setMessage(msg).setItems(opts,(d,w)->{
+                  if(w==0)confirmDeleteUnlinkedMedia();
+                  else if(w==1)confirmDeleteOldMedia(30);
+                  else if(w==2)confirmDeleteOldMedia(90);
+                  else if(w==3){MediaThumbnailLoader.clearDiskCache(this);Toast.makeText(this,"Caché de miniaturas limpiada",Toast.LENGTH_SHORT).show();}
+                  else if(w==4)confirmClear(true);
+              }).setNegativeButton("Cerrar",null).show();
+          }
+
+          '''
+          s=s[:start]+block+s[end:]
+          p.write_text(s)
+          PY
           grep -q 'versionCode = 34' app/build.gradle.kts
           grep -q 'versionName = "0.3.4"' app/build.gradle.kts
           grep -q 'class VaultUiNotifier' app/src/main/java/com/fer/wavault/VaultUiNotifier.java
           grep -q 'ingestGrowingDirectMedia' app/src/main/java/com/fer/wavault/MediaArchiver.java
           grep -q 'getStats()' app/src/main/java/com/fer/wavault/VaultDb.java
+          grep -q 'showDiagnostics()' app/src/main/java/com/fer/wavault/MainActivity.java
 
       - uses: android-actions/setup-android@v3
 
