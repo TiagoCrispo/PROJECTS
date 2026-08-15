@@ -1,0 +1,110 @@
+name: WA Vault v0.5.8 repeated-message deletion fix
+
+on:
+  push:
+    branches: [wa-vault-build-v058]
+    paths:
+      - '.github/workflows/wa-vault-build-v058.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Restore verified v0.5.7 source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir wa-vault-v058-project
+          gh run download 31877135651 -n WA-Vault-v0.5.7-source -D wa-vault-v058-project
+          grep -q 'versionCode = 57' wa-vault-v058-project/app/build.gradle.kts
+          grep -q 'versionName = "0.5.7"' wa-vault-v058-project/app/build.gradle.kts
+          grep -q 'MAX_VIDEO_BYTES = 40L' wa-vault-v058-project/app/src/main/java/com/fer/wavault/MediaLimits.java
+
+      - name: Apply verified v0.5.8 patch
+        run: |
+          set -euo pipefail
+          cat > /tmp/v058.patch.gz.b64 <<'EOF'
+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
+EOF
+          base64 -d /tmp/v058.patch.gz.b64 | gzip -dc > /tmp/v058.patch
+          echo '00205ffa3766e13276ee5d71cfb8062080a2dfd50262905f660ecb5112ae8d45  /tmp/v058.patch' | sha256sum -c -
+          cd wa-vault-v058-project
+          patch -p1 --batch < /tmp/v058.patch
+          find . -name '*.rej' -print -quit | grep -q . && { find . -name '*.rej' -print; exit 1; } || true
+          grep -q 'versionCode = 58' app/build.gradle.kts
+          grep -q 'versionName = "0.5.8"' app/build.gradle.kts
+          grep -q 'SNAPSHOT_SHRINK_IGNORED' app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java
+          grep -q 'stableTimestamp' app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java
+          grep -q 'REMOVE_WAIT_' app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java
+          grep -q 'EMPTY_WAIT' app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java
+          test -s V058_NOTES.md
+
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK 35
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Compile release
+        working-directory: wa-vault-v058-project
+        run: gradle :app:assembleRelease --stacktrace --console=plain
+
+      - name: Restore signing key
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p signing
+          gh run download 31869556369 -n WA-Vault-v0.4.0-signing-backup-fixed -D signing
+          test -s signing/WA-Vault-v0.4.0-signing-backup.jks
+          grep -q 'WAVault-v040-2026' signing/SIGNING_BACKUP_PASSWORD.txt
+
+      - name: Sign and verify v0.5.8
+        run: |
+          set -euo pipefail
+          UNSIGNED=wa-vault-v058-project/app/build/outputs/apk/release/app-release-unsigned.apk
+          mkdir -p wa-vault-v058-output
+          PASS='WAVault-v040-2026'
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign \
+            --ks signing/WA-Vault-v0.4.0-signing-backup.jks \
+            --ks-key-alias wavault \
+            --ks-pass pass:"$PASS" \
+            --key-pass pass:"$PASS" \
+            --out wa-vault-v058-output/WA-Vault-v0.5.8.apk "$UNSIGNED"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs wa-vault-v058-output/WA-Vault-v0.5.8.apk > wa-vault-v058-output/APK_SIGNATURE.txt
+          sha256sum wa-vault-v058-output/WA-Vault-v0.5.8.apk > wa-vault-v058-output/APK_SHA256.txt
+          cp wa-vault-v058-project/V058_NOTES.md wa-vault-v058-output/
+          cp wa-vault-v058-project/TEST_MATRIX.md wa-vault-v058-output/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WA-Vault-v0.5.8-release
+          path: |
+            wa-vault-v058-output/WA-Vault-v0.5.8.apk
+            wa-vault-v058-output/APK_SHA256.txt
+            wa-vault-v058-output/APK_SIGNATURE.txt
+            wa-vault-v058-output/V058_NOTES.md
+            wa-vault-v058-output/TEST_MATRIX.md
+          retention-days: 90
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WA-Vault-v0.5.8-source
+          path: wa-vault-v058-project
+          retention-days: 30
