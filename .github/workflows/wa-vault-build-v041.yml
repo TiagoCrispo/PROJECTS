@@ -46,7 +46,7 @@ jobs:
       - name: Apply v0.4.1 stability patch
         run: |
           set -euo pipefail
-          cat wa-vault-build-v041/patch-00.b64 wa-vault-build-v041/patch-01.b64 wa-vault-build-v041/patch-02.b64 wa-vault-build-v041/patch-03.b64 > /tmp/v041.patch.b64
+          cat wa-vault-build-v041/patch-000.b64 wa-vault-build-v041/patch-001.b64 wa-vault-build-v041/patch-002.b64 wa-vault-build-v041/patch-003.b64 wa-vault-build-v041/patch-01.b64 wa-vault-build-v041/patch-02.b64 wa-vault-build-v041/patch-03.b64 > /tmp/v041.patch.b64
           base64 -d /tmp/v041.patch.b64 > /tmp/v041.patch.xz
           echo 'df6f5924fa96abcaf2369cbaa699e8f7709fb27b0b9109b7c0b62e23ae0abf38  /tmp/v041.patch.xz' | sha256sum -c -
           xz -dc /tmp/v041.patch.xz > /tmp/v041.patch
