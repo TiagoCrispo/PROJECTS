@@ -7,7 +7,7 @@ on:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: macos-15-intel
     timeout-minutes: 55
     env:
       KODO_COMMIT: 8152ffdd3f384e0563a39db7bf77a8b70d3a6e84
@@ -19,53 +19,36 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat > /tmp/CHUNK_SHA256SUMS <<'EOF'
-          79cff69b984c8bf78c99317eb91ef292f7b7ca98d1db8c7f603e19ec98ab022b  src_chunks/00.b64
-          08064429f01e995d9a2b856283d8d4f36de6f609ed126529ecdb7a54e4cc8de1  src_chunks/01a.b64
-          443697e91d6fc1efd877f2042ab555da89cb9c230128bdb948d023c3d274ff2a  src_chunks/01b.b64
-          76f5da7c21270d49e054c792a9e61b92e44f48736fc6a522df13656a565eaf2f  src_chunks/02.b64
-          905408338378d168d0688ea12593e38449ba567b41b92512491807855031890d  src_chunks/03.b64
-          3daba85da67f43f769a392489e550ae2b28d106b8a2ac12e37dd628da6ae7c6e  src_chunks/04.b64
-          4e8dfc5e4ee49e2714d457485d555ee745e4f45bbaf6ff1fe37d17f11629e730  src_chunks/05.b64
-          f385e474ae6ea774a6b1cad1ca72ca4f25135999751e39969145347c4d17ddcd  src_chunks/06.b64
-          EOF
-          sha256sum -c /tmp/CHUNK_SHA256SUMS
           cat src_chunks/00.b64 src_chunks/01a.b64 src_chunks/01b.b64 src_chunks/02.b64 src_chunks/03.b64 src_chunks/04.b64 src_chunks/05.b64 src_chunks/06.b64 > /tmp/bandlab.b64
-          base64 -d /tmp/bandlab.b64 > /tmp/bandlab.tar.xz
-          echo "$SOURCE_SHA256  /tmp/bandlab.tar.xz" | sha256sum -c -
+          base64 -D -i /tmp/bandlab.b64 -o /tmp/bandlab.tar.xz
+          test "$(shasum -a 256 /tmp/bandlab.tar.xz | awk '{print $1}')" = "$SOURCE_SHA256"
           mkdir -p work
           tar -xJf /tmp/bandlab.tar.xz -C work
-          test -f work/app/build.gradle.kts
           test -f work/app/src/main/java/com/fer/bandlab/MainActivity.kt
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android platform
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
         shell: bash
         run: |
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools" "emulator" "system-images;android-35;default;x86_64"
 
-      - name: Set up Gradle 8.13
-        uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
 
-      - name: Import pinned Xiaomi Band 9 Active protocol
+      - name: Import pinned Xiaomi protocol
         shell: bash
         run: |
           set -euo pipefail
           git clone --filter=blob:none https://github.com/kidneyweakx/Kodo.git /tmp/Kodo
           git -C /tmp/Kodo checkout "$KODO_COMMIT"
           test "$(git -C /tmp/Kodo rev-parse HEAD)" = "$KODO_COMMIT"
-
           mkdir -p work/app/src/main/java/com/kidneyweakx/miband9active/xiaomi
           cp -R /tmp/Kodo/android-port/src/main/java/com/kidneyweakx/miband9active/xiaomi/auth work/app/src/main/java/com/kidneyweakx/miband9active/xiaomi/
           cp -R /tmp/Kodo/android-port/src/main/java/com/kidneyweakx/miband9active/xiaomi/protocol work/app/src/main/java/com/kidneyweakx/miband9active/xiaomi/
@@ -78,87 +61,112 @@ jobs:
           cp /tmp/Kodo/NOTICE.md work/third_party/Kodo/NOTICE.md
           git -C /tmp/Kodo rev-parse HEAD > work/third_party/Kodo/COMMIT.txt
 
-      - name: Sequential build + emulator smoke 2.0 → 2.3
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('work/app/src/main/java/com/kidneyweakx/miband9active/xiaomi/protocol/MiBand9BleDriver.kt')
+          s = p.read_text()
+          old = '''            is XiaomiSppPacketV2.Data -> {
+                sendAck(packet.sequenceNumber)
+                val plain = packet.decryptedPayload(authSession)
+                val cmd = runCatching { XiaomiProto.Command.parseFrom(plain) }.getOrNull()
+                if (cmd == null) {
+                    Log.w(TAG, "← Data seq=${packet.sequenceNumber} channel=${packet.channel} but Command.parseFrom failed (${plain.size}B)")
+                    return
+                }
+                Log.d(TAG, "← Data seq=${packet.sequenceNumber} channel=${packet.channel} cmd type=${cmd.type} subtype=${cmd.subtype}")
+                onCommandReceived(cmd, packet.channel)
+            }
+'''
+          new = '''            is XiaomiSppPacketV2.Data -> {
+                sendAck(packet.sequenceNumber)
+                val plain = packet.decryptedPayload(authSession)
+                if (packet.channel == XiaomiChannel.ACTIVITY) {
+                    _activityChunks.tryEmit(plain)
+                    return
+                }
+                val cmd = runCatching { XiaomiProto.Command.parseFrom(plain) }.getOrNull()
+                if (cmd == null) {
+                    Log.w(TAG, "← Data seq=${packet.sequenceNumber} channel=${packet.channel} but Command.parseFrom failed (${plain.size}B)")
+                    return
+                }
+                Log.d(TAG, "← Data seq=${packet.sequenceNumber} channel=${packet.channel} cmd type=${cmd.type} subtype=${cmd.subtype}")
+                onCommandReceived(cmd, packet.channel)
+            }
+'''
+          if old not in s: raise SystemExit('activity patch anchor not found')
+          s = s.replace(old, new)
+          s = s.replace('''        if (channel == XiaomiChannel.ACTIVITY) {
+            _activityChunks.tryEmit(cmd.toByteArray())
+            return
+        }
+''', '')
+          p.write_text(s)
+          PY
+          cat > work/third_party/Kodo/BANDLAB_PATCHES.txt <<'EOF'
+          BandLab integration: ACTIVITY payloads are delivered as raw bytes before protobuf parsing.
+          EOF
+
+      - name: Build and test 2.0 first
+        working-directory: work
+        shell: bash
+        run: gradle --no-daemon :app:testV20DebugUnitTest :app:assembleV20Debug :app:assembleV20Release
+
+      - name: Sequential emulator gates 2.0 to 2.3
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
           arch: x86_64
           profile: pixel_6
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save -no-metrics
           script: |
             set -euo pipefail
             cd work
             mkdir -p ../verification
-
             smoke() {
-              local stage="$1"
-              local apk="$2"
-              local version="$3"
-              echo "=== VERIFY $version ==="
+              local stage="$1" apk="$2" version="$3"
               adb logcat -c
-              if [ "$stage" = "v20" ]; then
-                adb install "$apk"
-              else
-                adb install -r "$apk"
-              fi
+              if [ "$stage" = v20 ]; then adb install "$apk"; else adb install -r "$apk"; fi
               adb shell am force-stop com.fer.bandlab
               adb shell am start -W -n com.fer.bandlab/.MainActivity | tee "../verification/${stage}-am-start.txt"
-              sleep 4
-              pid="$(adb shell pidof com.fer.bandlab | tr -d '\r')"
-              test -n "$pid"
+              sleep 5
+              test -n "$(adb shell pidof com.fer.bandlab | tr -d '\r')"
               adb shell dumpsys activity activities > "../verification/${stage}-activities.txt"
               grep -q "com.fer.bandlab/.MainActivity" "../verification/${stage}-activities.txt"
               adb shell dumpsys package com.fer.bandlab | grep -E "versionCode|versionName" > "../verification/${stage}-package.txt"
-              adb logcat -d -t 500 > "../verification/${stage}-logcat.txt"
-              if grep -E "FATAL EXCEPTION|Process: com\.fer\.bandlab.*has died|AndroidRuntime.*com\.fer\.bandlab" "../verification/${stage}-logcat.txt"; then
-                echo "Crash detected in $version"
-                exit 1
-              fi
-              echo "$version: BUILD + INSTALL + LAUNCH + PROCESS ALIVE + MAIN ACTIVITY OK" | tee "../verification/${stage}-PASS.txt"
+              adb logcat -d -t 800 > "../verification/${stage}-logcat.txt"
+              if grep -E "FATAL EXCEPTION|Process: com\.fer\.bandlab.*has died|AndroidRuntime.*com\.fer\.bandlab" "../verification/${stage}-logcat.txt"; then exit 1; fi
+              echo "$version PASS" | tee "../verification/${stage}-PASS.txt"
             }
-
-            echo "--- 2.0 CORE ---"
-            gradle --no-daemon :app:testV20DebugUnitTest :app:assembleV20Debug
             smoke v20 app/build/outputs/apk/v20/debug/app-v20-debug.apk 2.0.0
-
-            echo "--- 2.1 WATCHFACE ---"
-            gradle --no-daemon :app:testV21DebugUnitTest :app:assembleV21Debug
+            gradle --no-daemon :app:testV21DebugUnitTest :app:assembleV21Debug :app:assembleV21Release
             smoke v21 app/build/outputs/apk/v21/debug/app-v21-debug.apk 2.1.0
-
-            echo "--- 2.2 TRAINING PRO ---"
-            gradle --no-daemon :app:testV22DebugUnitTest :app:assembleV22Debug
+            gradle --no-daemon :app:testV22DebugUnitTest :app:assembleV22Debug :app:assembleV22Release
             smoke v22 app/build/outputs/apk/v22/debug/app-v22-debug.apk 2.2.0
-
-            echo "--- 2.3 FULL ---"
-            gradle --no-daemon :app:testV23DebugUnitTest :app:assembleV23Debug
+            gradle --no-daemon :app:testV23DebugUnitTest :app:assembleV23Debug :app:assembleV23Release
             smoke v23 app/build/outputs/apk/v23/debug/app-v23-debug.apk 2.3.0
 
       - name: Package verified outputs
-        if: success()
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist
-          cp work/app/build/outputs/apk/v20/debug/app-v20-debug.apk dist/BandLab9Active_v2.0_CORE.apk
-          cp work/app/build/outputs/apk/v21/debug/app-v21-debug.apk dist/BandLab9Active_v2.1_WATCHFACE.apk
-          cp work/app/build/outputs/apk/v22/debug/app-v22-debug.apk dist/BandLab9Active_v2.2_TRAINING_PRO.apk
-          cp work/app/build/outputs/apk/v23/debug/app-v23-debug.apk dist/BandLab9Active_v2.3_FULL.apk
+          cp work/app/build/outputs/apk/v20/debug/app-v20-debug.apk dist/BandLab9Active_v2.0_CORE_DEBUG_VERIFIED.apk
+          cp work/app/build/outputs/apk/v21/debug/app-v21-debug.apk dist/BandLab9Active_v2.1_WATCHFACE_DEBUG_VERIFIED.apk
+          cp work/app/build/outputs/apk/v22/debug/app-v22-debug.apk dist/BandLab9Active_v2.2_TRAINING_PRO_DEBUG_VERIFIED.apk
+          cp work/app/build/outputs/apk/v23/debug/app-v23-debug.apk dist/BandLab9Active_v2.3_FULL_DEBUG_VERIFIED.apk
+          find work/app/build/outputs/apk -name '*release-unsigned.apk' -exec cp {} dist/ \;
           cp -R verification dist/verification
           cat > dist/VERIFICATION_REPORT.txt <<'EOF'
-          BandLab 2.x sequential verification
-          ====================================
           Gate order: 2.0 -> 2.1 -> 2.2 -> 2.3.
-          A later stage was built/launched only after the previous stage passed.
-          Each stage: unit tests, Android build, APK install/update, MainActivity launch,
-          process-alive check, foreground Activity check, and fatal-crash log scan.
-          Hardware-only Xiaomi/BLE/watchface behavior cannot be exercised by the emulator.
+          Each stage passed unit tests/build plus APK install/update, MainActivity launch,
+          process-alive, foreground-activity and fatal-crash-log checks before the next stage.
+          Physical Xiaomi BLE/watchface behavior requires the actual Smart Band 9 Active.
           EOF
           (cd work && zip -qr ../dist/BandLab9Active_v2.3_SOURCE_COMPLETE.zip . -x 'app/build/*' '.gradle/*' 'build/*')
-          sha256sum dist/*.apk dist/*.zip > dist/SHA256SUMS.txt
+          shasum -a 256 dist/*.apk dist/*.zip > dist/SHA256SUMS.txt
 
       - uses: actions/upload-artifact@v4
-        if: success()
         with:
           name: BandLab-v2.0-to-v2.3-verified
           path: dist/
