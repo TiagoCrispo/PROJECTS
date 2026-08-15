@@ -67,7 +67,6 @@ storage = '''    private void showStorageManager(){
 s = s[:start] + storage + s[end:]
 
 # Remove every previous onDestroy implementation, regardless of spacing, and insert one canonical lifecycle cleanup.
-# Both legacy implementations are short and contain no nested multi-line method blocks.
 s = re.sub(
     r'\n\s*@Override\s+protected\s+void\s+onDestroy\s*\(\s*\)\s*\{.*?\n\s{4}\}\n',
     '\n',
@@ -93,7 +92,7 @@ p.write_text(s)
 # Hard checks before invoking Gradle.
 assert 'versionCode = 34' in (root / 'app/build.gradle.kts').read_text()
 assert 'versionName = "0.3.4"' in (root / 'app/build.gradle.kts').read_text()
-assert s.count('onDestroy()') == 1, s.count('onDestroy()')
+assert s.count('protected void onDestroy()') == 1, s.count('protected void onDestroy()')
 assert 'private void showDiagnostics()' in s
 assert 'private void confirmDeleteUnlinkedMedia()' in s
 assert 'private TextView diagRow(String label,String value)' in s
