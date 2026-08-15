@@ -19,6 +19,7 @@ jobs:
           unzip -t source.zip
           unzip -q source.zip
           cp patches/MainActivity.java mendoza_v4_native/app/src/main/java/com/mendozameteo/pro/MainActivity.java
+          cp patches/gradle.properties mendoza_v4_native/gradle.properties
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -37,7 +38,7 @@ jobs:
           set +e
           gradle :app:assembleDebug --stacktrace > ../gradle-build.log 2>&1
           echo $? > ../gradle-exit.txt
-          tail -n 200 ../gradle-build.log
+          tail -n 220 ../gradle-build.log
           exit 0
       - name: Upload build diagnostics
         uses: actions/upload-artifact@v4
@@ -58,4 +59,4 @@ jobs:
           name: MendozaMeteo-PRO-v4.0-Native-APK
           path: MendozaMeteo_PRO_v4.0_Native.apk
 
-# build-trigger: diagnostics-v1
+# build-trigger: androidx-fix-v1
