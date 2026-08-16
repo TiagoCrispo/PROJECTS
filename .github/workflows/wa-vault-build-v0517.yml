@@ -32,12 +32,19 @@ jobs:
           grep -q 'versionCode = 66' wa-vault-v0517-project/app/build.gradle.kts
           grep -q 'versionName = "0.5.16"' wa-vault-v0517-project/app/build.gradle.kts
 
-      - name: Apply v0.5.17 patch and regressions
+      - name: Reconstruct and apply verified v0.5.17 patch
         run: |
           set -euo pipefail
-          test -s wa-vault-build-v0517/v0517.patch
+          cat wa-vault-build-v0517/b64/part00 \
+              wa-vault-build-v0517/b64/part01 \
+              wa-vault-build-v0517/b64/part02 \
+              wa-vault-build-v0517/b64/part03 \
+            | tr -d '\r\n\t ' | base64 -d > /tmp/v0517.patch.gz
+          echo '5f06f5182a1d0633b1dd7895df4d3bcb6329b0a2f078a9bbc4d5256b24f0c510  /tmp/v0517.patch.gz' | sha256sum -c -
+          gzip -dc /tmp/v0517.patch.gz > /tmp/v0517.patch
+          echo '3c28deb1dd69a5bce72b56770330acd3d53fa9a18b3f68998d3800f1ad30e469  /tmp/v0517.patch' | sha256sum -c -
           cd wa-vault-v0517-project
-          patch -p1 --batch < ../wa-vault-build-v0517/v0517.patch
+          patch -p1 --batch < /tmp/v0517.patch
           find . -name '*.orig' -delete
           if find . -name '*.rej' -print -quit | grep -q .; then
             find . -name '*.rej' -print
