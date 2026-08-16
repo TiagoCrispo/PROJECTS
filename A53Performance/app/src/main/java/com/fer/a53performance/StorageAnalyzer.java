@@ -16,6 +16,7 @@ import java.nio.channels.FileChannel;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -26,7 +27,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public final class StorageAnalyzer {
     public interface Callback<T>{void onPhase(String phase);void onDone(T result);}
-    public static final class DuplicateResult{public final Set<String> keys;public final int groups;DuplicateResult(Set<String> keys,int groups){this.keys=Collections.unmodifiableSet(keys);this.groups=groups;}}
+    public static final class DuplicateGroup{
+        public final List<StorageItem> items;public final String keeperKey;public final Set<String> removableKeys;public final long recoverableBytes;
+        DuplicateGroup(List<StorageItem> source,String keeperKey,Set<String> removableKeys,long recoverableBytes){this.items=Collections.unmodifiableList(new ArrayList<>(source));this.keeperKey=keeperKey;this.removableKeys=Collections.unmodifiableSet(new HashSet<>(removableKeys));this.recoverableBytes=recoverableBytes;}
+    }
+    public static final class DuplicateResult{
+        public final Set<String> keys;public final int groups;public final List<DuplicateGroup> groupList;public final Set<String> safeDeleteKeys;public final long recoverableBytes;
+        DuplicateResult(Set<String> keys,List<DuplicateGroup> groupList,Set<String> safeDeleteKeys,long recoverableBytes){this.keys=Collections.unmodifiableSet(new HashSet<>(keys));this.groupList=Collections.unmodifiableList(new ArrayList<>(groupList));this.groups=groupList.size();this.safeDeleteKeys=Collections.unmodifiableSet(new HashSet<>(safeDeleteKeys));this.recoverableBytes=recoverableBytes;}
+    }
     public static final class SimilarResult{public final Set<String> keys;public final int groups;SimilarResult(Set<String> keys,int groups){this.keys=Collections.unmodifiableSet(keys);this.groups=groups;}}
 
     private static final int QUICK_BLOCK=32*1024;
@@ -38,23 +46,28 @@ public final class StorageAnalyzer {
 
     public StorageAnalyzer(Context context){app=context.getApplicationContext();cache=new AnalysisCacheDb(app);}
     public void analyzeDuplicatesAsync(List<StorageItem> input,Callback<DuplicateResult> callback){int g=generation.incrementAndGet();ArrayList<StorageItem> snapshot=new ArrayList<>(input);worker.execute(()->{callback.onPhase("Buscando duplicados…");DuplicateResult result=duplicates(snapshot,g,callback);if(g==generation.get())callback.onDone(result);});}
-    public void analyzeSimilarAsync(List<StorageItem> input,Callback<SimilarResult> callback){int g=generation.incrementAndGet();ArrayList<StorageItem> snapshot=new ArrayList<>(input);worker.execute(()->{callback.onPhase("Preparando fotos similares…");DuplicateResult dup=duplicates(snapshot,g,null);if(g!=generation.get())return;SimilarResult result=similar(snapshot,dup.keys,g,callback);if(g==generation.get())callback.onDone(result);});}
+    public void analyzeSimilarAsync(List<StorageItem> input,Callback<SimilarResult> callback){analyzeSimilarAsync(input,null,callback);}
+    public void analyzeSimilarAsync(List<StorageItem> input,DuplicateResult knownDuplicates,Callback<SimilarResult> callback){int g=generation.incrementAndGet();ArrayList<StorageItem> snapshot=new ArrayList<>(input);worker.execute(()->{callback.onPhase("Preparando fotos similares…");DuplicateResult dup=knownDuplicates==null?duplicates(snapshot,g,null):knownDuplicates;if(g!=generation.get())return;SimilarResult result=similar(snapshot,dup.keys,g,callback);if(g==generation.get())callback.onDone(result);});}
     public void cancel(){generation.incrementAndGet();}
     public void shutdown(){cancel();worker.shutdownNow();cache.close();}
 
     private DuplicateResult duplicates(List<StorageItem> items,int g,Callback<?> callback){
         HashMap<Long,ArrayList<StorageItem>> bySize=new HashMap<>();for(StorageItem x:items){if(x.size>=64*1024L)bySize.computeIfAbsent(x.size,k->new ArrayList<>()).add(x);}
-        HashSet<String> keys=new HashSet<>();int groups=0,checked=0,total=items.size();
+        HashSet<String> keys=new HashSet<>(),safeKeys=new HashSet<>();ArrayList<DuplicateGroup> groupList=new ArrayList<>();long recoverable=0L;int checked=0,total=items.size();
         for(ArrayList<StorageItem> sameSize:bySize.values()){
             if(g!=generation.get())break;if(sameSize.size()<2)continue;HashMap<String,ArrayList<StorageItem>> quickGroups=new HashMap<>();
-            for(StorageItem x:sameSize){if(g!=generation.get())break;if(!thermalGate(g,callback,checked,total))return new DuplicateResult(keys,groups);String q=quickFingerprintCached(x);if(q==null)q="__fallback__";quickGroups.computeIfAbsent(q,k->new ArrayList<>()).add(x);checked++;}
+            for(StorageItem x:sameSize){if(g!=generation.get())break;if(!thermalGate(g,callback,checked,total))return new DuplicateResult(keys,groupList,safeKeys,recoverable);String q=quickFingerprintCached(x);if(q==null)q="__fallback__";quickGroups.computeIfAbsent(q,k->new ArrayList<>()).add(x);checked++;}
             for(ArrayList<StorageItem> candidates:quickGroups.values()){
                 if(g!=generation.get())break;if(candidates.size()<2)continue;HashMap<String,ArrayList<StorageItem>> hashes=new HashMap<>();
-                for(StorageItem x:candidates){if(g!=generation.get())break;if(!thermalGate(g,callback,checked,total))return new DuplicateResult(keys,groups);String h=sha256Cached(x);if(h!=null)hashes.computeIfAbsent(h,k->new ArrayList<>()).add(x);checked++;}
-                for(ArrayList<StorageItem> sameHash:hashes.values())if(sameHash.size()>1){groups++;for(StorageItem x:sameHash)keys.add(x.stableKey());}
+                for(StorageItem x:candidates){if(g!=generation.get())break;if(!thermalGate(g,callback,checked,total))return new DuplicateResult(keys,groupList,safeKeys,recoverable);String h=sha256Cached(x);if(h!=null)hashes.computeIfAbsent(h,k->new ArrayList<>()).add(x);checked++;}
+                for(ArrayList<StorageItem> sameHash:hashes.values())if(sameHash.size()>1){
+                    sameHash.sort(Comparator.comparingLong((StorageItem x)->x.modified).reversed().thenComparing(x->x.path));StorageItem keeper=sameHash.get(0);HashSet<String> removable=new HashSet<>();long groupBytes=0L;
+                    for(int i=0;i<sameHash.size();i++){StorageItem x=sameHash.get(i);keys.add(x.stableKey());if(i>0){removable.add(x.stableKey());safeKeys.add(x.stableKey());groupBytes+=x.size;}}
+                    recoverable+=groupBytes;groupList.add(new DuplicateGroup(sameHash,keeper.stableKey(),removable,groupBytes));
+                }
             }
         }
-        return new DuplicateResult(keys,groups);
+        groupList.sort((a,b)->Long.compare(b.recoverableBytes,a.recoverableBytes));return new DuplicateResult(keys,groupList,safeKeys,recoverable);
     }
 
     private SimilarResult similar(List<StorageItem> items,Set<String> duplicates,int g,Callback<?> callback){
@@ -82,17 +95,11 @@ public final class StorageAnalyzer {
     }
 
     private static long bucketKey(int seg,int value,int aspect){return(((long)aspect&0xffffL)<<16)|((seg&0xffL)<<8)|(value&0xffL);}
-
     private boolean thermalGate(int g,Callback<?> callback,int done,int total){
-        if(Build.VERSION.SDK_INT<29)return g==generation.get();
-        PowerManager pm=(PowerManager)app.getSystemService(Context.POWER_SERVICE);boolean announced=false;
+        if(Build.VERSION.SDK_INT<29)return g==generation.get();PowerManager pm=(PowerManager)app.getSystemService(Context.POWER_SERVICE);boolean announced=false;
         while(g==generation.get()){
-            try{
-                int s=pm.getCurrentThermalStatus();
-                if(s<PowerManager.THERMAL_STATUS_SEVERE){if(s>=PowerManager.THERMAL_STATUS_MODERATE)Thread.sleep(70L);return true;}
-                if(!announced&&callback!=null){callback.onPhase("Pausado por temperatura · "+done+"/"+total+" guardado");announced=true;}
-                Thread.sleep(2500L);
-            }catch(InterruptedException e){Thread.currentThread().interrupt();return false;}catch(Throwable ignored){return true;}
+            try{int s=pm.getCurrentThermalStatus();if(s<PowerManager.THERMAL_STATUS_SEVERE){if(s>=PowerManager.THERMAL_STATUS_MODERATE)Thread.sleep(70L);return true;}if(!announced&&callback!=null){callback.onPhase("Pausado por temperatura · "+done+"/"+total+" guardado");announced=true;}Thread.sleep(2500L);}
+            catch(InterruptedException e){Thread.currentThread().interrupt();return false;}catch(Throwable ignored){return true;}
         }
         return false;
     }
