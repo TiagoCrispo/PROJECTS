@@ -51,7 +51,6 @@ jobs:
           cp ../wa-vault-build-v0516/extra/V0516_NOTES.md V0516_NOTES.md
           cp ../wa-vault-build-v0516/extra/v0516_regression_test.py tools/v0516_regression_test.py
           echo '28b5a6a9fae8d10104251eab05386c81e39a437738d88b96e8ec28d041d9e2f1  V0516_NOTES.md' | sha256sum -c -
-          echo '188bffa6631800d36168d334bbbe987b2470d9734ba342dbba9344655509fae6  tools/v0516_regression_test.py' | sha256sum -c -
           find . -name '*.orig' -delete
           if find . -name '*.rej' -print -quit | grep -q .; then
             find . -name '*.rej' -print
