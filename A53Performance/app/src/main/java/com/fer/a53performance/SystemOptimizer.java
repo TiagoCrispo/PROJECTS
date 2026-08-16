@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public final class SystemOptimizer {
     public interface Callback { void onDone(boolean ok, String message); }
-    public enum Profile { DAILY, PERFORMANCE, BATTERY, DATA }
+    public enum Profile { CLASS, GAMING, PERFORMANCE, BALANCED, COOL, BATTERY, DATA }
 
     private final Context app;
     private final ShizukuShell shell;
@@ -64,15 +64,21 @@ public final class SystemOptimizer {
             if(!shell.permissionGranted()){cb.onDone(false,"Shizuku necesita permiso para aplicar el perfil real.");return;}
             ArrayList<String> commands=new ArrayList<>();
             switch(profile){
-                case DAILY -> {
+                case CLASS, BALANCED -> {
                     commands.add("settings put system peak_refresh_rate 120.0");
                     commands.add("settings put system min_refresh_rate 60.0");
                     commands.add("settings put global low_power 0");
                     commands.add("cmd netpolicy set restrict-background false");
                 }
-                case PERFORMANCE -> {
+                case GAMING, PERFORMANCE -> {
                     commands.add("settings put system peak_refresh_rate 120.0");
                     commands.add("settings put system min_refresh_rate 120.0");
+                    commands.add("settings put global low_power 0");
+                    commands.add("cmd netpolicy set restrict-background false");
+                }
+                case COOL -> {
+                    commands.add("settings put system peak_refresh_rate 60.0");
+                    commands.add("settings put system min_refresh_rate 60.0");
                     commands.add("settings put global low_power 0");
                     commands.add("cmd netpolicy set restrict-background false");
                 }
@@ -87,14 +93,14 @@ public final class SystemOptimizer {
                     commands.add("settings put system min_refresh_rate 60.0");
                 }
             }
-            int ok=0;StringBuilder failures=new StringBuilder();
+            int ok=0;
             for(String command:commands){
                 if(gen!=profileGeneration.get())return;
                 ShizukuShell.Result r=shell.exec(command,1400);
-                if(r.ok())ok++;else failures.append(command.split(" ")[0]).append(' ');
+                if(r.ok())ok++;
             }
             if(gen!=profileGeneration.get())return;
-            cb.onDone(ok==commands.size(),"Perfil "+label(profile)+" aplicado en segundo plano: "+ok+"/"+commands.size()+" ajustes"+(failures.length()>0?". Algunos ajustes fueron rechazados por Android.":"."));
+            cb.onDone(ok==commands.size(),"Perfil "+label(profile)+" aplicado en segundo plano: "+ok+"/"+commands.size()+" ajustes"+(ok==commands.size()?".":". Algunos ajustes fueron rechazados por Android."));
         });
     }
 
@@ -131,12 +137,15 @@ public final class SystemOptimizer {
 
     private long availableMemory(){ActivityManager.MemoryInfo m=new ActivityManager.MemoryInfo();((ActivityManager)app.getSystemService(Context.ACTIVITY_SERVICE)).getMemoryInfo(m);return m.availMem;}
     private static String safePackage(String p){return p.replaceAll("[^A-Za-z0-9._]","");}
-    public static String label(Profile p){return switch(p){case DAILY->"Diario";case PERFORMANCE->"Rendimiento";case BATTERY->"Batería";case DATA->"Datos";};}
+    public static String label(Profile p){return switch(p){case CLASS->"Clases";case GAMING->"Gaming";case PERFORMANCE->"Rendimiento";case BALANCED->"Balanced";case COOL->"Cool";case BATTERY->"Batería";case DATA->"Datos";};}
     public static String description(Profile p){return switch(p){
-        case DAILY->"120 Hz cuando corresponde, ahorro desactivado y datos normales. No toca restricciones por app.";
-        case PERFORMANCE->"Fija 120 Hz y desactiva ahorro de batería. No promete overclock ni altera apps protegidas.";
+        case CLASS->"Equilibrio 60–120 Hz para estudiar. No cierra ChatGPT, Brave, mensajería ni otras apps protegidas.";
+        case GAMING->"Solicita 120 Hz y desactiva ahorro de batería. No promete overclock ni altera apps protegidas.";
+        case PERFORMANCE->"Prioriza fluidez con 120 Hz y ahorro desactivado. Solo aplica ajustes reales disponibles.";
+        case BALANCED->"60–120 Hz y datos normales para uso diario, sin restricciones por app.";
+        case COOL->"Limita la pantalla a 60 Hz para reducir carga y calor; no inventa control directo de CPU/GPU.";
         case BATTERY->"60 Hz y ahorro de batería del sistema. Es un ajuste global de Android.";
-        case DATA->"Activa Data Saver global. Las protecciones de A53 Performance siguen evitando acciones individuales sobre Gmail, Mensajes, Reloj, Brave, ChatGPT y Grabadora.";
+        case DATA->"Activa Data Saver global. La protección por app sigue evitando acciones individuales sobre Gmail, Mensajes, Reloj, Brave, ChatGPT y Grabadora.";
     };}
     public void shutdown(){cancelRam();cancelProfiles();ramExecutor.shutdownNow();profileExecutor.shutdownNow();}
 }
