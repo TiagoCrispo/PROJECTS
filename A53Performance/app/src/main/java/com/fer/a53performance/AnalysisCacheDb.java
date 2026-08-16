@@ -5,10 +5,14 @@ import android.content.Context;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
+import java.util.ArrayList;
+import java.util.Set;
 
 public final class AnalysisCacheDb extends SQLiteOpenHelper {
     private static final String DB="analysis_cache.db";
     private static final int VERSION=3;
+    private static final long MAX_LIVE_BYTES=32L*1024L*1024L;
+    private static final long TARGET_LIVE_BYTES=24L*1024L*1024L;
 
     public AnalysisCacheDb(Context context){super(context.getApplicationContext(),DB,null,VERSION);}
 
@@ -56,9 +60,20 @@ public final class AnalysisCacheDb extends SQLiteOpenHelper {
         db.insertWithOnConflict("cache",null,v,SQLiteDatabase.CONFLICT_REPLACE);
     }
 
-    public synchronized void prune(){
-        SQLiteDatabase db=getWritableDatabase();long cutoff=System.currentTimeMillis()-60L*24L*60L*60L*1000L;
+    public synchronized void prune(){prune(Set.of());}
+    public synchronized void prune(Set<String> existingKeys){
+        SQLiteDatabase db=getWritableDatabase();long cutoff=System.currentTimeMillis()-75L*24L*60L*60L*1000L;
         db.delete("cache","updated<?",new String[]{Long.toString(cutoff)});
-        db.execSQL("DELETE FROM cache WHERE k NOT IN (SELECT k FROM cache ORDER BY updated DESC LIMIT 50000)");
+        if(existingKeys!=null&&!existingKeys.isEmpty()){
+            ArrayList<String> stale=new ArrayList<>();try(Cursor c=db.query("cache",new String[]{"k"},null,null,null,null,null)){while(c.moveToNext()){String k=c.getString(0);if(!existingKeys.contains(k))stale.add(k);}}
+            db.beginTransaction();try{for(String k:stale)db.delete("cache","k=?",new String[]{k});db.setTransactionSuccessful();}finally{db.endTransaction();}
+        }
+        long used=liveBytes(db);int guard=0;
+        while(used>MAX_LIVE_BYTES&&guard++<20){long before=count(db);db.execSQL("DELETE FROM cache WHERE k IN (SELECT k FROM cache ORDER BY updated ASC LIMIT 2000)");long after=count(db);if(after>=before)break;used=liveBytes(db);if(used<=TARGET_LIVE_BYTES)break;}
     }
+
+    public synchronized long estimatedLiveBytes(){return liveBytes(getReadableDatabase());}
+    private static long count(SQLiteDatabase db){try(Cursor c=db.rawQuery("SELECT COUNT(*) FROM cache",null)){return c.moveToFirst()?c.getLong(0):0L;}}
+    private static long liveBytes(SQLiteDatabase db){long pages=pragma(db,"page_count"),free=pragma(db,"freelist_count"),pageSize=pragma(db,"page_size");return Math.max(0L,pages-free)*Math.max(1L,pageSize);}
+    private static long pragma(SQLiteDatabase db,String name){try(Cursor c=db.rawQuery("PRAGMA "+name,null)){return c.moveToFirst()?c.getLong(0):0L;}catch(Throwable ignored){return 0L;}}
 }
