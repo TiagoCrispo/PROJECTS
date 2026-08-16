@@ -151,12 +151,14 @@ jobs:
             adb shell run-as com.fer.a53performance cp /data/local/tmp/a53_ui.xml shared_prefs/a53_ui.xml
             adb shell run-as com.fer.a53performance cp /data/local/tmp/a53_protected_apps.xml shared_prefs/a53_protected_apps.xml
             adb shell run-as com.fer.a53performance cp /data/local/tmp/a53_ui.xml files/upgrade_marker.txt
+            adb logcat -c
             adb install -r upgrade/v11511.apk
             adb shell dumpsys package com.fer.a53performance | grep -q 'versionName=1.15.11'
             adb shell run-as com.fer.a53performance cat files/upgrade_marker.txt | grep -q COOL
             adb shell run-as com.fer.a53performance cat shared_prefs/a53_ui.xml | grep -q COOL
             adb shell run-as com.fer.a53performance cat shared_prefs/a53_protected_apps.xml | grep -q com.example.keepme
-            adb shell am start -W -n com.fer.a53performance/.MainActivity >/dev/null
-            sleep 2
-            test -n "$(adb shell pidof com.fer.a53performance | tr -d '\r')"
-            if adb logcat -d -t 3000 | grep -A24 'FATAL EXCEPTION' | grep -q 'com.fer.a53performance'; then exit 1; fi
+            adb shell am start -W -n com.fer.a53performance/.MainActivity || true
+            i=0; PID=''; while [ $i -lt 10 ]; do PID=$(adb shell pidof com.fer.a53performance | tr -d '\r'); if [ -n "$PID" ]; then break; fi; sleep 1; i=$((i+1)); done
+            if [ -z "$PID" ]; then echo 'First post-upgrade launch did not remain alive; retrying once after package manager settles.'; adb shell am force-stop com.fer.a53performance; sleep 1; adb shell am start -W -n com.fer.a53performance/.MainActivity || true; sleep 4; PID=$(adb shell pidof com.fer.a53performance | tr -d '\r'); fi
+            if [ -z "$PID" ]; then echo 'App not alive after post-upgrade retry'; adb logcat -d -t 6000 | grep -E -A35 -B5 'FATAL EXCEPTION|AndroidRuntime|com.fer.a53performance|SQLite|WorkManager' || true; exit 1; fi
+            if adb logcat -d -t 6000 | grep -A24 'FATAL EXCEPTION' | grep -q 'com.fer.a53performance'; then adb logcat -d -t 6000 | grep -A35 -B5 'FATAL EXCEPTION' || true; exit 1; fi
