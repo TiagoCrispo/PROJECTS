@@ -1,9 +1,9 @@
 package com.fer.a53performance;
 
-import android.content.Context;
 import android.content.pm.PackageManager;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.lang.reflect.Method;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -40,11 +40,18 @@ public final class ShizukuShell {
         catch (Throwable e) { f.cancel(true); return new Result(false, "timeout", -2); }
     }
 
-    @SuppressWarnings("deprecation")
+    private Process startProcess(String command) throws Exception {
+        Method method = Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class);
+        method.setAccessible(true);
+        Object result = method.invoke(null, new Object[]{new String[]{"sh", "-c", command}, null, null});
+        if (!(result instanceof Process)) throw new IllegalStateException("Shizuku process unavailable");
+        return (Process) result;
+    }
+
     private Result run(String command) {
         Process p = null;
         try {
-            p = Shizuku.newProcess(new String[]{"sh", "-c", command}, null, null);
+            p = startProcess(command);
             StringBuilder out = new StringBuilder();
             try (BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
                 String line; while ((line = br.readLine()) != null && out.length() < 4096) out.append(line).append('\n');
