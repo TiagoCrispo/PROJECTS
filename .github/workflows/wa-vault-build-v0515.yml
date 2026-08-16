@@ -1,0 +1,121 @@
+name: WA Vault v0.5.15 precision + battery hardening
+
+on:
+  push:
+    branches: [wa-vault-build-v0515]
+    paths:
+      - 'wa-vault-build-v0515/**'
+      - '.github/workflows/wa-vault-build-v0515.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Restore verified v0.5.14 source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir wa-vault-v0515-project
+          gh run download 31915356284 -n WA-Vault-v0.5.14-source -D wa-vault-v0515-project
+          grep -q 'versionCode = 64' wa-vault-v0515-project/app/build.gradle.kts
+          grep -q 'versionName = "0.5.14"' wa-vault-v0515-project/app/build.gradle.kts
+
+      - name: Apply verified v0.5.15 patch and regressions
+        run: |
+          set -euo pipefail
+          echo '60e5ddca6f3de969ee910206bffdcc78e30e1eac9dfc51f02be113192a535a97  wa-vault-build-v0515/chunks/part00' | sha256sum -c -
+          echo '72132be3db6a6e1498fc4f5e8b295eea387bd977a6fd0deeb4f3345290d87f34  wa-vault-build-v0515/chunks/part01' | sha256sum -c -
+          echo 'f9556391abcc3cf82cc1938c808d2bb668aba5eff33d56463c66bd4683e8b140  wa-vault-build-v0515/chunks/part02' | sha256sum -c -
+          echo 'a0529395d5755fd840e701868a93cfd80101a5eee0797c2cb7f64817ac1d94a8  wa-vault-build-v0515/chunks/part03' | sha256sum -c -
+          echo '1a9ecc942ad5495c3d984bbd4f4954de599fcb486533fe2c3f3ee045ef136a29  wa-vault-build-v0515/chunks/part04' | sha256sum -c -
+          cat wa-vault-build-v0515/chunks/part00 \
+              wa-vault-build-v0515/chunks/part01 \
+              wa-vault-build-v0515/chunks/part02 \
+              wa-vault-build-v0515/chunks/part03 \
+              wa-vault-build-v0515/chunks/part04 | tr -d '\r\n' > /tmp/v0515.patch.gz.b64
+          base64 -d /tmp/v0515.patch.gz.b64 | gzip -dc > /tmp/v0515.patch
+          echo '5fad086e19fecb21fc710bf709a3c34d6b1f2006c8a9082891ad3e5b685ae0f2  /tmp/v0515.patch' | sha256sum -c -
+          cd wa-vault-v0515-project
+          patch -p1 --batch < /tmp/v0515.patch
+          find . -name '*.orig' -delete
+          if find . -name '*.rej' -print -quit | grep -q .; then
+            find . -name '*.rej' -print
+            exit 1
+          fi
+          grep -q 'versionCode = 65' app/build.gradle.kts
+          grep -q 'versionName = "0.5.15"' app/build.gradle.kts
+          test -s V0515_NOTES.md
+          test -s tools/v0515_regression_test.py
+          python3 tools/v0515_regression_test.py
+
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK 35
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Compile release
+        working-directory: wa-vault-v0515-project
+        run: gradle :app:assembleRelease --stacktrace --console=plain
+
+      - name: Restore signing key
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p signing
+          gh run download 31869556369 -n WA-Vault-v0.4.0-signing-backup-fixed -D signing
+          test -s signing/WA-Vault-v0.4.0-signing-backup.jks
+          grep -q 'WAVault-v040-2026' signing/SIGNING_BACKUP_PASSWORD.txt
+
+      - name: Sign and verify v0.5.15
+        run: |
+          set -euo pipefail
+          UNSIGNED=wa-vault-v0515-project/app/build/outputs/apk/release/app-release-unsigned.apk
+          mkdir -p wa-vault-v0515-output
+          PASS='WAVault-v040-2026'
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign \
+            --ks signing/WA-Vault-v0.4.0-signing-backup.jks \
+            --ks-key-alias wavault \
+            --ks-pass pass:"$PASS" \
+            --key-pass pass:"$PASS" \
+            --out wa-vault-v0515-output/WA-Vault-v0.5.15.apk "$UNSIGNED"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs wa-vault-v0515-output/WA-Vault-v0.5.15.apk > wa-vault-v0515-output/APK_SIGNATURE.txt
+          sha256sum wa-vault-v0515-output/WA-Vault-v0.5.15.apk > wa-vault-v0515-output/APK_SHA256.txt
+          cp wa-vault-v0515-project/V0515_NOTES.md wa-vault-v0515-output/
+          cp wa-vault-v0515-project/TEST_MATRIX.md wa-vault-v0515-output/
+          cp wa-vault-v0515-project/tools/v0515_regression_test.py wa-vault-v0515-output/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WA-Vault-v0.5.15-release
+          path: |
+            wa-vault-v0515-output/WA-Vault-v0.5.15.apk
+            wa-vault-v0515-output/APK_SHA256.txt
+            wa-vault-v0515-output/APK_SIGNATURE.txt
+            wa-vault-v0515-output/V0515_NOTES.md
+            wa-vault-v0515-output/TEST_MATRIX.md
+            wa-vault-v0515-output/v0515_regression_test.py
+          retention-days: 90
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WA-Vault-v0.5.15-source
+          path: wa-vault-v0515-project
+          retention-days: 30
