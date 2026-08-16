@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -35,15 +37,16 @@ jobs:
       - name: Apply v0.5.20 hardening and regressions
         run: |
           set -euo pipefail
-          base64 -d wa-vault-build-v0520/v0520.patch.gz.b64 | gzip -d > /tmp/v0520.patch
+          git show 70d9242dd1216c517911b5e4328817fc9c874dfc:wa-vault-build-v0520/v0520.patch.gz.b64 | base64 -d | gzip -d > /tmp/v0520.patch
           cd wa-vault-v0520-project
           patch -p1 < /tmp/v0520.patch
+          sed -i 's/android\.system\.OsConstants\.O_RDONLY|android\.system\.OsConstants\.O_DIRECTORY/android.system.OsConstants.O_RDONLY/g' app/src/main/java/com/fer/wavault/MediaCrypto.java
           python3 tools/v0520_regression_test.py
           grep -q 'versionCode = 70' app/build.gradle.kts
           grep -q 'versionName = "0.5.20"' app/build.gradle.kts
           test ! -e tools/v0518_regression_test.py
           test ! -e tools/v0519_regression_test.py
-          ! grep -R -n -E 'portable_|plainbak|encbak|\.wavb|PortableBackupManager|PORTABLE_BACKUP' app/src/main/java tools || true
+          ! grep -R -n -E 'portable_|plainbak|encbak|\.wavb|PortableBackupManager|PORTABLE_BACKUP' app/src/main/java tools
 
       - uses: android-actions/setup-android@v3
       - name: Install Android SDK 35
