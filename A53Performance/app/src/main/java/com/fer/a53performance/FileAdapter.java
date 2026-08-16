@@ -55,7 +55,7 @@ public final class FileAdapter extends RecyclerView.Adapter<FileAdapter.Holder> 
     }
 
     @Override public void onBindViewHolder(@NonNull Holder h,int position){
-        StorageItem x=items.get(position);h.title.setText(x.name);h.sub.setText(formatBytes(x.size)+"  ·  "+type(x)+"\n"+DateFormat.getDateTimeInstance(DateFormat.SHORT,DateFormat.SHORT,Locale.getDefault()).format(new Date(x.modified)));
+        StorageItem x=items.get(position);h.title.setText(x.name);h.sub.setText(formatBytes(x.size)+"  ·  "+type(x)+"  ·  "+StorageRepository.volumeLabel(x)+"\n"+DateFormat.getDateTimeInstance(DateFormat.SHORT,DateFormat.SHORT,Locale.getDefault()).format(new Date(x.modified)));
         h.cb.setOnCheckedChangeListener(null);h.cb.setChecked(selected.contains(x.stableKey()));h.cb.setOnCheckedChangeListener((b,checked)->toggle(x,checked));
         h.itemView.setOnClickListener(v->{boolean next=!selected.contains(x.stableKey());h.cb.setChecked(next);});thumbs.load(x,h.image);
     }
