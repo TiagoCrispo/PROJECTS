@@ -38,6 +38,7 @@ jobs:
           cat wa-vault-build-v0527/v0527.patch.gz.b64.part* | base64 -d | gzip -d > /tmp/v0527.patch
           cd wa-vault-v0527-project
           patch -p1 < /tmp/v0527.patch
+          python3 ../wa-vault-build-v0527/fix_compile.py
           rm -rf app/build build .gradle
           python3 tools/v0527_regression_test.py
           grep -q 'versionCode = 77' app/build.gradle.kts
