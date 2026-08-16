@@ -35,12 +35,22 @@ jobs:
       - name: Apply verified v0.5.15 patch and regressions
         run: |
           set -euo pipefail
-          cat wa-vault-build-v0515/chunks/part00 \
-              wa-vault-build-v0515/chunks/part01 \
-              wa-vault-build-v0515/chunks/part02 \
-              wa-vault-build-v0515/chunks/part03 \
-              wa-vault-build-v0515/chunks/part04 | tr -d '\r\n' > /tmp/v0515.patch.gz.b64
-          base64 -d /tmp/v0515.patch.gz.b64 | gzip -dc > /tmp/v0515.patch
+          echo 'ee868444225e27c70ea6d5947188465cdace69ab9dfa408b09282c08c1086212  wa-vault-build-v0515/bin/part00' | sha256sum -c -
+          echo '54ab23e2d3bcd0e527ff1e7689974ebecb80fe26942e3a80155ce816939dfac0  wa-vault-build-v0515/bin/part01' | sha256sum -c -
+          echo 'e0cc7414100f2d78e0774ab06bbf441128529310e9dc2999cc363a78a0745c11  wa-vault-build-v0515/bin/part02' | sha256sum -c -
+          echo 'f548027e83843a061b0eda98842a60c81ac20f9d7b99845055cbea0b7d21966b  wa-vault-build-v0515/bin/part03' | sha256sum -c -
+          echo '84a33967eedc10429caef74348502f1262e4610aa2e6560f82c0c06962e22a8e  wa-vault-build-v0515/bin/part04' | sha256sum -c -
+          echo '25b9feb6a1641c7bf4e1cab593016c5e4ec9f167da402a06291da1c7dc83c240  wa-vault-build-v0515/bin/part05' | sha256sum -c -
+          echo '75eed91b1c0080b88d356db82b98d794c92a3843a2d952a5ed2b9155360dcc06  wa-vault-build-v0515/bin/part06' | sha256sum -c -
+          cat wa-vault-build-v0515/bin/part00 \
+              wa-vault-build-v0515/bin/part01 \
+              wa-vault-build-v0515/bin/part02 \
+              wa-vault-build-v0515/bin/part03 \
+              wa-vault-build-v0515/bin/part04 \
+              wa-vault-build-v0515/bin/part05 \
+              wa-vault-build-v0515/bin/part06 > /tmp/v0515.patch.gz
+          echo 'a79851c70e0a52e166d83ef6ff358a806c47645de6f874b062f4b8d4dd24416c  /tmp/v0515.patch.gz' | sha256sum -c -
+          gzip -dc /tmp/v0515.patch.gz > /tmp/v0515.patch
           echo '5fad086e19fecb21fc710bf709a3c34d6b1f2006c8a9082891ad3e5b685ae0f2  /tmp/v0515.patch' | sha256sum -c -
           cd wa-vault-v0515-project
           patch -p1 --batch < /tmp/v0515.patch
