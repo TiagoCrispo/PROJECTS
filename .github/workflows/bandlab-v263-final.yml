@@ -111,7 +111,7 @@ jobs:
           for p in ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION ACTIVITY_RECOGNITION BLUETOOTH_SCAN BLUETOOTH_CONNECT POST_NOTIFICATIONS FOREGROUND_SERVICE FOREGROUND_SERVICE_LOCATION FOREGROUND_SERVICE_HEALTH VIBRATE health.WRITE_EXERCISE health.WRITE_DISTANCE health.WRITE_ACTIVE_CALORIES_BURNED health.WRITE_HEART_RATE; do
             grep -q "android.permission.$p" verification/permissions-v263.txt
           done
-          "$ANDROID_HOME/build-tools/36.0.0/aapt2" dump xmltree "$D" AndroidManifest.xml > verification/manifest-v263.txt
+          "$ANDROID_HOME/build-tools/36.0.0/aapt2" dump xmltree "$D" --file AndroidManifest.xml > verification/manifest-v263.txt
           grep -q 'BandLabWidgetProvider' verification/manifest-v263.txt
           grep -q 'APPWIDGET_UPDATE' verification/manifest-v263.txt
           unzip -p "$D" assets/bandlab_xiaomi_seed.bin | cmp - <(printf 'EMPTY\n')
