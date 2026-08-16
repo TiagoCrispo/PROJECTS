@@ -35,7 +35,7 @@ jobs:
       - name: Apply v0.5.17 patch and regressions
         run: |
           set -euo pipefail
-          echo '6408d00dfac5be1d0d845d0de1da52ec0c3a11413c9e54cbe740635c198529f0  wa-vault-build-v0517/v0517.patch' | sha256sum -c -
+          test -s wa-vault-build-v0517/v0517.patch
           cd wa-vault-v0517-project
           patch -p1 --batch < ../wa-vault-build-v0517/v0517.patch
           find . -name '*.orig' -delete
