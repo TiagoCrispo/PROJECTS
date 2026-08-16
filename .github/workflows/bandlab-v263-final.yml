@@ -1,0 +1,182 @@
+name: BandLab 2.6.3 Reliability Final
+
+on:
+  push:
+    branches: [ bandlab-build-v263 ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: bandlab-v263-final
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 80
+    env:
+      V262_ARTIFACT_ID: '9257788918'
+      V262_SOURCE_SHA256: '014a2389ab5fae0035e4ee3c88c5e9745243034dd1518a1b0f0e9e44e7bf4d48'
+      V263_PATCH_SHA256: '5fcfbb0303acfa6fcfdbf5fc200311ea2594bf1f0bc88f53867bcd3fc0748530'
+      V263_XZ_SHA256: '9bb1b9de849b861286e0488f6a2a9a24b9a95348799da3920d0aaee4fc2a145d'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools" "emulator" "system-images;android-30;default;x86_64"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Restore verified BandLab 2.6.2 source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${V262_ARTIFACT_ID}/zip" \
+            -o /tmp/v262-artifact.zip
+          mkdir /tmp/v262-artifact
+          unzip -q /tmp/v262-artifact.zip -d /tmp/v262-artifact
+          V262_SOURCE=/tmp/v262-artifact/BandLab9Active_v2.6.2_FINAL_SOURCE.zip
+          test -s "$V262_SOURCE"
+          echo "$V262_SOURCE_SHA256  $V262_SOURCE" | sha256sum -c -
+          mkdir work
+          unzip -q "$V262_SOURCE" -d work
+          grep -q 'versionName = "2.6.2"' work/app/build.gradle.kts
+          grep -q 'versionCode = 262' work/app/build.gradle.kts
+
+      - name: Build 2.6.2 update base
+        working-directory: work
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Preserve 2.6.2 APK
+        run: cp work/app/build/outputs/apk/debug/app-debug.apk /tmp/BandLab-v262-debug.apk
+
+      - name: Apply verified 2.6.3 delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d ci/v263_00.b64 > /tmp/v263.patch.xz
+          echo "$V263_XZ_SHA256  /tmp/v263.patch.xz" | sha256sum -c -
+          xz -dc /tmp/v263.patch.xz > /tmp/v263.patch
+          echo "$V263_PATCH_SHA256  /tmp/v263.patch" | sha256sum -c -
+          patch -d work -p1 --batch < /tmp/v263.patch
+          grep -q 'versionName = "2.6.3"' work/app/build.gradle.kts
+          grep -q 'versionCode = 263' work/app/build.gradle.kts
+          grep -q 'FEATURE_STAGE", "263"' work/app/build.gradle.kts
+          grep -q 'BandLabWidgetProvider' work/app/src/main/AndroidManifest.xml
+          grep -q 'targetCellWidth="2"' work/app/src/main/res/xml/bandlab_widget_info.xml
+          grep -q 'clientRecordId' work/app/src/main/java/com/fer/bandlab/health/HealthConnectWorkoutSync.kt
+          grep -q 'ACTION_KEY_MISSING' work/app/src/main/java/com/fer/bandlab/device/XiaomiBandManager.kt
+          grep -q 'ACTION_ENCRYPTION_CHANGE' work/app/src/main/java/com/fer/bandlab/device/XiaomiBandManager.kt
+          grep -q 'BandLab 2.6.3' work/app/src/main/java/com/fer/bandlab/training/WorkoutExporter.kt
+          test "$(cat work/app/src/main/assets/bandlab_xiaomi_seed.bin)" = "EMPTY"
+          ! grep -R -E --binary-files=without-match '[[:xdigit:]]{32}' work/app/src/main/java/com/fer/bandlab/device/BundledBandCredential.kt | grep -q .
+
+      - name: Unit tests and Android builds
+        working-directory: work
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease
+
+      - name: Validate APK metadata, widget and permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          D=work/app/build/outputs/apk/debug/app-debug.apk
+          R=work/app/build/outputs/apk/release/app-release-unsigned.apk
+          test -s "$D"; test -s "$R"
+          unzip -t "$D" >/dev/null; unzip -t "$R" >/dev/null
+          mkdir -p verification
+          "$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging "$D" | tee verification/badging-v263.txt
+          grep -q "package: name='com.fer.bandlab'" verification/badging-v263.txt
+          grep -q "versionCode='263'" verification/badging-v263.txt
+          grep -q "versionName='2.6.3'" verification/badging-v263.txt
+          "$ANDROID_HOME/build-tools/36.0.0/aapt2" dump permissions "$D" | tee verification/permissions-v263.txt
+          for p in ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION ACTIVITY_RECOGNITION BLUETOOTH_SCAN BLUETOOTH_CONNECT POST_NOTIFICATIONS FOREGROUND_SERVICE FOREGROUND_SERVICE_LOCATION FOREGROUND_SERVICE_HEALTH VIBRATE health.WRITE_EXERCISE health.WRITE_DISTANCE health.WRITE_ACTIVE_CALORIES_BURNED health.WRITE_HEART_RATE; do
+            grep -q "android.permission.$p" verification/permissions-v263.txt
+          done
+          "$ANDROID_HOME/build-tools/36.0.0/aapt2" dump xmltree "$D" AndroidManifest.xml > verification/manifest-v263.txt
+          grep -q 'BandLabWidgetProvider' verification/manifest-v263.txt
+          grep -q 'APPWIDGET_UPDATE' verification/manifest-v263.txt
+          unzip -p "$D" assets/bandlab_xiaomi_seed.bin | cmp - <(printf 'EMPTY\n')
+
+      - name: Upgrade smoke test 2.6.2 to 2.6.3
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/android-avd"
+          mkdir -p "$ANDROID_AVD_HOME" verification
+          echo no | avdmanager create avd -n bandlab_ci -k "system-images;android-30;default;x86_64" --device pixel_4 --force
+          nohup "$ANDROID_HOME/emulator/emulator" -avd bandlab_ci -no-window -noaudio -no-boot-anim -gpu swiftshader_indirect -accel off -no-snapshot -no-metrics -memory 2048 -cores 2 >/tmp/emulator.log 2>&1 &
+          timeout 180s adb wait-for-device
+          for i in $(seq 1 180); do [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] && break; sleep 2; done
+          test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = 1
+          V263=work/app/build/outputs/apk/debug/app-debug.apk
+          timeout 240s adb install /tmp/BandLab-v262-debug.apk
+          timeout 60s adb shell am start -n com.fer.bandlab/.MainActivity >/dev/null
+          sleep 8
+          test -n "$(adb shell pidof com.fer.bandlab | tr -d '\r')"
+          adb shell run-as com.fer.bandlab ls databases | tee verification/v262-databases.txt
+          grep -q 'bandlab_training.db' verification/v262-databases.txt
+          timeout 240s adb install -r "$V263"
+          adb shell pm grant com.fer.bandlab android.permission.ACCESS_FINE_LOCATION || true
+          adb shell pm grant com.fer.bandlab android.permission.ACCESS_COARSE_LOCATION || true
+          adb shell pm grant com.fer.bandlab android.permission.ACTIVITY_RECOGNITION || true
+          adb shell am force-stop com.fer.bandlab
+          adb logcat -c
+          timeout 60s adb shell am start -n com.fer.bandlab/.MainActivity | tee verification/v263-start.txt
+          sleep 10
+          test -n "$(adb shell pidof com.fer.bandlab | tr -d '\r')"
+          adb shell run-as com.fer.bandlab ls -l databases | tee verification/v263-databases.txt
+          grep -q 'bandlab_training.db' verification/v263-databases.txt
+          adb shell dumpsys package com.fer.bandlab | grep -E 'versionCode|versionName|WorkoutService|BandLabWidgetProvider' > verification/v263-package.txt
+          grep -q 'versionCode=263' verification/v263-package.txt
+          grep -q 'versionName=2.6.3' verification/v263-package.txt
+          grep -q 'BandLabWidgetProvider' verification/v263-package.txt
+          adb logcat -d -t 3500 > verification/v263-logcat.txt
+          ! grep -E 'FATAL EXCEPTION|Process: com\.fer\.bandlab.*has died|AndroidRuntime.*com\.fer\.bandlab|SQLiteException|SQLiteDatabaseCorruptException|IllegalStateException.*foreground' verification/v263-logcat.txt
+          echo '2.6.2 -> 2.6.3 UPDATE + SQLITE + WIDGET COMPONENT + STARTUP PASS' > verification/v263-PASS.txt
+
+      - name: Package public source-safe release inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/signing-tools/lib dist/verification
+          cp work/app/build/outputs/apk/debug/app-debug.apk dist/BandLab9Active_v2.6.3_DEBUG_VERIFIED.apk
+          cp work/app/build/outputs/apk/release/app-release-unsigned.apk dist/BandLab9Active_v2.6.3_RELEASE_UNSIGNED_GENERIC.apk
+          cp -R verification/. dist/verification/
+          cp /tmp/emulator.log dist/emulator.log || true
+          cp "$ANDROID_HOME/build-tools/36.0.0/apksigner" "$ANDROID_HOME/build-tools/36.0.0/zipalign" "$ANDROID_HOME/build-tools/36.0.0/aapt2" dist/signing-tools/
+          cp "$ANDROID_HOME/build-tools/36.0.0/lib/apksigner.jar" dist/signing-tools/lib/
+          if [ -d "$ANDROID_HOME/build-tools/36.0.0/lib64" ]; then cp -R "$ANDROID_HOME/build-tools/36.0.0/lib64" dist/signing-tools/; fi
+          chmod +x dist/signing-tools/* || true
+          (cd work && zip -qr ../dist/BandLab9Active_v2.6.3_FINAL_SOURCE_GENERIC.zip . -x 'app/build/*' '.gradle/*' 'build/*')
+          test "$(unzip -p dist/BandLab9Active_v2.6.3_FINAL_SOURCE_GENERIC.zip app/src/main/assets/bandlab_xiaomi_seed.bin)" = "EMPTY"
+          sha256sum dist/*.apk dist/*.zip > dist/SHA256SUMS_UNSIGNED.txt
+          printf '%s\n' \
+            'BandLab 2.6.3 generic build passed unit tests, debug/release builds, package/permission/widget validation and emulator update 2.6.2 -> 2.6.3.' \
+            'CI/public source intentionally contains EMPTY Xiaomi credential seed. The user-specific credential is injected only locally after CI and before final signing.' \
+            'Physical Xiaomi BLE/heart-rate and outdoor GNSS remain hardware-only validation.' \
+            > dist/VERIFICATION_REPORT.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BandLab-v2.6.3-final-generic-unsigned
+          path: dist/
+          if-no-files-found: error
