@@ -53,10 +53,7 @@ jobs:
               p7=fixed
           pieces=[]
           for i in range(11):
-              if i==7:
-                  pieces.append(p7)
-              else:
-                  pieces.append((root/f'p{i:02d}.b64').read_text().strip())
+              pieces.append(p7 if i==7 else (root/f'p{i:02d}.b64').read_text().strip())
           packed=base64.b64decode(''.join(pieces), validate=True)
           Path('/tmp/bandlab.zip').write_bytes(lzma.decompress(packed))
           PY
@@ -89,6 +86,18 @@ jobs:
           s=s.replace('device.connectGatt(context, false, cb)', 'device.connectGatt(context, autoConnect, cb)')
           p.write_text(s)
           assert 'autoConnect: Boolean = false' in s
+          PY
+
+      - name: Apply v2.6.3 compile fixes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('work/app/src/main/java/com/fer/bandlab/device/XiaomiBandManager.kt')
+          s=p.read_text().replace('HealthCommands.CMD_REALTIME_STATS_EVENT','SystemCommands.CMD_REALTIME_STATS_EVENT').replace('HealthCommands.CMD_REALTIME_STATS_START','SystemCommands.CMD_REALTIME_STATS_START').replace('HealthCommands.CMD_REALTIME_STATS_STOP','SystemCommands.CMD_REALTIME_STATS_STOP')
+          p.write_text(s)
+          p=Path('work/app/src/main/java/com/fer/bandlab/ui/screens/HistoryScreen.kt')
+          s=p.read_text().replace('heartRateZoneTimes.sumOf { it.elapsedMs }','heartRateZoneTimes.sumOf { it.durationMs }').replace('formatDuration(it.elapsedMs)) }','formatDuration(it.durationMs)) }')
+          p.write_text(s)
           PY
 
       - name: Compile and unit-test
