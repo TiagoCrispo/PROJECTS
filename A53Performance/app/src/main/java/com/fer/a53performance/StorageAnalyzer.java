@@ -26,148 +26,105 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public final class StorageAnalyzer {
     public interface Callback<T>{void onPhase(String phase);void onDone(T result);}
-    public static final class DuplicateResult{
-        public final Set<String> keys;public final int groups;
-        DuplicateResult(Set<String> keys,int groups){this.keys=Collections.unmodifiableSet(keys);this.groups=groups;}
-    }
-    public static final class SimilarResult{
-        public final Set<String> keys;public final int groups;
-        SimilarResult(Set<String> keys,int groups){this.keys=Collections.unmodifiableSet(keys);this.groups=groups;}
-    }
+    public static final class DuplicateResult{public final Set<String> keys;public final int groups;DuplicateResult(Set<String> keys,int groups){this.keys=Collections.unmodifiableSet(keys);this.groups=groups;}}
+    public static final class SimilarResult{public final Set<String> keys;public final int groups;SimilarResult(Set<String> keys,int groups){this.keys=Collections.unmodifiableSet(keys);this.groups=groups;}}
 
-    private static final int SIMILARITY_MAX_IMAGES=2500;
     private static final int QUICK_BLOCK=32*1024;
+    private static final int VISUAL_BATCH=250;
     private final Context app;
     private final AnalysisCacheDb cache;
     private final ExecutorService worker=Executors.newSingleThreadExecutor(r->{Thread t=new Thread(r,"a53-storage-analysis");t.setPriority(Thread.MIN_PRIORITY);return t;});
     private final AtomicInteger generation=new AtomicInteger();
 
     public StorageAnalyzer(Context context){app=context.getApplicationContext();cache=new AnalysisCacheDb(app);}
-
-    public void analyzeDuplicatesAsync(List<StorageItem> input,Callback<DuplicateResult> callback){
-        int g=generation.incrementAndGet();ArrayList<StorageItem> snapshot=new ArrayList<>(input);
-        worker.execute(()->{callback.onPhase("Buscando duplicados…");DuplicateResult result=duplicates(snapshot,g);if(g==generation.get())callback.onDone(result);});
-    }
-
-    public void analyzeSimilarAsync(List<StorageItem> input,Callback<SimilarResult> callback){
-        int g=generation.incrementAndGet();ArrayList<StorageItem> snapshot=new ArrayList<>(input);
-        worker.execute(()->{
-            callback.onPhase("Preparando fotos similares…");DuplicateResult dup=duplicates(snapshot,g);
-            if(g!=generation.get())return;callback.onPhase("Comparando fotos similares…");SimilarResult result=similar(snapshot,dup.keys,g);
-            if(g==generation.get())callback.onDone(result);
-        });
-    }
-
+    public void analyzeDuplicatesAsync(List<StorageItem> input,Callback<DuplicateResult> callback){int g=generation.incrementAndGet();ArrayList<StorageItem> snapshot=new ArrayList<>(input);worker.execute(()->{callback.onPhase("Buscando duplicados…");DuplicateResult result=duplicates(snapshot,g,callback);if(g==generation.get())callback.onDone(result);});}
+    public void analyzeSimilarAsync(List<StorageItem> input,Callback<SimilarResult> callback){int g=generation.incrementAndGet();ArrayList<StorageItem> snapshot=new ArrayList<>(input);worker.execute(()->{callback.onPhase("Preparando fotos similares…");DuplicateResult dup=duplicates(snapshot,g,null);if(g!=generation.get())return;SimilarResult result=similar(snapshot,dup.keys,g,callback);if(g==generation.get())callback.onDone(result);});}
     public void cancel(){generation.incrementAndGet();}
     public void shutdown(){cancel();worker.shutdownNow();cache.close();}
 
-    private DuplicateResult duplicates(List<StorageItem> items,int g){
-        HashMap<Long,ArrayList<StorageItem>> bySize=new HashMap<>();
-        for(StorageItem x:items){if(x.size<64*1024L)continue;bySize.computeIfAbsent(x.size,k->new ArrayList<>()).add(x);}
-        HashSet<String> duplicateKeys=new HashSet<>();int groups=0,checked=0;
+    private DuplicateResult duplicates(List<StorageItem> items,int g,Callback<?> callback){
+        HashMap<Long,ArrayList<StorageItem>> bySize=new HashMap<>();for(StorageItem x:items){if(x.size>=64*1024L)bySize.computeIfAbsent(x.size,k->new ArrayList<>()).add(x);}
+        HashSet<String> keys=new HashSet<>();int groups=0,checked=0,total=items.size();
         for(ArrayList<StorageItem> sameSize:bySize.values()){
-            if(g!=generation.get())break;if(sameSize.size()<2)continue;
-            HashMap<String,ArrayList<StorageItem>> quickGroups=new HashMap<>();
-            for(StorageItem x:sameSize){
-                if(g!=generation.get())break;String quick=quickFingerprintCached(x);if(quick==null)quick="__fallback__";
-                quickGroups.computeIfAbsent(quick,k->new ArrayList<>()).add(x);if((++checked&31)==0)yieldForThermals();
-            }
+            if(g!=generation.get())break;if(sameSize.size()<2)continue;HashMap<String,ArrayList<StorageItem>> quickGroups=new HashMap<>();
+            for(StorageItem x:sameSize){if(g!=generation.get())break;if(!thermalGate(g,callback,checked,total))return new DuplicateResult(keys,groups);String q=quickFingerprintCached(x);if(q==null)q="__fallback__";quickGroups.computeIfAbsent(q,k->new ArrayList<>()).add(x);checked++;}
             for(ArrayList<StorageItem> candidates:quickGroups.values()){
-                if(g!=generation.get())break;if(candidates.size()<2)continue;
-                HashMap<String,ArrayList<StorageItem>> hashes=new HashMap<>();
-                for(StorageItem x:candidates){String hash=sha256Cached(x);if(hash!=null)hashes.computeIfAbsent(hash,k->new ArrayList<>()).add(x);if((++checked&31)==0)yieldForThermals();}
-                for(ArrayList<StorageItem> sameHash:hashes.values())if(sameHash.size()>1){groups++;for(StorageItem x:sameHash)duplicateKeys.add(x.stableKey());}
+                if(g!=generation.get())break;if(candidates.size()<2)continue;HashMap<String,ArrayList<StorageItem>> hashes=new HashMap<>();
+                for(StorageItem x:candidates){if(g!=generation.get())break;if(!thermalGate(g,callback,checked,total))return new DuplicateResult(keys,groups);String h=sha256Cached(x);if(h!=null)hashes.computeIfAbsent(h,k->new ArrayList<>()).add(x);checked++;}
+                for(ArrayList<StorageItem> sameHash:hashes.values())if(sameHash.size()>1){groups++;for(StorageItem x:sameHash)keys.add(x.stableKey());}
             }
         }
-        return new DuplicateResult(duplicateKeys,groups);
+        return new DuplicateResult(keys,groups);
     }
 
-    private String quickFingerprintCached(StorageItem item){String hit=cache.getQuick(item);if(hit!=null)return hit;String value=quickFingerprint(item);if(value!=null)cache.putQuick(item,value);return value;}
-    private String sha256Cached(StorageItem item){String hit=cache.getSha(item);if(hit!=null)return hit;String value=sha256(item);if(value!=null)cache.putSha(item,value);return value;}
-
-    private String quickFingerprint(StorageItem item){
-        try{
-            MessageDigest md=MessageDigest.getInstance("SHA-256");md.update(ByteBuffer.allocate(8).putLong(item.size).array());
-            long[] positions={0L,Math.max(0L,item.size/2L-QUICK_BLOCK/2L),Math.max(0L,item.size-QUICK_BLOCK)};
-            if(item.uri!=null){
-                try(ParcelFileDescriptor pfd=app.getContentResolver().openFileDescriptor(item.uri,"r")){
-                    if(pfd==null)return null;try(FileInputStream fis=new FileInputStream(pfd.getFileDescriptor());FileChannel ch=fis.getChannel()){
-                        for(long pos:positions)sample(ch,pos,md);
-                    }
-                }
-            }else if(item.path!=null&&!item.path.isBlank()){
-                try(FileInputStream fis=new FileInputStream(item.path);FileChannel ch=fis.getChannel()){for(long pos:positions)sample(ch,pos,md);}
-            }else return null;
-            return hex(md.digest());
-        }catch(Throwable ignored){return null;}
-    }
-
-    private static void sample(FileChannel ch,long position,MessageDigest md)throws Exception{
-        ch.position(Math.max(0L,position));ByteBuffer buf=ByteBuffer.allocate(QUICK_BLOCK);int total=0;
-        while(buf.hasRemaining()){int n=ch.read(buf);if(n<=0)break;total+=n;}
-        md.update(ByteBuffer.allocate(8).putLong(position).array());md.update(ByteBuffer.allocate(4).putInt(total).array());md.update(buf.array(),0,total);
-    }
-
-    private String sha256(StorageItem item){
-        try(InputStream raw=open(item);BufferedInputStream in=raw==null?null:new BufferedInputStream(raw,128*1024)){
-            if(in==null)return null;MessageDigest md=MessageDigest.getInstance("SHA-256");byte[] buffer=new byte[128*1024];int n;while((n=in.read(buffer))>0)md.update(buffer,0,n);return hex(md.digest());
-        }catch(Throwable ignored){return null;}
-    }
-    private static String hex(byte[] digest){StringBuilder sb=new StringBuilder(digest.length*2);for(byte b:digest)sb.append(String.format("%02x",b&0xff));return sb.toString();}
-
-    private SimilarResult similar(List<StorageItem> items,Set<String> duplicates,int g){
-        ArrayList<PhotoSig> photos=new ArrayList<>();int decoded=0;
+    private SimilarResult similar(List<StorageItem> items,Set<String> duplicates,int g,Callback<?> callback){
+        ArrayList<PhotoSig> photos=new ArrayList<>();int totalImages=0;for(StorageItem x:items)if(x.isImage()&&x.size>0&&x.size<=200L*1024L*1024L)totalImages++;
+        int done=0;
         for(StorageItem x:items){
-            if(g!=generation.get()||photos.size()>=SIMILARITY_MAX_IMAGES)break;
-            if(!x.isImage()||x.size<=0||x.size>200L*1024L*1024L)continue;
-            Long hash=dHashCached(x);if(hash!=null)photos.add(new PhotoSig(x,hash));if((++decoded&15)==0)yieldForThermals();
+            if(g!=generation.get())break;if(!x.isImage()||x.size<=0||x.size>200L*1024L*1024L)continue;
+            if(!thermalGate(g,callback,done,totalImages))break;VisualSig sig=visualSigCached(x);if(sig!=null)photos.add(new PhotoSig(x,sig.dhash,sig.ahash,sig.aspect));done++;
+            if(callback!=null&&(done%VISUAL_BATCH==0||done==totalImages))callback.onPhase("Fotos similares: "+done+"/"+totalImages+" firmas listas · progreso guardado");
         }
-        ArrayList<Group> groups=new ArrayList<>();HashMap<Integer,ArrayList<Integer>> buckets=new HashMap<>();
+        if(g!=generation.get())return new SimilarResult(new HashSet<>(),0);
+        if(callback!=null)callback.onPhase("Agrupando "+photos.size()+" fotos con doble hash perceptual…");
+        ArrayList<Group> groups=new ArrayList<>();HashMap<Long,ArrayList<Integer>> buckets=new HashMap<>();
         for(int i=0;i<photos.size();i++){
-            if(g!=generation.get())break;PhotoSig photo=photos.get(i);HashSet<Integer> candidates=new HashSet<>();
-            for(int segment=0;segment<8;segment++){
-                int value=(int)((photo.hash>>>(segment*8))&0xffL);ArrayList<Integer> ids=buckets.get((segment<<8)|value);if(ids!=null)candidates.addAll(ids);
-            }
-            Group best=null;int bestDistance=8;
-            for(int groupIndex:candidates){Group group=groups.get(groupIndex);int d=Long.bitCount(photo.hash^group.representative.hash);if(d<=7&&d<bestDistance){best=group;bestDistance=d;if(d==0)break;}}
-            if(best==null){
-                int newIndex=groups.size();Group group=new Group(photo);groups.add(group);
-                for(int segment=0;segment<8;segment++){int value=(int)((photo.hash>>>(segment*8))&0xffL);buckets.computeIfAbsent((segment<<8)|value,k->new ArrayList<>()).add(newIndex);}
-            }else best.items.add(photo);
-            if((i&31)==0)yieldForThermals();
+            if(g!=generation.get())break;PhotoSig p=photos.get(i);HashSet<Integer> candidates=new HashSet<>();
+            for(int seg=0;seg<8;seg++){int value=(int)((p.dhash>>>(seg*8))&0xffL);for(int a=p.aspect-2;a<=p.aspect+2;a++){ArrayList<Integer> ids=buckets.get(bucketKey(seg,value,a));if(ids!=null)candidates.addAll(ids);}}
+            Group best=null;int bestScore=Integer.MAX_VALUE;
+            for(int idx:candidates){Group group=groups.get(idx);int aspectDiff=Math.abs(p.aspect-group.rep.aspect);if(aspectDiff>2)continue;int dd=Long.bitCount(p.dhash^group.rep.dhash);if(dd>7)continue;int ad=Long.bitCount(p.ahash^group.rep.ahash);if(ad>10)continue;int score=dd*2+ad+aspectDiff*2;if(score<bestScore){best=group;bestScore=score;}}
+            if(best==null){int idx=groups.size();Group ng=new Group(p);groups.add(ng);for(int seg=0;seg<8;seg++){int value=(int)((p.dhash>>>(seg*8))&0xffL);buckets.computeIfAbsent(bucketKey(seg,value,p.aspect),k->new ArrayList<>()).add(idx);}}else best.items.add(p);
+            if((i&127)==0&&!thermalGate(g,callback,i,photos.size()))break;
         }
         HashSet<String> similarKeys=new HashSet<>();int count=0;
-        for(Group group:groups){
-            if(group.items.size()<2)continue;boolean hasNonExact=false;
-            for(PhotoSig p:group.items)if(!duplicates.contains(p.item.stableKey())){hasNonExact=true;break;}
-            if(!hasNonExact)continue;count++;for(PhotoSig p:group.items)similarKeys.add(p.item.stableKey());
-        }
+        for(Group group:groups){if(group.items.size()<2)continue;boolean nonExact=false;for(PhotoSig p:group.items)if(!duplicates.contains(p.item.stableKey())){nonExact=true;break;}if(!nonExact)continue;count++;for(PhotoSig p:group.items)similarKeys.add(p.item.stableKey());}
         return new SimilarResult(similarKeys,count);
     }
 
-    private Long dHashCached(StorageItem item){Long hit=cache.getDHash(item);if(hit!=null)return hit;Long value=dHash(item);if(value!=null)cache.putDHash(item,value);return value;}
-    private Long dHash(StorageItem item){
-        Bitmap decoded=null,tiny=null;
-        try{
-            BitmapFactory.Options bounds=new BitmapFactory.Options();bounds.inJustDecodeBounds=true;
-            try(InputStream in=open(item)){if(in==null)return null;BitmapFactory.decodeStream(in,null,bounds);}
-            int max=Math.max(bounds.outWidth,bounds.outHeight);if(max<=0)return null;int sample=1;while(max/sample>160&&sample<128)sample<<=1;
-            BitmapFactory.Options opts=new BitmapFactory.Options();opts.inSampleSize=sample;opts.inPreferredConfig=Bitmap.Config.RGB_565;
-            try(InputStream in=open(item)){if(in==null)return null;decoded=BitmapFactory.decodeStream(in,null,opts);}
-            if(decoded==null)return null;tiny=Bitmap.createScaledBitmap(decoded,9,8,true);long hash=0L;int bit=0;
-            for(int y=0;y<8;y++)for(int x=0;x<8;x++){int left=luminance(tiny.getPixel(x,y)),right=luminance(tiny.getPixel(x+1,y));if(left>right)hash|=(1L<<bit);bit++;}
-            return hash;
-        }catch(Throwable ignored){return null;}
-        finally{if(tiny!=null&&tiny!=decoded&&!tiny.isRecycled())tiny.recycle();if(decoded!=null&&!decoded.isRecycled())decoded.recycle();}
+    private static long bucketKey(int seg,int value,int aspect){return(((long)aspect&0xffffL)<<16)|((seg&0xffL)<<8)|(value&0xffL);}
+
+    private boolean thermalGate(int g,Callback<?> callback,int done,int total){
+        if(Build.VERSION.SDK_INT<29)return g==generation.get();
+        PowerManager pm=(PowerManager)app.getSystemService(Context.POWER_SERVICE);boolean announced=false;
+        while(g==generation.get()){
+            try{
+                int s=pm.getCurrentThermalStatus();
+                if(s<PowerManager.THERMAL_STATUS_SEVERE){if(s>=PowerManager.THERMAL_STATUS_MODERATE)Thread.sleep(70L);return true;}
+                if(!announced&&callback!=null){callback.onPhase("Pausado por temperatura · "+done+"/"+total+" guardado");announced=true;}
+                Thread.sleep(2500L);
+            }catch(InterruptedException e){Thread.currentThread().interrupt();return false;}catch(Throwable ignored){return true;}
+        }
+        return false;
     }
 
-    private void yieldForThermals(){
-        if(Build.VERSION.SDK_INT<29)return;
-        try{int s=((PowerManager)app.getSystemService(Context.POWER_SERVICE)).getCurrentThermalStatus();if(s>=PowerManager.THERMAL_STATUS_MODERATE)Thread.sleep(s>=PowerManager.THERMAL_STATUS_SEVERE?220L:90L);}catch(Throwable ignored){}
+    private String quickFingerprintCached(StorageItem item){String hit=cache.getQuick(item);if(hit!=null)return hit;String v=quickFingerprint(item);if(v!=null)cache.putQuick(item,v);return v;}
+    private String sha256Cached(StorageItem item){String hit=cache.getSha(item);if(hit!=null)return hit;String v=sha256(item);if(v!=null)cache.putSha(item,v);return v;}
+    private VisualSig visualSigCached(StorageItem item){Long d=cache.getDHash(item),a=cache.getAHash(item);Integer aspect=cache.getAspect(item);if(d!=null&&a!=null&&aspect!=null)return new VisualSig(d,a,aspect);VisualSig v=visualSig(item);if(v!=null)cache.putVisual(item,v.dhash,v.ahash,v.aspect);return v;}
+
+    private String quickFingerprint(StorageItem item){
+        try{MessageDigest md=MessageDigest.getInstance("SHA-256");md.update(ByteBuffer.allocate(8).putLong(item.size).array());long[] positions={0L,Math.max(0L,item.size/2L-QUICK_BLOCK/2L),Math.max(0L,item.size-QUICK_BLOCK)};
+            if(item.uri!=null){try(ParcelFileDescriptor pfd=app.getContentResolver().openFileDescriptor(item.uri,"r")){if(pfd==null)return null;try(FileInputStream fis=new FileInputStream(pfd.getFileDescriptor());FileChannel ch=fis.getChannel()){for(long pos:positions)sample(ch,pos,md);}}}
+            else if(item.path!=null&&!item.path.isBlank()){try(FileInputStream fis=new FileInputStream(item.path);FileChannel ch=fis.getChannel()){for(long pos:positions)sample(ch,pos,md);}}else return null;return hex(md.digest());
+        }catch(Throwable ignored){return null;}
+    }
+    private static void sample(FileChannel ch,long position,MessageDigest md)throws Exception{ch.position(Math.max(0L,position));ByteBuffer buf=ByteBuffer.allocate(QUICK_BLOCK);int total=0;while(buf.hasRemaining()){int n=ch.read(buf);if(n<=0)break;total+=n;}md.update(ByteBuffer.allocate(8).putLong(position).array());md.update(ByteBuffer.allocate(4).putInt(total).array());md.update(buf.array(),0,total);}
+    private String sha256(StorageItem item){try(InputStream raw=open(item);BufferedInputStream in=raw==null?null:new BufferedInputStream(raw,128*1024)){if(in==null)return null;MessageDigest md=MessageDigest.getInstance("SHA-256");byte[] buffer=new byte[128*1024];int n;while((n=in.read(buffer))>0)md.update(buffer,0,n);return hex(md.digest());}catch(Throwable ignored){return null;}}
+    private static String hex(byte[] digest){StringBuilder sb=new StringBuilder(digest.length*2);for(byte b:digest)sb.append(String.format("%02x",b&0xff));return sb.toString();}
+
+    private VisualSig visualSig(StorageItem item){
+        Bitmap decoded=null,tiny9=null,tiny8=null;
+        try{
+            BitmapFactory.Options bounds=new BitmapFactory.Options();bounds.inJustDecodeBounds=true;try(InputStream in=open(item)){if(in==null)return null;BitmapFactory.decodeStream(in,null,bounds);}int w=bounds.outWidth,h=bounds.outHeight;if(w<=0||h<=0)return null;int aspect=Math.round((w/(float)h)*100f);
+            int max=Math.max(w,h),sample=1;while(max/sample>192&&sample<128)sample<<=1;BitmapFactory.Options opts=new BitmapFactory.Options();opts.inSampleSize=sample;opts.inPreferredConfig=Bitmap.Config.RGB_565;try(InputStream in=open(item)){if(in==null)return null;decoded=BitmapFactory.decodeStream(in,null,opts);}if(decoded==null)return null;
+            tiny9=Bitmap.createScaledBitmap(decoded,9,8,true);long dh=0L;int bit=0;for(int y=0;y<8;y++)for(int x=0;x<8;x++){if(luminance(tiny9.getPixel(x,y))>luminance(tiny9.getPixel(x+1,y)))dh|=(1L<<bit);bit++;}
+            tiny8=Bitmap.createScaledBitmap(decoded,8,8,true);int[] lum=new int[64];long sum=0;for(int y=0;y<8;y++)for(int x=0;x<8;x++){int i=y*8+x;lum[i]=luminance(tiny8.getPixel(x,y));sum+=lum[i];}int avg=(int)(sum/64L);long ah=0L;for(int i=0;i<64;i++)if(lum[i]>=avg)ah|=(1L<<i);
+            return new VisualSig(dh,ah,aspect);
+        }catch(Throwable ignored){return null;}finally{if(tiny9!=null&&tiny9!=decoded&&!tiny9.isRecycled())tiny9.recycle();if(tiny8!=null&&tiny8!=decoded&&!tiny8.isRecycled())tiny8.recycle();if(decoded!=null&&!decoded.isRecycled())decoded.recycle();}
     }
 
     private InputStream open(StorageItem item){ContentResolver cr=app.getContentResolver();try{if(item.uri!=null)return cr.openInputStream(item.uri);}catch(Throwable ignored){}try{if(item.path!=null&&!item.path.isBlank())return new FileInputStream(item.path);}catch(Throwable ignored){}return null;}
     private static int luminance(int c){return(Color.red(c)*299+Color.green(c)*587+Color.blue(c)*114)/1000;}
-    private record PhotoSig(StorageItem item,long hash){}
-    private static final class Group{final PhotoSig representative;final ArrayList<PhotoSig> items=new ArrayList<>();Group(PhotoSig p){representative=p;items.add(p);}}
+    private record VisualSig(long dhash,long ahash,int aspect){}
+    private record PhotoSig(StorageItem item,long dhash,long ahash,int aspect){}
+    private static final class Group{final PhotoSig rep;final ArrayList<PhotoSig> items=new ArrayList<>();Group(PhotoSig p){rep=p;items.add(p);}}
 }
