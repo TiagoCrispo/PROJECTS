@@ -47,9 +47,13 @@ jobs:
           disable-animations: true
           script: |
             adb install upgrade/v11510.apk
+            adb shell pm grant com.fer.a53performance android.permission.READ_MEDIA_IMAGES || true
+            adb shell pm grant com.fer.a53performance android.permission.READ_MEDIA_VIDEO || true
+            adb shell pm grant com.fer.a53performance android.permission.READ_MEDIA_AUDIO || true
+            adb shell appops set com.fer.a53performance MANAGE_EXTERNAL_STORAGE allow || true
             adb shell am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n com.fer.a53performance/.MainActivity >/dev/null
             adb shell am force-stop com.fer.a53performance
-            printf '%s' '<map><string name="last_profile">COOL</string><boolean name="auto_restore_profile" value="false" /></map>' > /tmp/a53_ui.xml
+            printf '%s' '<map><string name="last_profile">COOL</string><boolean name="auto_restore_profile" value="false" /><boolean name="permission_flow_v1154" value="true" /></map>' > /tmp/a53_ui.xml
             printf '%s' '<map><set name="user_packages"><string>com.example.keepme</string></set></map>' > /tmp/a53_protected_apps.xml
             adb push /tmp/a53_ui.xml /data/local/tmp/a53_ui.xml >/dev/null
             adb push /tmp/a53_protected_apps.xml /data/local/tmp/a53_protected_apps.xml >/dev/null
@@ -63,13 +67,16 @@ jobs:
             adb shell run-as com.fer.a53performance cat files/upgrade_marker.txt | grep -q COOL
             adb shell run-as com.fer.a53performance cat shared_prefs/a53_ui.xml | grep -q COOL
             adb shell run-as com.fer.a53performance cat shared_prefs/a53_protected_apps.xml | grep -q com.example.keepme
+            adb shell appops get com.fer.a53performance MANAGE_EXTERNAL_STORAGE | grep -q allow
             adb reboot
             adb wait-for-device
             i=0; while [ $i -lt 90 ]; do BOOT=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r'); if [ "$BOOT" = "1" ]; then break; fi; sleep 2; i=$((i+1)); done
             test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1"
             adb shell input keyevent 82 || true
             adb logcat -c
-            adb shell am start -S -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n com.fer.a53performance/.MainActivity
+            adb shell am start -S -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n com.fer.a53performance/.MainActivity | tee launch.txt
+            grep -q 'Status: ok' launch.txt
+            grep -q 'Activity: com.fer.a53performance/.MainActivity' launch.txt
             i=0; PID=''; while [ $i -lt 15 ]; do PID=$(adb shell pidof com.fer.a53performance | tr -d '\r'); if [ -n "$PID" ]; then break; fi; sleep 1; i=$((i+1)); done
             test -n "$PID"
             adb shell run-as com.fer.a53performance cat files/upgrade_marker.txt | grep -q COOL
