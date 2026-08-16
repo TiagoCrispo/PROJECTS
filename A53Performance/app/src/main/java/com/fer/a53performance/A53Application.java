@@ -13,13 +13,11 @@ public final class A53Application extends Application {
     private static final long PRUNE_INTERVAL_MS=7L*24L*60L*60L*1000L;
 
     @Override public void onCreate(){
-        super.onCreate();
-        SharedPreferences prefs=getSharedPreferences("a53_ui", Context.MODE_PRIVATE);
-        long now=System.currentTimeMillis(),last=prefs.getLong("last_cache_prune",0L);
-        if(now-last<PRUNE_INTERVAL_MS)return;
-        Constraints constraints=new Constraints.Builder().setRequiresBatteryNotLow(true).build();
-        Data input=new Data.Builder().putBoolean("maintenance",true).build();
+        super.onCreate();SharedPreferences prefs=getSharedPreferences("a53_ui",Context.MODE_PRIVATE);
+        if(prefs.getBoolean("auto_deferred",false)&&prefs.getBoolean("auto_restore_profile",false))AutoScheduler.scheduleDeferredRestore(this);
+        long now=System.currentTimeMillis(),last=prefs.getLong("last_cache_prune",0L);if(now-last<PRUNE_INTERVAL_MS)return;
+        Constraints constraints=new Constraints.Builder().setRequiresBatteryNotLow(true).build();Data input=new Data.Builder().putBoolean("maintenance",true).build();
         OneTimeWorkRequest maintenance=new OneTimeWorkRequest.Builder(AutoWorker.class).setInputData(input).setConstraints(constraints).build();
-        WorkManager.getInstance(this).enqueueUniqueWork("a53-cache-maintenance", ExistingWorkPolicy.KEEP,maintenance);
+        WorkManager.getInstance(this).enqueueUniqueWork("a53-cache-maintenance",ExistingWorkPolicy.KEEP,maintenance);
     }
 }
