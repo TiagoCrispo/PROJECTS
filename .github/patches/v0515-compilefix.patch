@@ -1,0 +1,44 @@
+--- app/src/main/java/com/fer/wavault/MediaStoreWatcher.java
++++ app/src/main/java/com/fer/wavault/MediaStoreWatcher.java
+@@ -75,7 +75,7 @@
+         if("image".equals(type)||"video".equals(type))try{
+             VaultDb db=new VaultDb(app);db.armPendingManualMedia(messageId,type,t,ARM_WINDOW_MS);
+             db.reconcileRecentUnlinkedMedia(messageId,t,type);
+-        }catch(Throwable t){record("MEDIASTORE_ARM_DB_ERROR",t.getClass().getSimpleName());}
++        }catch(Throwable err){record("MEDIASTORE_ARM_DB_ERROR",err.getClass().getSimpleName());}
+     }
+ 
+     private static void scheduleRetries(Uri changed,int flags){
+@@ -113,7 +113,7 @@
+                     else n=MediaArchiver.scanRecentDownloadedMedia(app,id,t,"");
+                 } else n=MediaArchiver.scanRecentDownloadedMedia(app,id,t,changedType);
+             }
+-        }catch(Throwable t){record("MEDIASTORE_CAPTURE_ERROR",t.getClass().getSimpleName());}
++        }catch(Throwable err){record("MEDIASTORE_CAPTURE_ERROR",err.getClass().getSimpleName());}
+         if(n>0&&arm!=null)consume(arm.messageId,changedType);
+         app.getSharedPreferences("wa_vault_diag",Context.MODE_PRIVATE).edit()
+                 .putString("last_mediastore_event",(changed==null?"change":changed.toString())+" · copiados="+n+" · flags="+flags)
+--- app/src/main/java/com/fer/wavault/MainActivity.java
++++ app/src/main/java/com/fer/wavault/MainActivity.java
+@@ -670,21 +670,6 @@
+         return "Archivo multimedia";
+     }
+ 
+-    private VaultDb.Media findNearestMedia(long messageTime, String expectedType, long maxDelta) {
+-        if (expectedType == null || expectedType.isEmpty()) return null;
+-        VaultDb.Media best = null;
+-        long bestDelta = Long.MAX_VALUE;
+-        for (VaultDb.Media media : safeMedia(1500)) {
+-            if (media == null || !expectedType.equals(media.type)) continue;
+-            File f = media.path == null ? null : new File(media.path);
+-            if (f == null || !f.exists() || f.length() <= 0) continue;
+-            long t = media.sourceTime > 0 ? media.sourceTime : media.capturedAt;
+-            long d = Math.abs(t - messageTime);
+-            if (d <= maxDelta && d < bestDelta) { best = media; bestDelta = d; }
+-        }
+-        return best;
+-    }
+-
+     private void addDeletedMessageMedia(LinearLayout parent, VaultDb.Media media) {
+         File file = media.path == null ? null : new File(media.path);
+         if (file == null || !file.exists()) return;
