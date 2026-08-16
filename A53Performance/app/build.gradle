@@ -8,8 +8,8 @@ android {
         applicationId 'com.fer.a53performance'
         minSdk 26
         targetSdk 35
-        versionCode 30
-        versionName '1.15.8'
+        versionCode 31
+        versionName '1.15.9'
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }
 
