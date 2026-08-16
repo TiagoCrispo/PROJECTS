@@ -29,6 +29,7 @@ public final class StorageIndexDb extends SQLiteOpenHelper {
         if(oldVersion<2){
             try{db.execSQL("ALTER TABLE files ADD COLUMN volume TEXT NOT NULL DEFAULT 'external'");}catch(Throwable ignored){}
             try{db.execSQL("CREATE INDEX idx_files_volume ON files(volume,id)");}catch(Throwable ignored){}
+            try{db.delete("meta","k=?",new String[]{META_SIGNATURE});}catch(Throwable ignored){}
         }
     }
 
