@@ -1,0 +1,636 @@
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -10,8 +10,8 @@
+         applicationId = "com.fer.wavault"
+         minSdk = 26
+         targetSdk = 35
+-        versionCode = 66
+-        versionName = "0.5.16"
++        versionCode = 67
++        versionName = "0.5.17"
+     }
+ 
+     compileOptions {
+--- a/app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java
++++ b/app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java
+@@ -243,11 +243,21 @@
+         long newestAudioMessageTime = 0L;
+         Map<String,Long> previousTokenIds = new LinkedHashMap<>();
+         for (SnapshotItem x : previousItems) if (x != null && !x.token.isEmpty() && x.id > 0) previousTokenIds.put(x.token,x.id);
++        // A plural text such as "2 mensajes eliminados" is not deletion proof by itself: a human
++        // can type that exact sentence. It is promoted to a system marker only when the structured
++        // MessagingStyle snapshot proves exactly N previous tokens vanished and no normal token was
++        // added. Otherwise it stays an ordinary chat message.
++        final int structuredPluralCount = structuredPluralDeleteCount(parsed, previousItems);
++        boolean structuredPluralConsumed = false;
+ 
+         for (Parsed p : parsed) {
+             fallbackConversation = p.conversation;
+             String low = p.text.toLowerCase(Locale.ROOT);
+             int markerCount = deletedMarkerCount(low);
++            if (markerCount == 0 && !structuredPluralConsumed && structuredPluralCount > 0) {
++                int plural = pluralDeleteCount(normalizeDeleteMarkerText(low));
++                if (plural == structuredPluralCount) { markerCount = plural; structuredPluralConsumed = true; }
++            }
+             if (markerCount > 0) {
+                 deletionMarkers += markerCount;
+                 if (firstDeletionMarker == null) firstDeletionMarker = p;
+@@ -722,7 +732,9 @@
+     }
+ 
+     private boolean isAppDrivenRemovalReason(int reason) {
+-        return reason == REASON_APP_CANCEL || reason == REASON_APP_CANCEL_ALL;
++        // APP_CANCEL_ALL is a global notification lifecycle event (clear/regroup/etc.), not a
++        // per-message deletion signal. Drop it before any candidate/probable work is scheduled.
++        return reason == REASON_APP_CANCEL;
+     }
+ 
+     private void traceDeletion(String path, String conversation, int previous, int current, int marked) {
+@@ -850,6 +862,7 @@
+                     removalCandidateGenerations.remove(ck,generation);
+                     traceDeletion("APP_CANCEL_UNPROVEN_ROLLBACK",conv,candidate.size(),liveCount,0);
+                     try{db2.logEvent("DELETE_APP_CANCEL_UNPROVEN","Sin marcador explícito · revertidos="+reverted+" · "+conv,0L,0L);}catch(Throwable ignored){}
++                    recordUnverifiableDelete("APP_CANCEL sin marcador",conv,candidate.size());
+                     return;
+                 }
+                 int confirmed=0;
+@@ -904,11 +917,9 @@
+                 if (x.token.isEmpty() || !liveSet.contains(x.token)) absent.add(x);
+             }
+             VaultDb db = new VaultDb(getApplicationContext());
+-            if (reason != REASON_APP_CANCEL) {
+-                removalCandidateGenerations.remove(candidateKey, generation);
+-                traceDeletion("APP_CANCEL_ALL_IGNORED", conv, candidate.size(), liveSet.size(), 0);
+-                return;
+-            }
++            // scheduleRemovedDeletionCheck is reached only for REASON_APP_CANCEL. APP_CANCEL_ALL
++            // is filtered in onNotificationRemoved before candidate/probable work starts.
+             List<Long> marked = optimisticMark(db, absent, active == null ? "DELETE_REMOVE_STABLE" : "DELETE_REMOVE_RECONCILED", conv);
+             traceDeletion(active == null ? "APP_CANCEL_CANDIDATE" : "APP_CANCEL_RECONCILED", conv, candidate.size(), liveSet.size(), marked.size());
+             if (marked.isEmpty() && active == null) {
+@@ -1364,25 +1375,41 @@
+ 
+     private boolean isDeletedMarker(String low) { return deletedMarkerCount(low) > 0; }
+ 
++    /** Exact singular WhatsApp deletion markers only. Plural phrases need structured proof and are
++     * deliberately excluded from this generic helper so APP_CANCEL/polling can never promote them
++     * by text alone. */
+     private int deletedMarkerCount(String low) {
+         if (low == null) return 0;
+-        String t = normalizeTokenPart(low);
+-        while (t.endsWith(".") || t.endsWith("!") || t.endsWith(":") || t.endsWith("…")) t = t.substring(0,t.length()-1).trim();
+-        // Some fallback notification layouts prefix a line with "Sender: ". Only strip the
+-        // prefix when the suffix itself is an exact known WhatsApp deletion marker.
++        String t = normalizeDeleteMarkerText(low);
+         int colon = t.indexOf(": ");
+         if (colon > 0) {
+             String suffix = t.substring(colon + 2).trim();
+-            if (isExactDeleteText(suffix) || pluralDeleteCount(suffix) > 0) t = suffix;
++            if (isExactDeleteText(suffix)) t = suffix;
+         }
+-        if (isExactDeleteText(t)) return 1;
+-        return pluralDeleteCount(t);
++        return isExactDeleteText(t) ? 1 : 0;
++    }
++
++    private String normalizeDeleteMarkerText(String value){
++        if(value==null)return "";
++        String t=value.replace("\u200b","").replace("\u200c","").replace("\u200d","").replace("\ufeff","")
++                .replace('\u00a0',' ');
++        t=normalizeTokenPart(t);
++        while(!t.isEmpty() && (t.endsWith(".")||t.endsWith("!")||t.endsWith(":")||t.endsWith("…")))
++            t=t.substring(0,t.length()-1).trim();
++        return t;
+     }
+ 
+     private boolean isExactDeleteText(String t) {
+         if (t == null) return false;
+-        // Keep only full WhatsApp-style marker sentences. Generic fragments such as
+-        // "mensaje eliminado" / "message deleted" are valid things a person can send
+-        // in a normal chat and must never become deletion proof.
++        // Full WhatsApp-style marker sentences only. Generic fragments remain ordinary chat.
+         return t.equals("este mensaje fue eliminado")
+                 || t.equals("se eliminó este mensaje")
+                 || t.equals("eliminaste este mensaje")
+@@ -1406,13 +1433,39 @@
+                 String prefix = t.substring(0, t.length() - phrase.length()).trim();
+                 try {
+                     int n = Integer.parseInt(prefix);
+-                    return Math.max(1, Math.min(100, n));
++                    return n>=2 ? Math.min(100,n) : 0;
+                 } catch (Throwable ignored) {}
+             }
+         }
+         return 0;
+     }
+ 
++    /** Strong plural-marker gate: exactly one MessagingStyle plural candidate, all previous rows
++     * tokenized, exactly N previous tokens missing, and zero newly-added normal tokens. */
++    private int structuredPluralDeleteCount(List<Parsed> parsed,List<SnapshotItem> previous){
++        if(parsed==null||previous==null||previous.size()<2||!allTokenized(previous))return 0;
++        Parsed candidate=null;int count=0,candidates=0;
++        List<String> preview=new ArrayList<>();Map<String,Integer> occurrences=new LinkedHashMap<>();
++        for(Parsed p:parsed){
++            if(p==null)continue;String low=p.text==null?"":p.text.toLowerCase(Locale.ROOT);String norm=normalizeDeleteMarkerText(low);
++            if(isExactDeleteText(norm))continue;
++            int plural=pluralDeleteCount(norm);
++            if(plural>0){candidate=p;count=plural;candidates++;continue;}
++            if(isOneTimeMarker(low)||shouldSkip(low))continue;
++            String base=messageTokenBase(p);int n=occurrences.containsKey(base)?occurrences.get(base)+1:1;occurrences.put(base,n);preview.add(base+"#"+n);
++        }
++        if(candidates!=1||candidate==null||!candidate.stableTimestamp||candidate.dataUri!=null||!(candidate.dataMime==null||candidate.dataMime.isEmpty()))return 0;
++        Set<String> before=new HashSet<>(),after=new HashSet<>(preview);for(SnapshotItem x:previous)before.add(x.token);
++        int missing=0,added=0;for(String x:before)if(!after.contains(x))missing++;for(String x:after)if(!before.contains(x))added++;
++        return added==0&&missing==count&&count<=previous.size()?count:0;
++    }
++
++    private void recordUnverifiableDelete(String reason,String conversation,int candidates){
++        try{
++            if(prefs==null)prefs=getSharedPreferences(DIAG_PREFS,MODE_PRIVATE);
++            int add=Math.max(1,candidates),total=prefs.getInt("delete_unverifiable_count",0)+add;
++            prefs.edit().putInt("delete_unverifiable_count",total).putLong("delete_unverifiable_at",System.currentTimeMillis())
++                    .putString("delete_unverifiable_last",(reason==null?"":reason)+" · "+(conversation==null?"WhatsApp":conversation)).apply();
++            new VaultDb(getApplicationContext()).logEvent("DELETE_UNVERIFIABLE","Candidato oculto sin prueba fuerte · "+(reason==null?"":reason)+" · n="+add+" · "+conversation,0L,0L);
++        }catch(Throwable ignored){}
++    }
++
+     private boolean isOneTimeMarker(String low) {
+         return low.contains("ver una vez") || low.contains("view once") || low.contains("voir une fois");
+     }
+--- a/app/src/main/java/com/fer/wavault/MainActivity.java
++++ b/app/src/main/java/com/fer/wavault/MainActivity.java
+@@ -150,6 +150,8 @@
+     private boolean mediaFavoritesOnly = false;
+     private final ArrayList<VaultDb.Media> recoveredItems = new ArrayList<>();
+     private long recoveredRefreshAnchorId = 0L;
++    private long recoveredRefreshFallbackId = 0L;
++    private int recoveredRefreshAnchorIndex = 0;
+     private int recoveredRefreshAnchorOffset = 0;
+     private int recoveredRefreshTargetCount = 0;
+     private MediaAdapter recoveredAdapter;
+@@ -740,7 +742,7 @@
+ 
+     private void resetRecoveredPaging() {
+         ++mediaLoadGeneration;
+-        mediaNextOffset=0;mediaHasMore=true;mediaLoadingMore=false;recoveredRefreshAnchorId=0L;recoveredRefreshAnchorOffset=0;recoveredRefreshTargetCount=0;recoveredSelection.clear();recoveredItems.clear();recoveredContext.clear();
++        mediaNextOffset=0;mediaHasMore=true;mediaLoadingMore=false;recoveredRefreshAnchorId=0L;recoveredRefreshFallbackId=0L;recoveredRefreshAnchorIndex=0;recoveredRefreshAnchorOffset=0;recoveredRefreshTargetCount=0;recoveredSelection.clear();recoveredItems.clear();recoveredContext.clear();
+         if(recoveryCenterAdapter!=null)recoveryCenterAdapter.submitList(new ArrayList<>());
+         updateRecoveredSelectionUi();
+         loadRecoveredPage(true);
+@@ -798,21 +800,28 @@
+     private void submitRecoveredList(){if(recoveryCenterAdapter!=null)recoveryCenterAdapter.submitList(new ArrayList<>(recoveredItems));updateRecoveredSelectionUi();}
+     private void refreshRecoveredInPlace(){
+         if(!"recovered".equals(currentScreen))return;
+-        recoveredRefreshAnchorId=0L;recoveredRefreshAnchorOffset=0;recoveredRefreshTargetCount=Math.max(MEDIA_PAGE_SIZE,recoveredItems.size());
++        recoveredRefreshAnchorId=0L;recoveredRefreshFallbackId=0L;recoveredRefreshAnchorIndex=0;recoveredRefreshAnchorOffset=0;recoveredRefreshTargetCount=Math.max(MEDIA_PAGE_SIZE,recoveredItems.size());
+         try{
+             if(recoveryRecycler!=null&&recoveryRecycler.getLayoutManager() instanceof GridLayoutManager){
+                 GridLayoutManager lm=(GridLayoutManager)recoveryRecycler.getLayoutManager();int pos=lm.findFirstVisibleItemPosition();
+-                if(pos>=0&&pos<recoveredItems.size()){recoveredRefreshAnchorId=recoveredItems.get(pos).id;View v=lm.findViewByPosition(pos);if(v!=null)recoveredRefreshAnchorOffset=v.getTop()-recoveryRecycler.getPaddingTop();}
++                if(pos>=0&&pos<recoveredItems.size()){
++                    recoveredRefreshAnchorIndex=pos;recoveredRefreshAnchorId=recoveredItems.get(pos).id;
++                    if(pos+1<recoveredItems.size())recoveredRefreshFallbackId=recoveredItems.get(pos+1).id;
++                    else if(pos>0)recoveredRefreshFallbackId=recoveredItems.get(pos-1).id;
++                    View v=lm.findViewByPosition(pos);if(v!=null)recoveredRefreshAnchorOffset=v.getTop()-recoveryRecycler.getPaddingTop();
++                }
+             }
+         }catch(Throwable t){recordUiError("RECOVERY_ANCHOR",t);}
+         ++mediaLoadGeneration;mediaLoadingMore=false;loadRecoveredPage(true);
+     }
+     private void restoreRecoveredAnchorIfNeeded(){
+-        if(recoveredRefreshTargetCount<=0)return;long anchor=recoveredRefreshAnchorId;int offset=recoveredRefreshAnchorOffset;
+-        recoveredRefreshTargetCount=0;recoveredRefreshAnchorId=0L;recoveredRefreshAnchorOffset=0;
+-        if(anchor<=0||recoveryRecycler==null||!(recoveryRecycler.getLayoutManager() instanceof GridLayoutManager))return;
++        if(recoveredRefreshTargetCount<=0)return;long anchor=recoveredRefreshAnchorId,fallback=recoveredRefreshFallbackId;int oldIndex=recoveredRefreshAnchorIndex,offset=recoveredRefreshAnchorOffset;
++        recoveredRefreshTargetCount=0;recoveredRefreshAnchorId=0L;recoveredRefreshFallbackId=0L;recoveredRefreshAnchorIndex=0;recoveredRefreshAnchorOffset=0;
++        if(recoveryRecycler==null||!(recoveryRecycler.getLayoutManager() instanceof GridLayoutManager)||recoveredItems.isEmpty())return;
+         int pos=-1;for(int i=0;i<recoveredItems.size();i++)if(recoveredItems.get(i).id==anchor){pos=i;break;}
+-        if(pos>=0){final int target=pos,off=offset;recoveryRecycler.post(()->{try{((GridLayoutManager)recoveryRecycler.getLayoutManager()).scrollToPositionWithOffset(target,off);}catch(Throwable t){recordUiError("RECOVERY_SCROLL_RESTORE",t);}});}
++        if(pos<0&&fallback>0)for(int i=0;i<recoveredItems.size();i++)if(recoveredItems.get(i).id==fallback){pos=i;break;}
++        if(pos<0)pos=Math.max(0,Math.min(oldIndex,recoveredItems.size()-1));
++        final int target=pos,off=offset;recoveryRecycler.post(()->{try{((GridLayoutManager)recoveryRecycler.getLayoutManager()).scrollToPositionWithOffset(target,off);}catch(Throwable t){recordUiError("RECOVERY_SCROLL_RESTORE",t);}});
+     }
+     private void loadMoreRecoveredInPlace(){if(!mediaHasMore||mediaLoadingMore||!"recovered".equals(currentScreen))return;loadRecoveredPage(false);}
+     private void updateRecoveredSelectionUi(){boolean active=!recoveredSelection.isEmpty();if(recoveredSelectionText!=null)recoveredSelectionText.setText(active?recoveredSelection.size()+" seleccionados":"Mantén pulsado para seleccionar");if(recoveredSelectBulk!=null)recoveredSelectBulk.setVisibility(active?View.VISIBLE:View.GONE);if(recoveredBulkActions!=null)recoveredBulkActions.setVisibility(active?View.VISIBLE:View.GONE);if(recoveryCenterAdapter!=null)recoveryCenterAdapter.notifyDataSetChanged();}
+@@ -1581,6 +1590,7 @@
+         latest.addView(text("Últimas señales",18,fg,true));
+         latest.addView(diagRow("Mensaje",d.getString("last_event","Sin actividad")));
+         latest.addView(diagRow("Borrado",d.getString("last_delete_path","Sin señal")+" · prev "+d.getInt("last_delete_previous",0)+" → actual "+d.getInt("last_delete_current",0)+" · marcados "+d.getInt("last_delete_marked",0)));
++        latest.addView(diagRow("Borrados no verificables",d.getInt("delete_unverifiable_count",0)+" candidatos ocultos · "+d.getString("delete_unverifiable_last","sin incidencias")));
+         latest.addView(diagRow("Audio",d.getString("notif_audio_status",d.getString("direct_watcher_last_event","Sin evento"))));
+         latest.addView(diagRow("Foto / video",d.getString("last_direct_media","Sin evento directo")));
+         latest.addView(diagRow("MediaStore",d.getString("last_mediastore_event","Sin evento")));
+--- a/app/src/main/java/com/fer/wavault/MediaArchiver.java
++++ b/app/src/main/java/com/fer/wavault/MediaArchiver.java
+@@ -143,7 +143,7 @@
+             String low=name.toLowerCase(Locale.ROOT);
+             if(low.contains("view once")||low.contains("ver una vez"))return -1L;
+             if(size<=0||size>600L*1024L*1024L)return -1L;
+-            if(MediaLimits.videoTooLarge(context,type,size)){MediaLimits.recordVideoLimit(context,linkedMessageId,sourceTime,size,"MEDIASTORE_EXACT");return -1L;}
++            if(MediaLimits.mediaTooLarge(context,type,size)){MediaLimits.recordLimit(context,type,linkedMessageId,sourceTime,size,"MEDIASTORE_EXACT");return -1L;}
+             String mimeLow=mime==null?"":mime.toLowerCase(Locale.ROOT);
+             if("image".equals(type)&&!mimeLow.isEmpty()&&!mimeLow.startsWith("image/"))return -1L;
+             if("video".equals(type)&&!mimeLow.isEmpty()&&!mimeLow.startsWith("video/"))return -1L;
+@@ -218,7 +218,7 @@
+                 if ("audio".equals(type) && !isAudioDocument(name,mime)) continue;
+                 if ("document".equals(type) && !isDocumentAttachment(name,mime)) continue;
+                 if (size <= 0 || size > 600L * 1024L * 1024L) continue;
+-                if(MediaLimits.videoTooLarge(context,type,size)){MediaLimits.recordVideoLimit(context,linkedMessageId,sourceTime,size,"MEDIASTORE_SCAN");continue;}
++                if(MediaLimits.mediaTooLarge(context,type,size)){MediaLimits.recordLimit(context,type,linkedMessageId,sourceTime,size,"MEDIASTORE_SCAN");continue;}
+ 
+                 Uri uri = ContentUris.withAppendedId(base, id);
+                 String uriString = uri.toString();
+@@ -824,7 +824,7 @@
+         if (context == null || staged == null || !staged.exists() || staged.length() <= 128) return -1L;
+         if (!("image".equals(type) || "video".equals(type))) return -1L;
+         Context app=context.getApplicationContext();
+-        if(MediaLimits.videoTooLarge(app,type,staged.length())){MediaLimits.recordVideoLimit(app,linkedMessageId,sourceTime,staged.length(),"NOTIFICATION_DATA_URI");try{staged.delete();}catch(Throwable ignored){}return -1L;}
++        if(MediaLimits.mediaTooLarge(app,type,staged.length())){MediaLimits.recordLimit(app,type,linkedMessageId,sourceTime,staged.length(),"NOTIFICATION_DATA_URI");try{staged.delete();}catch(Throwable ignored){}return -1L;}
+         if (!isUsable(staged,type)) { try{staged.delete();}catch(Throwable ignored){} return -1L; }
+         VaultDb db=new VaultDb(app);
+         long now=System.currentTimeMillis();
+@@ -959,19 +959,20 @@
+     }
+ 
+     private static long copyUriLimited(Context context,Uri uri,File dst,String type,long messageId,long sourceTime,String origin){
+-        if(!"video".equals(type))return copyUri(context,uri,dst);
+-        long written=0L;final long videoLimit=MediaLimits.maxVideoBytes(context);
++        if(!("video".equals(type)||"document".equals(type)))return copyUri(context,uri,dst);
++        long written=0L;final long adaptiveLimit=MediaLimits.maxBytes(context,type);
+         try(InputStream in=context.getContentResolver().openInputStream(uri);FileOutputStream out=new FileOutputStream(dst)){
+             if(in==null){dst.delete();return 0L;}
+             byte[] buf=new byte[131072];int z;
+             while((z=in.read(buf))>0){
+-                if(written+z>videoLimit){
++                if(adaptiveLimit<=0L||written+z>adaptiveLimit){
+                     written+=z;try{dst.delete();}catch(Throwable ignored){}
+-                    MediaLimits.recordVideoLimit(context,messageId,sourceTime,written,origin);return -2L;
++                    MediaLimits.recordLimit(context,type,messageId,sourceTime,written,origin);return -2L;
+                 }
+                 out.write(buf,0,z);written+=z;
+             }
+             out.flush();return written;
+         }catch(Throwable t){try{dst.delete();}catch(Throwable ignored){}return 0L;}
+     }
++
+ 
+     private static File stagingDir(Context app){File d=new File(app.getFilesDir(),"vault_staging");if(!d.exists())d.mkdirs();return d;}
+     private static File vaultMediaDir(Context app){File d=new File(app.getFilesDir(),"vault_media");if(!d.exists())d.mkdirs();return d;}
+@@ -1041,7 +1042,7 @@
+ 
+     private static long commitReadyStaged(Context app,File ready,String type,long linkedMessageId,long sourceTime,String source,String origin){
+         if(app==null||ready==null||!ready.exists())return -1L;
+-        if(MediaLimits.videoTooLarge(app,type,ready.length())){MediaLimits.recordVideoLimit(app,linkedMessageId,sourceTime,ready.length(),origin);try{ready.delete();}catch(Throwable ignored){}return -1L;}
++        if(MediaLimits.mediaTooLarge(app,type,ready.length())){MediaLimits.recordLimit(app,type,linkedMessageId,sourceTime,ready.length(),origin);try{ready.delete();}catch(Throwable ignored){}return -1L;}
+         String n=ready.getName();int cut=n.indexOf("_"+type+"_");String safe=cut>=0?n.substring(cut+("_"+type+"_").length()):safeMediaName(ready,type);
+         File dst=new File(vaultMediaDir(app),System.currentTimeMillis()+"_"+safe);
+         if(!ready.renameTo(dst)){
+@@ -1073,7 +1074,7 @@
+         VaultDb db=new VaultDb(app);
+         long initialModified=sourceFile.lastModified();
+         long initialSize=Math.max(0L,sourceFile.length());
+-        if(MediaLimits.videoTooLarge(app,type,initialSize)){MediaLimits.recordVideoLimit(app,linkedMessageId,sourceTime,initialSize,"FILE_OBSERVER_EARLY_OPEN_PRECHECK");return -1L;}
++        if(MediaLimits.mediaTooLarge(app,type,initialSize)){MediaLimits.recordLimit(app,type,linkedMessageId,sourceTime,initialSize,"FILE_OBSERVER_EARLY_OPEN_PRECHECK");return -1L;}
+         String source="direct-media:"+sourceFile.getAbsolutePath()+"|"+initialModified;
+         long existing=db.findMediaId(source);
+         if(existing>0){db.linkMediaToMessageIfFree(existing,linkedMessageId);return existing;}
+@@ -1080,19 +1081,19 @@
+         String safe=safeMediaName(sourceFile,type);
+         File dst=new File(stagingDir(app),"part_"+System.currentTimeMillis()+"_"+type+"_"+safe);
+-        long written=0L;int idle=0;long started=System.currentTimeMillis();boolean overVideoLimit=false;
+-        final long videoLimit=MediaLimits.maxVideoBytes(app);
++        long written=0L;int idle=0;long started=System.currentTimeMillis();boolean overAdaptiveLimit=false;
++        final long adaptiveLimit=MediaLimits.maxBytes(app,type);
+         try(FileInputStream in=new FileInputStream(sourceFile);FileOutputStream out=new FileOutputStream(dst)){
+             byte[] buf=new byte[131072];
+             while(System.currentTimeMillis()-started<30_000L){
+                 int z=in.read(buf);
+-                if(z>0){if("video".equals(type)&&written+z>videoLimit){overVideoLimit=true;written+=z;break;}out.write(buf,0,z);written+=z;idle=0;continue;}
++                if(z>0){if(("video".equals(type)||"document".equals(type))&&(adaptiveLimit<=0L||written+z>adaptiveLimit)){overAdaptiveLimit=true;written+=z;break;}out.write(buf,0,z);written+=z;idle=0;continue;}
+                 idle++;
+                 if(written>256&&idle>=6)break;
+                 try{Thread.sleep(idle<3?18L:38L);}catch(InterruptedException ie){Thread.currentThread().interrupt();break;}
+             }
+             out.flush();
+         }catch(Throwable t){try{dst.delete();}catch(Throwable ignored){}return -1L;}
+-        if(overVideoLimit){try{dst.delete();}catch(Throwable ignored){}MediaLimits.recordVideoLimit(app,linkedMessageId,sourceTime,written,"FILE_OBSERVER_EARLY_OPEN");return -1L;}
++        if(overAdaptiveLimit){try{dst.delete();}catch(Throwable ignored){}MediaLimits.recordLimit(app,type,linkedMessageId,sourceTime,written,"FILE_OBSERVER_EARLY_OPEN");return -1L;}
+         if(written<=("document".equals(type)?0:256)||written>600L*1024L*1024L||!isUsable(dst,type)){try{dst.delete();}catch(Throwable ignored){}return -1L;}
+         long ts=sourceTime>0?sourceTime:(initialModified>0?initialModified:System.currentTimeMillis());
+         File ready=new File(stagingDir(app),"ready_"+System.currentTimeMillis()+"_"+type+"_"+safe);
+@@ -1132,7 +1133,7 @@
+         if (sourceFile.length() <= 0 || sourceFile.length() > 600L*1024L*1024L) return -1L;
+ 
+         Context app = context.getApplicationContext();
+-        if(MediaLimits.videoTooLarge(app,type,sourceFile.length())){MediaLimits.recordVideoLimit(app,linkedMessageId,sourceTime,sourceFile.length(),"FILE_OBSERVER");return -1L;}
++        if(MediaLimits.mediaTooLarge(app,type,sourceFile.length())){MediaLimits.recordLimit(app,type,linkedMessageId,sourceTime,sourceFile.length(),"FILE_OBSERVER");return -1L;}
+         VaultDb db = new VaultDb(app);
+         String source = "direct-media:" + sourceFile.getAbsolutePath() + "|" + sourceFile.lastModified() + "|" + sourceFile.length();
+         long existing = db.findMediaId(source);
+@@ -1141,10 +1142,14 @@
+         if (!dir.exists()) dir.mkdirs();
+         String safe = sourceFile.getName().replaceAll("[^a-zA-Z0-9._-]", "_");
+         File dst = new File(dir, System.currentTimeMillis()+"_"+safe);
+-        long written = 0L;
++        long written = 0L;boolean overAdaptiveLimit=false;final long adaptiveLimit=MediaLimits.maxBytes(app,type);
+         try (FileInputStream in = new FileInputStream(sourceFile); FileOutputStream out = new FileOutputStream(dst)) {
+             byte[] buf = new byte[131072];
+             int z;
+-            while ((z=in.read(buf))>0) { out.write(buf,0,z); written += z; }
++            while ((z=in.read(buf))>0) {
++                if(("video".equals(type)||"document".equals(type))&&(adaptiveLimit<=0L||written+z>adaptiveLimit)){overAdaptiveLimit=true;written+=z;break;}
++                out.write(buf,0,z); written += z;
++            }
+             out.flush();
+         } catch (Throwable t) {
+             try { dst.delete(); } catch (Throwable ignored) {}
+             return -1L;
+         }
++        if(overAdaptiveLimit){try{dst.delete();}catch(Throwable ignored){}MediaLimits.recordLimit(app,type,linkedMessageId,sourceTime,written,"FILE_OBSERVER_STREAM");return -1L;}
+         if (written <= 0 || !isUsable(dst,type)) { try { dst.delete(); } catch(Throwable ignored){} return -1L; }
+         String mime = guessMime(safe,type);
+         long ts = sourceTime > 0 ? sourceTime : (sourceFile.lastModified() > 0 ? sourceFile.lastModified() : System.currentTimeMillis());
+--- a/app/src/main/java/com/fer/wavault/MediaLimits.java
++++ b/app/src/main/java/com/fer/wavault/MediaLimits.java
+@@ -3,9 +3,9 @@
+ import android.content.Context;
+ import android.os.StatFs;
+ 
+-/** Shared capture limits. Oversized videos are never committed as partial/corrupt files. */
++/** Shared adaptive capture limits with a protected storage reserve. */
+ public final class MediaLimits {
+     private MediaLimits() {}
+ 
+@@ -13,18 +13,87 @@
+     public static final long VIDEO_LIMIT_NORMAL = 100L * 1024L * 1024L;
+     public static final long VIDEO_LIMIT_HIGH = 200L * 1024L * 1024L;
+ 
+-    /** Adaptive cap based on free space in WA Vault's private storage. */
+-    public static long maxVideoBytes(Context context){
+-        long free=0L;
++    public static final long DOCUMENT_LIMIT_LOW = 50L * 1024L * 1024L;
++    public static final long DOCUMENT_LIMIT_NORMAL = 150L * 1024L * 1024L;
++    public static final long DOCUMENT_LIMIT_HIGH = 300L * 1024L * 1024L;
++
++    /** Keep at least this much private storage untouched even during repeated captures. */
++    public static final long STORAGE_RESERVE_MIN = 768L * 1024L * 1024L;
++    private static final long STORAGE_RESERVE_PERCENT = 8L;
++
++    private static long[] storage(Context context){
++        long free=0L,total=0L;
+         try{
+             if(context!=null){
+                 StatFs fs=new StatFs(context.getFilesDir().getAbsolutePath());
+                 free=fs.getAvailableBytes();
++                total=fs.getTotalBytes();
+             }
+         }catch(Throwable ignored){}
+-        if(free<=0L)return VIDEO_LIMIT_LOW;
+-        if(free<1500L*1024L*1024L)return VIDEO_LIMIT_LOW;
+-        if(free<4L*1024L*1024L*1024L)return VIDEO_LIMIT_NORMAL;
+-        return VIDEO_LIMIT_HIGH;
++        return new long[]{Math.max(0L,free),Math.max(0L,total)};
++    }
++
++    public static long reserveBytes(Context context){
++        long[] s=storage(context);
++        long ratio=s[1]>0L ? (s[1]/100L)*STORAGE_RESERVE_PERCENT : 0L;
++        return Math.max(STORAGE_RESERVE_MIN,ratio);
++    }
++
++    public static long writableBytes(Context context){
++        long[] s=storage(context);
++        return Math.max(0L,s[0]-reserveBytes(context));
++    }
++
++    private static long clampToWritable(Context context,long tier){
++        long writable=writableBytes(context);
++        if(writable<=0L)return 0L;
++        return Math.max(0L,Math.min(tier,writable));
++    }
++
++    /** Adaptive video cap based on free space while preserving the reserve. */
++    public static long maxVideoBytes(Context context){
++        long free=storage(context)[0];
++        long tier;
++        if(free<=0L)tier=VIDEO_LIMIT_LOW;
++        else if(free<1500L*1024L*1024L)tier=VIDEO_LIMIT_LOW;
++        else if(free<4L*1024L*1024L*1024L)tier=VIDEO_LIMIT_NORMAL;
++        else tier=VIDEO_LIMIT_HIGH;
++        return clampToWritable(context,tier);
++    }
++
++    /** Documents use the same streaming/reserve policy, with their own conservative tiers. */
++    public static long maxDocumentBytes(Context context){
++        long free=storage(context)[0];
++        long tier;
++        if(free<=0L)tier=DOCUMENT_LIMIT_LOW;
++        else if(free<2L*1024L*1024L*1024L)tier=DOCUMENT_LIMIT_LOW;
++        else if(free<6L*1024L*1024L*1024L)tier=DOCUMENT_LIMIT_NORMAL;
++        else tier=DOCUMENT_LIMIT_HIGH;
++        return clampToWritable(context,tier);
++    }
++
++    public static long maxBytes(Context context,String type){
++        if("video".equals(type))return maxVideoBytes(context);
++        if("document".equals(type))return maxDocumentBytes(context);
++        return Long.MAX_VALUE;
++    }
++
++    public static boolean mediaTooLarge(Context context,String type,long bytes){
++        if(!("video".equals(type)||"document".equals(type)))return false;
++        long limit=maxBytes(context,type);
++        return bytes>=0L && (limit<=0L || bytes>limit);
+     }
+ 
+     public static boolean videoTooLarge(Context context,String type,long bytes){
+-        return "video".equals(type) && bytes >= 0L && bytes > maxVideoBytes(context);
++        return "video".equals(type) && mediaTooLarge(context,type,bytes);
++    }
++
++    public static boolean documentTooLarge(Context context,String type,long bytes){
++        return "document".equals(type) && mediaTooLarge(context,type,bytes);
+     }
+ 
+     public static String limitLabel(Context context){
+@@ -32,15 +101,27 @@
+         return mb+" MB";
+     }
+ 
++    public static String documentLimitLabel(Context context){
++        long mb=maxDocumentBytes(context)/(1024L*1024L);
++        return mb+" MB";
++    }
++
+     public static void recordVideoLimit(Context context,long messageId,long sourceTime,long observedBytes,String origin){
++        recordLimit(context,"video",messageId,sourceTime,observedBytes,origin);
++    }
++
++    public static void recordDocumentLimit(Context context,long messageId,long sourceTime,long observedBytes,String origin){
++        recordLimit(context,"document",messageId,sourceTime,observedBytes,origin);
++    }
++
++    public static void recordLimit(Context context,String type,long messageId,long sourceTime,long observedBytes,String origin){
+         if(context==null)return;
+         Context app=context.getApplicationContext();
+-        long limit=maxVideoBytes(app);String label=(limit/(1024L*1024L))+" MB";
++        long limit=maxBytes(app,type);String label=(limit/(1024L*1024L))+" MB";
+         try{
+             VaultDb db=new VaultDb(app);
+-            if(messageId>0){
++            if("video".equals(type) && messageId>0){
+                 db.ensureVideoPlaceholder(messageId,sourceTime,"Video no guardado · supera el límite actual de "+label,"VIDEO_LIMIT_PLACEHOLDER");
+                 db.markVideoPlaceholderLimited(messageId,observedBytes,limit);
+             }else{
+-                db.logEvent("VIDEO_LIMIT_EXCEEDED","Video omitido por límite "+label+" · observado="+Math.max(0L,observedBytes)+" bytes · "+(origin==null?"":origin),0L,0L);
++                String code="document".equals(type)?"DOCUMENT_LIMIT_EXCEEDED":"VIDEO_LIMIT_EXCEEDED";
++                String name="document".equals(type)?"Documento":"Video";
++                db.logEvent(code,name+" omitido por límite "+label+" · observado="+Math.max(0L,observedBytes)+" bytes · "+(origin==null?"":origin),messageId,0L);
+             }
+             app.getSharedPreferences("wa_vault_diag",Context.MODE_PRIVATE).edit()
+-                    .putString("last_video_limit","Omitido >"+label+" · observado="+Math.max(0L,observedBytes)+" B · "+(origin==null?"":origin))
+-                    .putLong("last_video_limit_bytes",limit)
+-                    .putLong("last_video_limit_at",System.currentTimeMillis()).apply();
++                    .putString("document".equals(type)?"last_document_limit":"last_video_limit","Omitido >"+label+" · observado="+Math.max(0L,observedBytes)+" B · "+(origin==null?"":origin))
++                    .putLong("document".equals(type)?"last_document_limit_bytes":"last_video_limit_bytes",limit)
++                    .putLong("document".equals(type)?"last_document_limit_at":"last_video_limit_at",System.currentTimeMillis()).apply();
+         }catch(Throwable ignored){}
+     }
+ }
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,3 +1,11 @@
++# v0.5.17 — Stability / Precision
++- Marcadores plurales requieren prueba estructural exacta; frases humanas no confirman borrados.
++- Normalización segura de marcadores singulares.
++- APP_CANCEL_ALL filtrado antes de candidatos.
++- Contador diagnóstico de borrados no verificables.
++- Reserva de almacenamiento protegida + límites adaptativos para documentos.
++- Fallback de scroll en Recuperados si desaparece el ancla.
++
+ ## 0.5.16 — Strict Delete Evidence + Media Cohorts
+ - `APP_CANCEL` deja de ser prueba de borrado: sin marcador explícito de WhatsApp, cualquier candidato probable se revierte y nunca aparece como confirmado.
+ - Limpieza acotada al actualizar para degradar confirmaciones heredadas de la antigua ruta `APP_CANCEL directo=` de v0.5.15.
+--- a/TEST_MATRIX.md
++++ b/TEST_MATRIX.md
+@@ -1,3 +1,14 @@
++# v0.5.17 Stability / Precision
++
++- [ ] Escribir literalmente `2 mensajes eliminados`: debe guardarse como mensaje normal si no faltan exactamente 2 tokens previos.
++- [ ] Borrado plural real: solo confirma cuando MessagingStyle demuestra N ausencias exactas y 0 altas normales.
++- [ ] `Este mensaje fue eliminado.` con punto / espacios invisibles: debe reconocerse.
++- [ ] APP_CANCEL_ALL: no debe crear candidatos ni probables.
++- [ ] APP_CANCEL sin marcador: no visible; aumenta `Borrados no verificables` en Diagnóstico.
++- [ ] Almacenamiento cercano a reserva: video/documento se rechaza antes de invadir el colchón.
++- [ ] Documento > límite adaptativo: copia se corta por streaming y no queda parcial visible.
++- [ ] Recuperados: borrar/mover a Papelera el primer elemento visible durante refresh; debe mantener vecino/posición, no saltar arriba.
++
+ # Matriz de pruebas WA Vault 0.5.0
+ 
+ ## Mensajes
+--- a/V0517_NOTES.md
++++ b/V0517_NOTES.md
+@@ -0,0 +1,18 @@
++# WA Vault v0.5.17 — Stability / Precision
++
++Objetivo: endurecer v0.5.16 sin ampliar ventanas ni volver a correlación por cercanía.
++
++## Cambios
++- Marcadores plurales de borrado (`2 mensajes eliminados`, etc.) ya no valen por texto: requieren una única señal MessagingStyle estructurada, exactamente N tokens previos ausentes y cero mensajes normales nuevos.
++- Marcadores singulares toleran espacios/saltos/invisibles y puntuación final sin aceptar frases genéricas.
++- `APP_CANCEL_ALL` se descarta antes de crear candidatos/probables.
++- `APP_CANCEL` sin marcador fuerte sigue oculto y ahora suma un contador diagnóstico `DELETE_UNVERIFIABLE`.
++- Videos conservan 40/100/200 MB adaptativos, pero nunca atraviesan una reserva de almacenamiento (mín. 768 MB o 8% del volumen).
++- Documentos usan límites adaptativos 50/150/300 MB con la misma reserva y copia por streaming.
++- Recuperados conserva ancla/offset; si el elemento ancla desaparece, restaura vecino o índice equivalente en lugar de saltar arriba.
++- Diagnóstico muestra candidatos de borrado no verificables.
++
++## Invariantes conservados
++confirmed-only · tombstones · parser estricto · sin nearest timestamp · stickers fuera · cuarentena oculta · Papelera · cohortes por conversación/ráfaga · SQLite v13.
+--- a/tools/v0517_regression_test.py
++++ b/tools/v0517_regression_test.py
+@@ -0,0 +1,81 @@
++#!/usr/bin/env python3
++from pathlib import Path
++import sqlite3
++ROOT=Path(__file__).resolve().parents[1]
++
++def read(rel): return (ROOT/rel).read_text(encoding='utf-8')
++def need(cond,msg):
++    if not cond:
++        print('FAIL:',msg); raise SystemExit(1)
++    print('PASS:',msg)
++
++gradle=read('app/build.gradle.kts')
++manifest=read('app/src/main/AndroidManifest.xml')
++main=read('app/src/main/java/com/fer/wavault/MainActivity.java')
++db=read('app/src/main/java/com/fer/wavault/VaultDb.java')
++listener=read('app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java')
++media=read('app/src/main/java/com/fer/wavault/MediaArchiver.java')
++limits=read('app/src/main/java/com/fer/wavault/MediaLimits.java')
++direct=read('app/src/main/java/com/fer/wavault/DirectMediaWatcher.java')
++voice=read('app/src/main/java/com/fer/wavault/DirectVoiceWatcher.java')
++ms=read('app/src/main/java/com/fer/wavault/MediaStoreWatcher.java')
++
++need('versionCode = 67' in gradle and 'versionName = "0.5.17"' in gradle,'version 0.5.17 / code 67')
++need('super(c, "wa_vault.db", null, 13)' in db,'SQLite schema remains v13')
++need('android:versionCode' not in manifest and 'android:versionName' not in manifest,'manifest has no stale version attributes')
++
++# v0.5.17 deletion precision.
++need('return reason == REASON_APP_CANCEL;' in listener,'APP_CANCEL_ALL filtered before candidate work')
++need('APP_CANCEL_ALL_IGNORED' not in listener,'dead APP_CANCEL_ALL candidate path removed')
++need('structuredPluralDeleteCount(parsed, previousItems)' in listener,'plural delete text requires structured snapshot proof')
++need('added==0&&missing==count' in listener and 'candidate.stableTimestamp' in listener,'plural proof requires exact missing count + structured MessagingStyle')
++need('return isExactDeleteText(t) ? 1 : 0;' in listener,'generic deletion helper accepts singular exact markers only')
++need('normalizeDeleteMarkerText' in listener and '\\u200b' in listener and "\\u00a0" in listener,'delete marker normalization handles invisible/non-breaking spacing')
++need('recordUnverifiableDelete("APP_CANCEL sin marcador"' in listener,'unverifiable delete candidates are counted internally')
++need('DELETE_UNVERIFIABLE' in listener and 'delete_unverifiable_count' in listener,'diagnostic evidence for hidden unverifiable candidates exists')
++need('Borrados no verificables' in main,'diagnostics expose unverifiable candidate count')
++
++# Keep strongest v0.5.16 no-guess invariants.
++joined='\n'.join([main,db,direct,voice,ms,listener])
++for forbidden in ['findNearestUnlinkedMedia','findBestPendingManualMessage','reconcileRecentUnlinkedPendingMedia','promotePendingNear','nearestArm(']:
++    need(forbidden not in joined, f'no nearest-winner API: {forbidden}')
++need('media.size()!=cohort.size()' in db and 'reconcilePendingMediaCohort' in db,'micro-cohort FIFO still requires exact arm/media counts')
++need('cohortGapMs=9_000L' in db and 'messageConversationFingerprint' in db,'micro-cohorts remain split by conversation and burst')
++need('"document".equals(type)' in db[db.index('public String armPendingManualMedia'):db.index('public void consumePendingManualMedia')],'documents remain first-class persisted arms')
++need('POLL_HOT_MS = 180L' in listener and 'POLL_IDLE_MS = 4_000L' in listener and 'HOT_WINDOW_MS = 9_000L' in listener,'short-hot / long-idle polling retained')
++
++# Storage reserve + adaptive documents/videos.
++for token in ['STORAGE_RESERVE_MIN = 768L','STORAGE_RESERVE_PERCENT = 8L','writableBytes(Context context)','maxDocumentBytes(Context context)','DOCUMENT_LIMIT_LOW = 50L','DOCUMENT_LIMIT_NORMAL = 150L','DOCUMENT_LIMIT_HIGH = 300L']:
++    need(token in limits,f'limit policy contains {token}')
++need('Math.min(tier,writable)' in limits,'adaptive limits cannot cross protected storage reserve')
++need('MediaLimits.mediaTooLarge(context,type,size)' in media,'MediaStore precheck enforces video/document adaptive limits')
++need('MediaLimits.maxBytes(context,type)' in media,'MediaStore streaming uses adaptive type-specific cap')
++need('"video".equals(type)||"document".equals(type)' in media,'streaming cap covers documents as well as videos')
++need('MediaLimits.recordLimit(app,type' in media,'direct file copy records adaptive type limit')
++
++# Scroll fallback if anchor disappears.
++need('recoveredRefreshFallbackId' in main and 'recoveredRefreshAnchorIndex' in main,'Recovered stores fallback id/index')
++need('if(pos<0&&fallback>0)' in main and 'Math.min(oldIndex,recoveredItems.size()-1)' in main,'Recovered restores neighbor/index when anchor disappears')
++need('scrollToPositionWithOffset' in main,'Recovered still restores exact offset')
++
++# Existing correctness invariants.
++need('CONFIRMED_MEDIA_SQL' in db and 'messages.deletion_state=2' in db,'Recovered feed remains confirmed-only')
++need('strictMediaKindForText' in listener and 'isExactStickerPlaceholder' in listener,'strict placeholder parser retained')
++need('whatsapp stickers' in direct.lower(),'stickers remain excluded')
++need('media_tombstones' in db and 'USER_DELETE_BLOCKED' in db,'tombstones retained')
++need('deleteMediaPermanently(long mediaId,boolean deleteGalleryCopy)' in db,'Gallery-aware permanent delete retained')
++
++# Basic SQL confirmed-only behavior.
++con=sqlite3.connect(':memory:'); c=con.cursor()
++c.executescript('''
++CREATE TABLE messages(id INTEGER PRIMARY KEY,is_deleted INTEGER,deletion_state INTEGER);
++CREATE TABLE media(id INTEGER PRIMARY KEY,linked_message_id INTEGER,trash_state INTEGER,retention_state INTEGER,expires_at INTEGER);
++INSERT INTO messages VALUES(1,1,2),(2,0,0),(3,1,1);
++INSERT INTO media VALUES(1,1,0,0,0),(2,2,0,2,0),(3,3,0,2,0),(4,0,0,2,0);
++''')
++cond='linked_message_id>0 AND EXISTS (SELECT 1 FROM messages WHERE messages.id=media.linked_message_id AND messages.is_deleted=1 AND messages.deletion_state=2)'
++c.execute('UPDATE media SET retention_state=2,expires_at=0 WHERE trash_state=0 AND '+cond)
++c.execute('UPDATE media SET retention_state=1,expires_at=99 WHERE trash_state=0 AND NOT ('+cond+') AND retention_state<>1')
++need(c.execute('SELECT id,retention_state FROM media ORDER BY id').fetchall()==[(1,2),(2,1),(3,1),(4,1)],'confirmed-only SQL hides normal/probable/unlinked media')
++
++for rel in ['app/src/main/java/com/fer/wavault/MainActivity.java','app/src/main/java/com/fer/wavault/VaultDb.java','app/src/main/java/com/fer/wavault/WhatsAppNotificationListener.java','app/src/main/java/com/fer/wavault/DirectMediaWatcher.java','app/src/main/java/com/fer/wavault/MediaStoreWatcher.java','app/src/main/java/com/fer/wavault/MediaArchiver.java','app/src/main/java/com/fer/wavault/MediaLimits.java']:
++    x=read(rel);need('<<<<<<<' not in x and '>>>>>>>' not in x and '=======' not in x,rel+' has no merge markers')
++need(not any(ROOT.rglob('*.orig')) and not any(ROOT.rglob('*.rej')),'no .orig/.rej artifacts')
++print('v0.5.17 regression suite: PASS')
