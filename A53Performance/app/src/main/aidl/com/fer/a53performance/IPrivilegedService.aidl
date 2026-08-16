@@ -12,4 +12,5 @@ interface IPrivilegedService {
     float getMinRefreshRate() = 8;
     int getLowPower() = 9;
     int getRestrictBackground() = 10;
+    String listSensitiveUserPackages() = 11;
 }
