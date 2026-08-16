@@ -47,12 +47,22 @@ jobs:
           s=s.replace('device.connectGatt(context, false, cb, BluetoothDevice.TRANSPORT_LE)','device.connectGatt(context, autoConnect, cb, BluetoothDevice.TRANSPORT_LE)').replace('device.connectGatt(context, false, cb)','device.connectGatt(context, autoConnect, cb)')
           p.write_text(s)
           PY
-      - name: Apply source compile fix
+      - name: Apply source compile fixes
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          p=Path('work/app/src/main/java/com/fer/bandlab/ui/screens/HistoryScreen.kt'); s=p.read_text()
-          p.write_text(s.replace('heartRateZoneTimes.sumOf { it.elapsedMs }','heartRateZoneTimes.sumOf { it.durationMs }').replace('formatDuration(it.elapsedMs)) }','formatDuration(it.durationMs)) }'))
+          p=Path('work/app/src/main/java/com/fer/bandlab/ui/screens/HistoryScreen.kt')
+          s=p.read_text().replace('heartRateZoneTimes.sumOf { it.elapsedMs }','heartRateZoneTimes.sumOf { it.durationMs }').replace('formatDuration(it.elapsedMs)) }','formatDuration(it.durationMs)) }')
+          p.write_text(s)
+          p=Path('work/app/src/main/java/com/fer/bandlab/device/XiaomiBandManager.kt')
+          s=p.read_text()
+          s=s.replace('HealthCommands.CMD_REALTIME_STATS_EVENT','HealthCommands.CMD_REALTIME_STATS')
+          s=s.replace('HealthCommands.CMD_REALTIME_STATS_START','HealthCommands.CMD_REALTIME_STARTSTOP')
+          s=s.replace('HealthCommands.CMD_REALTIME_STATS_STOP','HealthCommands.CMD_REALTIME_STARTSTOP')
+          s=s.replace('SystemCommands.CMD_REALTIME_STATS_EVENT','HealthCommands.CMD_REALTIME_STATS')
+          s=s.replace('SystemCommands.CMD_REALTIME_STATS_START','HealthCommands.CMD_REALTIME_STARTSTOP')
+          s=s.replace('SystemCommands.CMD_REALTIME_STATS_STOP','HealthCommands.CMD_REALTIME_STARTSTOP')
+          p.write_text(s)
           PY
       - name: Test and build
         run: cd work && gradle --no-daemon :app:testDebugUnitTest :app:assembleRelease
