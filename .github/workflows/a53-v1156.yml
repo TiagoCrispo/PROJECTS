@@ -82,13 +82,10 @@ jobs:
             adb shell am instrument -w com.fer.a53performance.test/androidx.test.runner.AndroidJUnitRunner | tee instrument.txt
             grep -q 'OK (2 tests)' instrument.txt
             adb logcat -c
-            for i in $(seq 1 5); do
-              adb shell am force-stop com.fer.a53performance
-              adb shell am start -W -n com.fer.a53performance/.MainActivity >/dev/null
-            done
+            i=1; while [ $i -le 5 ]; do adb shell am force-stop com.fer.a53performance; adb shell am start -W -n com.fer.a53performance/.MainActivity >/dev/null; i=$((i+1)); done
             adb shell am send-trim-memory com.fer.a53performance RUNNING_LOW || true
             adb shell monkey -p com.fer.a53performance --pct-syskeys 0 --pct-appswitch 0 --throttle 15 150 >/dev/null || true
             adb shell am start -W -n com.fer.a53performance/.MainActivity >/dev/null
             sleep 3
             test -n "$(adb shell pidof com.fer.a53performance | tr -d '\r')"
-            if adb logcat -d -t 1200 | grep -A15 'FATAL EXCEPTION' | grep -q 'com.fer.a53performance'; then exit 1; fi
+            ! adb logcat -d -t 1200 | grep -A15 'FATAL EXCEPTION' | grep -q 'com.fer.a53performance'
