@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 
 public final class StorageItem {
     public final long id;
+    public final String volume;
     public final Uri uri;
     public final String name;
     public final String path;
@@ -12,14 +13,14 @@ public final class StorageItem {
     public final long size;
     public final long modified;
 
-    public StorageItem(long id,Uri uri,String name,String path,String mime,long size,long modified){
-        this.id=id;this.uri=uri;this.name=name==null?"(sin nombre)":name;this.path=path==null?"":path;this.mime=mime==null?"":mime;this.size=Math.max(0,size);this.modified=modified;
+    public StorageItem(long id,Uri uri,String name,String path,String mime,long size,long modified){this(id,"external",uri,name,path,mime,size,modified);}
+    public StorageItem(long id,String volume,Uri uri,String name,String path,String mime,long size,long modified){
+        this.id=id;this.volume=volume==null||volume.isBlank()?"external":volume;this.uri=uri;this.name=name==null?"(sin nombre)":name;this.path=path==null?"":path;this.mime=mime==null?"":mime;this.size=Math.max(0,size);this.modified=modified;
     }
 
-    public String stableKey(){return uri!=null?uri.toString():path;}
+    public String stableKey(){return uri!=null?uri.toString():volume+":"+path;}
     public long stableId(){
-        if(id>0)return id;
-        byte[] data=stableKey().getBytes(StandardCharsets.UTF_8);long h=0xcbf29ce484222325L;
+        String base=volume+":"+id+":"+stableKey();byte[] data=base.getBytes(StandardCharsets.UTF_8);long h=0xcbf29ce484222325L;
         for(byte b:data){h^=(b&0xffL);h*=0x100000001b3L;}
         return h;
     }
