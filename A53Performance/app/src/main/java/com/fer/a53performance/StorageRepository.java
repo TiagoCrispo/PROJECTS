@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public final class StorageRepository {
@@ -34,6 +35,7 @@ public final class StorageRepository {
     private static final long FULL_RECONCILE_MS=6L*60L*60L*1000L;
     private static final String STATE_PREFS="a53_storage_state";
     private static final String LAST_FULL="last_full_reconcile_v11510";
+    private static final ConcurrentHashMap<String,String> VOLUME_LABELS=new ConcurrentHashMap<>();
 
     private final Context app;
     private final SharedPreferences state;
@@ -43,7 +45,7 @@ public final class StorageRepository {
     private final ArrayList<StorageItem> master=new ArrayList<>();
     private final StorageIndexDb indexDb;
 
-    public StorageRepository(Context context){app=context.getApplicationContext();state=app.getSharedPreferences(STATE_PREFS,Context.MODE_PRIVATE);indexDb=new StorageIndexDb(app);try{master.addAll(indexDb.load());}catch(Throwable ignored){}}
+    public StorageRepository(Context context){app=context.getApplicationContext();state=app.getSharedPreferences(STATE_PREFS,Context.MODE_PRIVATE);indexDb=new StorageIndexDb(app);try{master.addAll(indexDb.load());}catch(Throwable ignored){}volumeStats();}
 
     public boolean needsRefresh(){
         if(fullReconcileDue())return true;String current=mediaSignature();if(current.isBlank())return false;try{return !current.equals(indexDb.signature());}catch(Throwable ignored){return true;}
@@ -75,7 +77,8 @@ public final class StorageRepository {
             if(generation!=scanGeneration.get())return;long currentGen=safeGeneration(volume),previous=old.getOrDefault(volume,-1L);List<StorageItem> prior=cachedByVolume.getOrDefault(volume,Collections.emptyList());
             if(!forceFull&&currentGen>=0&&previous==currentGen&&!prior.isEmpty()){out.addAll(prior);continue;}
             if(currentGen>=0&&previous>=0&&!prior.isEmpty()){
-                List<StorageItem> merged=forceFull?scanVolumeReconciled(volume,previous,generation,prior):scanVolumeDelta(volume,previous,generation,prior);
+                List<StorageItem> merged=forceFull?scanVolumeReconciled(volume,previous,generation,prior):scanVolumeDelta(volume,previous,generation,prior);int liveCount=safeLiveCount(volume);
+                if(merged!=null&&liveCount>=0&&merged.size()!=liveCount)merged=scanVolumeReconciled(volume,previous,generation,prior);
                 if(merged!=null){out.addAll(merged);continue;}
             }
             if(!scanVolumeFull(volume,generation,out))throw new IllegalStateException("scan:"+volume);
@@ -96,6 +99,8 @@ public final class StorageRepository {
         ArrayList<StorageItem> changed=new ArrayList<>();String selection=alive+" AND "+MediaStore.MediaColumns.GENERATION_MODIFIED+">?";if(!scanVolumeQuery(volume,generation,changed,selection,new String[]{Long.toString(previousGeneration)}))return null;for(StorageItem x:changed)merged.put(x.id,x);
         if(merged.size()!=liveIds.size())return null;return new ArrayList<>(merged.values());
     }
+
+    private int safeLiveCount(String volume){if(Build.VERSION.SDK_INT<30)return-1;ContentResolver cr=app.getContentResolver();Uri base=MediaStore.Files.getContentUri(volume);String alive=MediaStore.MediaColumns.IS_TRASHED+"=0";try(Cursor c=cr.query(base,new String[]{MediaStore.Files.FileColumns._ID},alive,null,null)){return c==null?-1:c.getCount();}catch(Throwable ignored){return-1;}}
 
     private boolean scanVolumeFull(String volume,int generation,List<StorageItem> out){String selection=Build.VERSION.SDK_INT>=30?MediaStore.MediaColumns.IS_TRASHED+"=0":null;return scanVolumeQuery(volume,generation,out,selection,null);}
 
@@ -120,15 +125,15 @@ public final class StorageRepository {
     public List<VolumeStats> volumeStats(){
         ArrayList<VolumeStats> out=new ArrayList<>();
         if(Build.VERSION.SDK_INT>=30){
-            try{StorageManager sm=(StorageManager)app.getSystemService(Context.STORAGE_SERVICE);for(StorageVolume sv:sm.getStorageVolumes()){File dir=sv.getDirectory();String volume=sv.getMediaStoreVolumeName();if(dir==null||volume==null||volume.isBlank())continue;String st=sv.getState();if(!Environment.MEDIA_MOUNTED.equals(st)&&!Environment.MEDIA_MOUNTED_READ_ONLY.equals(st))continue;StatFs fs=new StatFs(dir.getAbsolutePath());String label=sv.isPrimary()?"Interno":sv.isRemovable()?"microSD":sv.getDescription(app);out.add(new VolumeStats(volume,label,fs.getTotalBytes(),fs.getAvailableBytes(),sv.isRemovable()));}}catch(Throwable ignored){}
+            try{StorageManager sm=(StorageManager)app.getSystemService(Context.STORAGE_SERVICE);for(StorageVolume sv:sm.getStorageVolumes()){File dir=sv.getDirectory();String volume=sv.getMediaStoreVolumeName();if(dir==null||volume==null||volume.isBlank())continue;String st=sv.getState();if(!Environment.MEDIA_MOUNTED.equals(st)&&!Environment.MEDIA_MOUNTED_READ_ONLY.equals(st))continue;StatFs fs=new StatFs(dir.getAbsolutePath());String label=labelFor(sv);VOLUME_LABELS.put(volume,label);out.add(new VolumeStats(volume,label,fs.getTotalBytes(),fs.getAvailableBytes(),sv.isRemovable()));}}catch(Throwable ignored){}
         }
-        if(out.isEmpty())try{StatFs fs=new StatFs(Environment.getExternalStorageDirectory().getAbsolutePath());out.add(new VolumeStats("external","Interno",fs.getTotalBytes(),fs.getAvailableBytes(),false));}catch(Throwable ignored){}
+        if(out.isEmpty())try{StatFs fs=new StatFs(Environment.getExternalStorageDirectory().getAbsolutePath());VOLUME_LABELS.put("external","Interno");VOLUME_LABELS.put(MediaStore.VOLUME_EXTERNAL_PRIMARY,"Interno");out.add(new VolumeStats("external","Interno",fs.getTotalBytes(),fs.getAvailableBytes(),false));}catch(Throwable ignored){}
         out.sort((a,b)->Boolean.compare(a.removable(),b.removable()));return out;
     }
-
+    private String labelFor(StorageVolume sv){if(sv.isPrimary())return"Interno";String d="";try{d=sv.getDescription(app);}catch(Throwable ignored){}String low=d==null?"":d.toLowerCase(Locale.ROOT);if(low.contains("usb"))return"USB";if(low.contains("sd")||low.contains("tarjeta")||low.contains("card"))return"microSD";return d==null||d.isBlank()?"Externo":d;}
     public String spaceSummary(){List<VolumeStats> stats=volumeStats();if(stats.isEmpty())return"Espacio no disponible";StringBuilder b=new StringBuilder();for(VolumeStats s:stats){if(b.length()>0)b.append("\n");b.append(s.label()).append(": ").append(FileAdapter.formatBytes(s.used())).append(" usados · ").append(FileAdapter.formatBytes(s.free())).append(" libres / ").append(FileAdapter.formatBytes(s.total()));}return b.toString();}
     public static boolean isPrimaryVolumeName(String volume){return volume==null||volume.isBlank()||"external".equals(volume)||MediaStore.VOLUME_EXTERNAL_PRIMARY.equals(volume);}
-    public static String volumeLabel(StorageItem item){return item==null||isPrimaryVolumeName(item.volume)?"Interno":"microSD";}
+    public static String volumeLabel(StorageItem item){if(item==null||isPrimaryVolumeName(item.volume))return"Interno";return VOLUME_LABELS.getOrDefault(item.volume,"Externo");}
     public static boolean matchesVolume(StorageItem item,int mode){if(mode==1)return isPrimaryVolumeName(item.volume);if(mode==2)return !isPrimaryVolumeName(item.volume);return true;}
 
     public void cancelScan(){scanGeneration.incrementAndGet();}

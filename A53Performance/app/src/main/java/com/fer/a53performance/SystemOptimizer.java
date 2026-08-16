@@ -16,6 +16,9 @@ public final class SystemOptimizer {
     public record ProfileResult(int ok,int total,int verified,int rollbackVerified,int rollbackTotal){public boolean success(){return ok==total&&verified==total;}public boolean rollbackComplete(){return rollbackTotal>0&&rollbackVerified==rollbackTotal;}}
     private record ProfilePlan(float peak,float min,boolean low,boolean restrict){int total(){return 4;}}
     private record SystemState(float peak,float min,int low,int restrict){}
+    private static final String RUNNING_OK="__A53_RUNNING_OK__",SENSITIVE_OK="__A53_SENSITIVE_OK__";
+    private static final long RAM_BUDGET_MS=12000L;
+    private static final int MAX_TRANSPORT_FAILURES=2;
 
     private final Context app;private final ShizukuShell shell;private final SharedPreferences prefs;
     private final ExecutorService ramExecutor=Executors.newSingleThreadExecutor(r->new Thread(r,"a53-ram"));
@@ -28,18 +31,24 @@ public final class SystemOptimizer {
         int gen=ramGeneration.incrementAndGet();ramExecutor.execute(()->{
             if(gen!=ramGeneration.get())return;if(!shell.permissionGranted()){cb.onDone(false,"Shizuku es necesario para identificar y cerrar procesos de usuario con seguridad.");return;}if(!shell.selfTest()){cb.onDone(false,"Shizuku no respondió al autotest. No se cerró ninguna app.");return;}
             ShizukuShell.Result runningResult=shell.listRunningUserPackages(),sensitiveResult=shell.listSensitiveUserPackages();
-            if(!runningResult.ok()||!sensitiveResult.ok()){cb.onDone(false,"No se pudo confirmar qué apps están activas/foreground. Por seguridad no se cerró ninguna app.");return;}
-            long before=availableMemory();Set<String> running=parsePackages(runningResult),sensitive=parsePackages(sensitiveResult),candidates=new LinkedHashSet<>();
+            if(!taggedOk(runningResult,RUNNING_OK)||!taggedOk(sensitiveResult,SENSITIVE_OK)){cb.onDone(false,"No se pudo verificar de forma completa qué apps están activas/foreground. Por seguridad no se cerró ninguna app.");return;}
+            long started=SystemClock.elapsedRealtime(),before=availableMemory();Set<String> running=parsePackages(runningResult),sensitive=parsePackages(sensitiveResult),candidates=new LinkedHashSet<>();
             for(String pkg:running)if(!sensitive.contains(pkg)&&!AppProtection.isProtected(app,pkg))candidates.add(pkg);
-            int requested=0,timeouts=0;LinkedHashSet<String> attempted=new LinkedHashSet<>();
-            for(String pkg:candidates){if(gen!=ramGeneration.get())return;if(requested>=40)break;requested++;attempted.add(pkg);ShizukuShell.Result r=shell.forceStopPackage(pkg);if(r.code()==-2)timeouts++;}
-            SystemClock.sleep(700);ShizukuShell.Result afterResult=shell.listRunningUserPackages();int disappeared=-1;if(afterResult.ok()){Set<String> afterRunning=parsePackages(afterResult);disappeared=0;for(String pkg:attempted)if(!afterRunning.contains(pkg))disappeared++;}
-            long after=availableMemory(),delta=after-before;
-            String disappearedText=disappeared>=0?Integer.toString(disappeared):"no verificable";
-            String msg="RAM disponible: "+FileAdapter.formatBytes(before)+" → "+FileAdapter.formatBytes(after)+". Solicitudes: "+requested+" · procesos que ya no aparecen: "+disappearedText+" · protegidos por actividad sensible: "+sensitive.size()+(timeouts>0?" · timeout: "+timeouts:"")+". "+(delta>0?"Cambio medido: +"+FileAdapter.formatBytes(delta):"Sin liberación neta medible; Android puede recrear procesos cuando los necesita.");
-            cb.onDone(true,msg);
+            int requested=0,timeouts=0,transportFailures=0;boolean budgetStop=false,transportStop=false;LinkedHashSet<String> attempted=new LinkedHashSet<>();
+            for(String pkg:candidates){
+                if(gen!=ramGeneration.get())return;if(requested>=40)break;if(SystemClock.elapsedRealtime()-started>=RAM_BUDGET_MS){budgetStop=true;break;}
+                requested++;attempted.add(pkg);ShizukuShell.Result r=shell.forceStopPackage(pkg);if(transportFailure(r)){transportFailures++;if(r.code()==-2)timeouts++;if(transportFailures>=MAX_TRANSPORT_FAILURES){transportStop=true;break;}}else transportFailures=0;
+            }
+            SystemClock.sleep(650);ShizukuShell.Result afterResult=shell.listRunningUserPackages();int disappeared=-1;if(taggedOk(afterResult,RUNNING_OK)){Set<String> afterRunning=parsePackages(afterResult);disappeared=0;for(String pkg:attempted)if(!afterRunning.contains(pkg))disappeared++;}
+            long after=availableMemory(),delta=after-before;String disappearedText=disappeared>=0?Integer.toString(disappeared):"no verificable";
+            String stop=transportStop?" · detenida por fallos consecutivos de Shizuku":budgetStop?" · detenida al alcanzar el presupuesto seguro de 12 s":"";
+            String msg="RAM disponible: "+FileAdapter.formatBytes(before)+" → "+FileAdapter.formatBytes(after)+". Solicitudes: "+requested+" · procesos que ya no aparecen: "+disappearedText+" · protegidos por actividad sensible: "+sensitive.size()+(timeouts>0?" · timeout: "+timeouts:"")+stop+". "+(delta>0?"Cambio medido: +"+FileAdapter.formatBytes(delta):"Sin liberación neta medible; Android puede recrear procesos cuando los necesita.");
+            cb.onDone(!transportStop,msg);
         });
     }
+
+    static boolean taggedOk(ShizukuShell.Result r,String tag){return r!=null&&r.ok()&&r.output()!=null&&(r.output().equals(tag)||r.output().startsWith(tag+"\n"));}
+    private static boolean transportFailure(ShizukuShell.Result r){return r==null||r.code()==-2||r.code()==-3||r.code()==-5;}
 
     public void applyProfile(Profile profile,Callback cb){
         int gen=profileGeneration.incrementAndGet();profileExecutor.execute(()->{
@@ -64,7 +73,7 @@ public final class SystemOptimizer {
     private interface ContinueGate{boolean go();}
 
     public void cancelRam(){ramGeneration.incrementAndGet();}public void cancelProfiles(){profileGeneration.incrementAndGet();}
-    private static Set<String> parsePackages(ShizukuShell.Result r){LinkedHashSet<String> out=new LinkedHashSet<>();if(r!=null&&r.ok()&&r.output()!=null)for(String line:r.output().split("\\R")){String p=line.trim();if(!p.isBlank())out.add(p);}return out;}
+    private static Set<String> parsePackages(ShizukuShell.Result r){LinkedHashSet<String> out=new LinkedHashSet<>();if(r!=null&&r.ok()&&r.output()!=null)for(String line:r.output().split("\\R")){String p=line.trim();if(!p.isBlank()&&!p.startsWith("__A53_"))out.add(p);}return out;}
     private long availableMemory(){ActivityManager.MemoryInfo m=new ActivityManager.MemoryInfo();((ActivityManager)app.getSystemService(Context.ACTIVITY_SERVICE)).getMemoryInfo(m);return m.availMem;}
     public static String label(Profile p){return switch(p){case CLASS->"Clases";case GAMING->"Gaming";case PERFORMANCE->"Rendimiento";case BALANCED->"Balanced";case COOL->"Cool";case BATTERY->"Batería";case DATA->"Datos";};}
     public static String description(Profile p){return switch(p){case CLASS->"60–120 Hz, ahorro y Data Saver desactivados. Conserva apps protegidas.";case GAMING->"120 Hz, ahorro y Data Saver desactivados. No altera CPU/GPU.";case PERFORMANCE->"120 Hz, ahorro y Data Saver desactivados para máxima fluidez disponible.";case BALANCED->"60–120 Hz, ahorro y Data Saver desactivados para uso diario.";case COOL->"60 Hz, ahorro y Data Saver desactivados; reduce carga de pantalla sin tocar CPU/GPU.";case BATTERY->"60 Hz, ahorro activado y Data Saver desactivado.";case DATA->"60–120 Hz, ahorro desactivado y Data Saver activado.";};}

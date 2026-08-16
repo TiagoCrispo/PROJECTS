@@ -12,8 +12,9 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public final class PrivilegedUserService extends IPrivilegedService.Stub {
-    private static final long TIMEOUT_MS=1800L;
+    private static final long COMMAND_TIMEOUT_MS=1800L,READ_TIMEOUT_MS=2600L;
     private static final Pattern PACKAGE=Pattern.compile("[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+");
+    private static final String RUNNING_OK="__A53_RUNNING_OK__",RUNNING_ERROR="__A53_RUNNING_ERROR__",SENSITIVE_OK="__A53_SENSITIVE_OK__",SENSITIVE_ERROR="__A53_SENSITIVE_ERROR__";
 
     public PrivilegedUserService() {}
     @Keep public PrivilegedUserService(Context context) {}
@@ -27,29 +28,32 @@ public final class PrivilegedUserService extends IPrivilegedService.Stub {
     @Override public int forceStopPackage(String packageName)throws RemoteException{return validPackage(packageName)?runFixed("am","force-stop",packageName):-4;}
 
     @Override public String listRunningUserPackages()throws RemoteException{
-        Set<String> user=userPackages();if(user.isEmpty())return "";String ps=readFixed("ps","-A","-o","NAME");StringBuilder out=new StringBuilder();Set<String> seen=new HashSet<>();
-        for(String line:ps.split("\\R")){String p=line.trim();int colon=p.indexOf(':');if(colon>0)p=p.substring(0,colon);if(user.contains(p)&&seen.add(p))out.append(p).append('\n');}
+        PackageSetResult packages=userPackagesResult();if(!packages.ok())return RUNNING_ERROR;ReadResult ps=readFixedResult("ps","-A","-o","NAME");if(!ps.ok())return RUNNING_ERROR;
+        StringBuilder out=new StringBuilder(RUNNING_OK).append('\n');Set<String> seen=new HashSet<>();
+        for(String line:ps.output().split("\\R")){String pkg=line.trim();int colon=pkg.indexOf(':');if(colon>0)pkg=pkg.substring(0,colon);if(packages.packages().contains(pkg)&&seen.add(pkg))out.append(pkg).append('\n');}
         return out.toString();
     }
 
     @Override public String listSensitiveUserPackages()throws RemoteException{
-        Set<String> user=userPackages(),sensitive=new HashSet<>();if(user.isEmpty())return "";
-        String current=null;String services=readFixed("dumpsys","activity","services");
-        for(String line:services.split("\\R")){
-            if(line.contains("ServiceRecord{")){String p=knownPackage(line,user);current=p;}
+        PackageSetResult packages=userPackagesResult();if(!packages.ok())return SENSITIVE_ERROR;Set<String> user=packages.packages(),sensitive=new HashSet<>();
+        ReadResult services=readFixedResult("dumpsys","activity","services"),media=readFixedResult("dumpsys","media_session"),activities=readFixedResult("dumpsys","activity","activities");
+        if(!services.ok()||!media.ok()||!activities.ok())return SENSITIVE_ERROR;
+        String current=null;
+        for(String line:services.output().split("\\R")){
+            if(line.contains("ServiceRecord{"))current=knownPackage(line,user);
             else if(current!=null&&(line.contains("isForeground=true")||line.matches(".*foregroundId=[1-9][0-9]*.*")))sensitive.add(current);
         }
-        current=null;String media=readFixed("dumpsys","media_session");
-        for(String line:media.split("\\R")){
-            String p=knownPackage(line,user);if(line.contains("package=")&&p!=null)current=p;
-            String low=line.toLowerCase();if(current!=null&&(low.contains("state=3")||low.contains("state=6")||low.contains("playing")))sensitive.add(current);
+        current=null;
+        for(String line:media.output().split("\\R")){
+            String pkg=knownPackage(line,user);if(line.contains("package=")&&pkg!=null)current=pkg;String low=line.toLowerCase();if(current!=null&&(low.contains("state=3")||low.contains("state=6")||low.contains("playing")))sensitive.add(current);
         }
-        String activities=readFixed("dumpsys","activity","activities");
-        for(String line:activities.split("\\R"))if(line.contains("mResumedActivity")||line.contains("topResumedActivity")||line.contains("mFocusedApp")){String p=knownPackage(line,user);if(p!=null)sensitive.add(p);}
-        StringBuilder out=new StringBuilder();for(String p:sensitive)out.append(p).append('\n');return out.toString();
+        for(String line:activities.output().split("\\R"))if(line.contains("mResumedActivity")||line.contains("topResumedActivity")||line.contains("mFocusedApp")){String pkg=knownPackage(line,user);if(pkg!=null)sensitive.add(pkg);}
+        StringBuilder out=new StringBuilder(SENSITIVE_OK).append('\n');for(String pkg:sensitive)out.append(pkg).append('\n');return out.toString();
     }
 
-    private static Set<String> userPackages(){Set<String> user=new HashSet<>();String packages=readFixed("pm","list","packages","-3");for(String line:packages.split("\\R"))if(line.startsWith("package:")){String p=line.substring(8).trim();if(validPackage(p))user.add(p);}return user;}
+    private static PackageSetResult userPackagesResult(){
+        ReadResult packages=readFixedResult("pm","list","packages","-3");if(!packages.ok())return new PackageSetResult(false,Set.of());Set<String> user=new HashSet<>();for(String line:packages.output().split("\\R"))if(line.startsWith("package:")){String p=line.substring(8).trim();if(validPackage(p))user.add(p);}return new PackageSetResult(true,user);
+    }
     private static String knownPackage(String line,Set<String> known){Matcher m=PACKAGE.matcher(line);while(m.find()){String p=m.group();if(known.contains(p))return p;}return null;}
 
     @Override public float getPeakRefreshRate()throws RemoteException{return parseFloat(readFixed("settings","get","system","peak_refresh_rate"));}
@@ -62,8 +66,11 @@ public final class PrivilegedUserService extends IPrivilegedService.Stub {
     private static boolean validRefresh(float value){return value>=30f&&value<=144f&&Float.isFinite(value);}
     private static boolean validPackage(String pkg){return pkg!=null&&pkg.length()<=180&&pkg.matches("[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)+");}
 
-    private static String readFixed(String...args){
-        Process p=null;try{p=new ProcessBuilder(args).redirectErrorStream(true).start();final Process proc=p;StringBuilder out=new StringBuilder();Thread reader=new Thread(()->{try(BufferedReader br=new BufferedReader(new InputStreamReader(proc.getInputStream()))){String line;while((line=br.readLine())!=null&&out.length()<131072)out.append(line).append('\n');}catch(Throwable ignored){}},"a53-read");reader.setDaemon(true);reader.start();boolean done=p.waitFor(TIMEOUT_MS,TimeUnit.MILLISECONDS);if(!done){p.destroyForcibly();return "";}try{reader.join(250L);}catch(InterruptedException e){Thread.currentThread().interrupt();}return out.toString().trim();}catch(Throwable ignored){return "";}finally{if(p!=null)try{p.destroy();}catch(Throwable ignored){}}
+    private static String readFixed(String...args){ReadResult r=readFixedResult(args);return r.ok()?r.output():"";}
+    private static ReadResult readFixedResult(String...args){
+        Process p=null;try{p=new ProcessBuilder(args).redirectErrorStream(true).start();final Process proc=p;StringBuilder out=new StringBuilder();Thread reader=new Thread(()->{try(BufferedReader br=new BufferedReader(new InputStreamReader(proc.getInputStream()))){String line;while((line=br.readLine())!=null&&out.length()<131072)out.append(line).append('\n');}catch(Throwable ignored){}},"a53-read");reader.setDaemon(true);reader.start();boolean done=p.waitFor(READ_TIMEOUT_MS,TimeUnit.MILLISECONDS);if(!done){p.destroyForcibly();return new ReadResult(false,"",-2);}try{reader.join(300L);}catch(InterruptedException e){Thread.currentThread().interrupt();return new ReadResult(false,"",-3);}int code=p.exitValue();return new ReadResult(code==0,out.toString().trim(),code);}catch(Throwable ignored){return new ReadResult(false,"",-3);}finally{if(p!=null)try{p.destroy();}catch(Throwable ignored){}}
     }
-    private static int runFixed(String...args){Process p=null;try{p=new ProcessBuilder(args).redirectErrorStream(true).start();if(!p.waitFor(TIMEOUT_MS,TimeUnit.MILLISECONDS)){try{p.destroy();}catch(Throwable ignored){}try{if(!p.waitFor(120L,TimeUnit.MILLISECONDS))p.destroyForcibly();}catch(Throwable ignored){}return -2;}return p.exitValue();}catch(Throwable ignored){return -3;}finally{if(p!=null)try{p.destroy();}catch(Throwable ignored){}}}
+    private static int runFixed(String...args){Process p=null;try{p=new ProcessBuilder(args).redirectErrorStream(true).start();if(!p.waitFor(COMMAND_TIMEOUT_MS,TimeUnit.MILLISECONDS)){try{p.destroy();}catch(Throwable ignored){}try{if(!p.waitFor(120L,TimeUnit.MILLISECONDS))p.destroyForcibly();}catch(Throwable ignored){}return -2;}return p.exitValue();}catch(Throwable ignored){return -3;}finally{if(p!=null)try{p.destroy();}catch(Throwable ignored){}}}
+    private record ReadResult(boolean ok,String output,int code){}
+    private record PackageSetResult(boolean ok,Set<String> packages){}
 }
