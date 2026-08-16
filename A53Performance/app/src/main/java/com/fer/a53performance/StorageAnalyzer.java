@@ -82,7 +82,7 @@ public final class StorageAnalyzer {
     private SimilarResult similar(List<StorageItem> items,Set<String> duplicates,int g,Callback<?> callback){
         ArrayList<PhotoSig> photos=new ArrayList<>();int totalImages=0;for(StorageItem x:items)if(x.isImage()&&x.size>0&&x.size<=200L*1024L*1024L)totalImages++;
         int done=0;for(StorageItem x:items){if(g!=generation.get())break;if(!x.isImage()||x.size<=0||x.size>200L*1024L*1024L)continue;if(!thermalGate(g,callback,done,totalImages))break;VisualSig sig=visualSigCached(x);if(sig!=null)photos.add(new PhotoSig(x,sig.dhash,sig.ahash,sig.aspect));done++;if(callback!=null&&(done%VISUAL_BATCH==0||done==totalImages))callback.onPhase("Fotos similares: "+done+"/"+totalImages+" firmas listas · progreso guardado");}
-        if(g!=generation.get())return new SimilarResult(new HashSet<>(),List.of());if(callback!=null)callback.onPhase("Agrupando "+photos.size()+" fotos con doble hash perceptual…");
+        if(g!=generation.get())return new SimilarResult(new HashSet<>(),Collections.emptyList());if(callback!=null)callback.onPhase("Agrupando "+photos.size()+" fotos con doble hash perceptual…");
         ArrayList<Group> groups=new ArrayList<>();HashMap<Long,ArrayList<Integer>> buckets=new HashMap<>();
         for(int i=0;i<photos.size();i++){
             if(g!=generation.get())break;PhotoSig p=photos.get(i);HashSet<Integer> candidates=new HashSet<>();for(int seg=0;seg<8;seg++){int value=(int)((p.dhash>>>(seg*8))&0xffL);for(int a=p.aspect-2;a<=p.aspect+2;a++){ArrayList<Integer> ids=buckets.get(bucketKey(seg,value,a));if(ids!=null)candidates.addAll(ids);}}

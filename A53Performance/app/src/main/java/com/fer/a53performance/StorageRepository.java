@@ -58,7 +58,7 @@ public final class StorageRepository {
         ArrayList<String> volumes=new ArrayList<>(MediaStore.getExternalVolumeNames(app));Collections.sort(volumes);Map<String,Long> old=parseSignature(oldSignature);Map<String,List<StorageItem>> cachedByVolume=new HashMap<>();
         for(StorageItem x:cached)cachedByVolume.computeIfAbsent(x.volume,k->new ArrayList<>()).add(x);
         for(String volume:volumes){
-            if(generation!=scanGeneration.get())return;long currentGen=safeGeneration(volume),previous=old.getOrDefault(volume,-1L);List<StorageItem> prior=cachedByVolume.getOrDefault(volume,List.of());
+            if(generation!=scanGeneration.get())return;long currentGen=safeGeneration(volume),previous=old.getOrDefault(volume,-1L);List<StorageItem> prior=cachedByVolume.getOrDefault(volume,Collections.emptyList());
             if(currentGen>=0&&previous==currentGen&&!prior.isEmpty()){out.addAll(prior);continue;}
             if(currentGen>=0&&previous>=0&&currentGen>previous&&!prior.isEmpty()){
                 List<StorageItem> merged=scanVolumeIncremental(volume,previous,generation,prior);
@@ -107,7 +107,7 @@ public final class StorageRepository {
     }
     public void removeFromIndex(Collection<StorageItem> selected){if(selected==null||selected.isEmpty())return;Map<String,Boolean> gone=new HashMap<>();for(StorageItem x:selected)gone.put(x.stableKey(),true);synchronized(lock){master.removeIf(x->gone.containsKey(x.stableKey()));}try{indexDb.remove(selected);}catch(Throwable ignored){}}
     public List<StorageItem> snapshot(){synchronized(lock){return new ArrayList<>(master);}}
-    public Set<String> indexedKeys(){try{return indexDb.keys();}catch(Throwable ignored){return Set.of();}}
+    public Set<String> indexedKeys(){try{return indexDb.keys();}catch(Throwable ignored){return Collections.emptySet();}}
     public static long freeBytes(){try{return new StatFs(Environment.getExternalStorageDirectory().getAbsolutePath()).getAvailableBytes();}catch(Throwable ignored){return 0;}}
     public void shutdown(){cancelScan();io.shutdownNow();indexDb.close();}
 }
