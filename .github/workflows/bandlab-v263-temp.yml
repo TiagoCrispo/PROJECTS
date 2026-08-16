@@ -1,120 +1,66 @@
 name: BandLab v2.6.3 temp build
-
 on:
   push:
     branches: [ bandlab-v263-temp-build ]
   workflow_dispatch:
-
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android 36
-        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.13'
-
-      - name: Reconstruct BandLab source
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '17'}
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: '8.13'}
+      - name: Reconstruct source
         run: |
-          set -euxo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          import base64, hashlib, lzma
-          root=Path('bandlab-ci')
-          expected='8fc4bb39cd28b6103da1a3107da536c2486c36cf'
-          p7=(root/'p07.b64').read_text().strip()
-          def blob_sha(s):
-              b=s.encode()
-              return hashlib.sha1(f'blob {len(b)}\0'.encode()+b).hexdigest()
-          if blob_sha(p7) != expected:
-              fixed=None
-              for i in range(len(p7)):
-                  c=p7[:i]+p7[i+1:]
-                  if blob_sha(c)==expected:
-                      fixed=c
-                      break
-              if fixed is None:
-                  raise SystemExit('Could not repair p07 payload')
-              p7=fixed
-          pieces=[]
-          for i in range(11):
-              pieces.append(p7 if i==7 else (root/f'p{i:02d}.b64').read_text().strip())
-          packed=base64.b64decode(''.join(pieces), validate=True)
-          Path('/tmp/bandlab.zip').write_bytes(lzma.decompress(packed))
+          import base64,hashlib,lzma
+          r=Path('bandlab-ci'); exp='8fc4bb39cd28b6103da1a3107da536c2486c36cf'; p7=(r/'p07.b64').read_text().strip()
+          def sha(s):
+            b=s.encode(); return hashlib.sha1(f'blob {len(b)}\0'.encode()+b).hexdigest()
+          if sha(p7)!=exp:
+            p7=next(c for i in range(len(p7)) if sha(c:=p7[:i]+p7[i+1:])==exp)
+          s=''.join(p7 if i==7 else (r/f'p{i:02d}.b64').read_text().strip() for i in range(11))
+          Path('/tmp/bandlab.zip').write_bytes(lzma.decompress(base64.b64decode(s,validate=True)))
           PY
-          mkdir work
-          unzip -q /tmp/bandlab.zip -d work
-
-      - name: Import Xiaomi Smart Band 9 Active protocol source
+          mkdir work && unzip -q /tmp/bandlab.zip -d work
+      - name: Import pinned Xiaomi protocol
         run: |
-          set -euxo pipefail
-          git clone https://github.com/kidneyweakx/Kodo.git /tmp/Kodo
-          git -C /tmp/Kodo checkout 8152ffdd3f384e0563a39db7bf77a8b70d3a6e84
+          git clone -q https://github.com/kidneyweakx/Kodo.git /tmp/Kodo
+          git -C /tmp/Kodo checkout -q 8152ffdd3f384e0563a39db7bf77a8b70d3a6e84
           cd work
-          mkdir -p app/src/main/java/com/kidneyweakx/miband9active/xiaomi app/src/main/proto third_party/Kodo
-          cp -R /tmp/Kodo/android-port/src/main/java/com/kidneyweakx/miband9active/xiaomi/auth app/src/main/java/com/kidneyweakx/miband9active/xiaomi/
-          cp -R /tmp/Kodo/android-port/src/main/java/com/kidneyweakx/miband9active/xiaomi/protocol app/src/main/java/com/kidneyweakx/miband9active/xiaomi/
-          cp -R /tmp/Kodo/android-port/src/main/java/com/kidneyweakx/miband9active/xiaomi/activity app/src/main/java/com/kidneyweakx/miband9active/xiaomi/
-          mkdir -p app/src/main/java/com/kidneyweakx/miband9active/xiaomi/services
-          cp /tmp/Kodo/android-port/src/main/java/com/kidneyweakx/miband9active/xiaomi/services/SystemCommands.kt app/src/main/java/com/kidneyweakx/miband9active/xiaomi/services/
-          cp /tmp/Kodo/android-port/src/main/java/com/kidneyweakx/miband9active/xiaomi/services/MiBand9DataUploader.kt app/src/main/java/com/kidneyweakx/miband9active/xiaomi/services/
+          mkdir -p app/src/main/java/com/kidneyweakx/miband9active/xiaomi app/src/main/proto third_party/Kodo app/src/main/java/com/kidneyweakx/miband9active/xiaomi/services
+          cp -R /tmp/Kodo/android-port/src/main/java/com/kidneyweakx/miband9active/xiaomi/{auth,protocol,activity} app/src/main/java/com/kidneyweakx/miband9active/xiaomi/
+          cp /tmp/Kodo/android-port/src/main/java/com/kidneyweakx/miband9active/xiaomi/services/{SystemCommands.kt,MiBand9DataUploader.kt} app/src/main/java/com/kidneyweakx/miband9active/xiaomi/services/
           cp /tmp/Kodo/android-port/src/main/proto/xiaomi.proto app/src/main/proto/
-          cp /tmp/Kodo/LICENSE third_party/Kodo/LICENSE
-          cp /tmp/Kodo/NOTICE.md third_party/Kodo/NOTICE.md
+          cp /tmp/Kodo/{LICENSE,NOTICE.md} third_party/Kodo/
           git -C /tmp/Kodo rev-parse HEAD > third_party/Kodo/COMMIT.txt
           python3 - <<'PY'
           from pathlib import Path
-          p=Path('app/src/main/java/com/kidneyweakx/miband9active/xiaomi/protocol/MiBand9BleDriver.kt')
-          s=p.read_text()
-          s=s.replace('fun connect(device: BluetoothDevice) {', 'fun connect(device: BluetoothDevice, autoConnect: Boolean = false) {')
-          s=s.replace('device.connectGatt(context, false, cb, BluetoothDevice.TRANSPORT_LE)', 'device.connectGatt(context, autoConnect, cb, BluetoothDevice.TRANSPORT_LE)')
-          s=s.replace('device.connectGatt(context, false, cb)', 'device.connectGatt(context, autoConnect, cb)')
+          p=Path('app/src/main/java/com/kidneyweakx/miband9active/xiaomi/protocol/MiBand9BleDriver.kt'); s=p.read_text()
+          s=s.replace('fun connect(device: BluetoothDevice) {','fun connect(device: BluetoothDevice, autoConnect: Boolean = false) {')
+          s=s.replace('device.connectGatt(context, false, cb, BluetoothDevice.TRANSPORT_LE)','device.connectGatt(context, autoConnect, cb, BluetoothDevice.TRANSPORT_LE)').replace('device.connectGatt(context, false, cb)','device.connectGatt(context, autoConnect, cb)')
           p.write_text(s)
-          assert 'autoConnect: Boolean = false' in s
           PY
-
-      - name: Apply v2.6.3 compile fixes
+      - name: Apply source compile fix
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          p=Path('work/app/src/main/java/com/fer/bandlab/device/XiaomiBandManager.kt')
-          s=p.read_text().replace('HealthCommands.CMD_REALTIME_STATS_EVENT','SystemCommands.CMD_REALTIME_STATS_EVENT').replace('HealthCommands.CMD_REALTIME_STATS_START','SystemCommands.CMD_REALTIME_STATS_START').replace('HealthCommands.CMD_REALTIME_STATS_STOP','SystemCommands.CMD_REALTIME_STATS_STOP')
-          p.write_text(s)
-          p=Path('work/app/src/main/java/com/fer/bandlab/ui/screens/HistoryScreen.kt')
-          s=p.read_text().replace('heartRateZoneTimes.sumOf { it.elapsedMs }','heartRateZoneTimes.sumOf { it.durationMs }').replace('formatDuration(it.elapsedMs)) }','formatDuration(it.durationMs)) }')
-          p.write_text(s)
+          p=Path('work/app/src/main/java/com/fer/bandlab/ui/screens/HistoryScreen.kt'); s=p.read_text()
+          p.write_text(s.replace('heartRateZoneTimes.sumOf { it.elapsedMs }','heartRateZoneTimes.sumOf { it.durationMs }').replace('formatDuration(it.elapsedMs)) }','formatDuration(it.durationMs)) }'))
           PY
-
-      - name: Compile and unit-test
+      - name: Test and build
+        run: cd work && gradle --no-daemon :app:testDebugUnitTest :app:assembleRelease
+      - name: Prepare artifact
         run: |
-          cd work
-          gradle --no-daemon :app:testDebugUnitTest :app:assembleRelease
-
-      - name: Prepare build artifact
-        run: |
-          set -eux
           mkdir -p dist
           cp work/app/build/outputs/apk/release/app-release-unsigned.apk dist/BandLab9Active_v2.6.3_unsigned.apk
           cp "$ANDROID_HOME/build-tools/36.0.0/lib/apksigner.jar" dist/apksigner.jar
           sha256sum dist/* > dist/SHA256SUMS.txt
-
       - uses: actions/upload-artifact@v4
-        with:
-          name: BandLab-v2.6.3-build
-          path: dist/
-          if-no-files-found: error
+        with: {name: BandLab-v2.6.3-build, path: dist/, if-no-files-found: error}
