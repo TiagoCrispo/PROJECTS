@@ -63,6 +63,7 @@ public final class MainActivity extends Activity {
     private Runnable searchRunnable;
     private int savedAnchor=-1,savedAnchorOffset=0,savedVisible=PAGE_SIZE;
     private boolean scanRunning=false;
+    private boolean waitingForAllFiles=false;
 
     private final Shizuku.OnRequestPermissionResultListener shizukuPermissionListener=(requestCode,grantResult)->{
         if(requestCode==SHIZUKU_REQUEST){toast(grantResult==PackageManager.PERMISSION_GRANTED?"Shizuku autorizado":"Shizuku no autorizado");if(currentPage.equals("home"))showHome();}
@@ -214,7 +215,9 @@ public final class MainActivity extends Activity {
         if(!need.isEmpty())requestPermissions(need.toArray(new String[0]),PERMISSION_REQUEST);else continuePermissionFlow();
     }
     @Override public void onRequestPermissionsResult(int requestCode,String[] permissions,int[] results){super.onRequestPermissionsResult(requestCode,permissions,results);if(requestCode==PERMISSION_REQUEST)main.postDelayed(this::continuePermissionFlow,250);}
-    private void continuePermissionFlow(){if(Build.VERSION.SDK_INT>=30&&!Environment.isExternalStorageManager()){openAllFilesSettings();return;}if(!shell.permissionGranted())shell.requestPermission(SHIZUKU_REQUEST);}
+    private void continuePermissionFlow(){if(Build.VERSION.SDK_INT>=30&&!Environment.isExternalStorageManager()){waitingForAllFiles=true;openAllFilesSettings();return;}requestShizukuIfNeeded();}
+    private void requestShizukuIfNeeded(){if(!shell.permissionGranted())shell.requestPermission(SHIZUKU_REQUEST);}
+    @Override protected void onResume(){super.onResume();if(waitingForAllFiles){waitingForAllFiles=false;main.postDelayed(this::requestShizukuIfNeeded,300);}}
     private void openAllFilesSettings(){try{Intent i=new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,Uri.parse("package:"+getPackageName()));startActivity(i);}catch(Throwable e){startActivity(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));}}
 
     private void saveListAnchor(){if(fileList==null)return;LinearLayoutManager lm=(LinearLayoutManager)fileList.getLayoutManager();savedAnchor=lm.findFirstVisibleItemPosition();View v=lm.findViewByPosition(savedAnchor);savedAnchorOffset=v==null?0:v.getTop();savedVisible=fileAdapter==null?PAGE_SIZE:Math.max(PAGE_SIZE,fileAdapter.displayedCount());}
