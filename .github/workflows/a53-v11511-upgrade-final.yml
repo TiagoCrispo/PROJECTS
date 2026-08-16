@@ -1,0 +1,78 @@
+name: A53 v1.15.11 Upgrade Cold Boot
+on:
+  push:
+    branches: [agent/a53-performance-v11511]
+    paths: [A53Performance/UPGRADE_FINAL_11511]
+permissions:
+  contents: read
+jobs:
+  upgrade-cold-boot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/a53-performance-v11511
+          path: current
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/a53-performance-v11510
+          path: old
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - run: yes | sdkmanager "platforms;android-35" "build-tools;35.0.0" >/dev/null
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Build update pair
+        run: |
+          (cd old/A53Performance && gradle --no-daemon :app:assembleDebug)
+          (cd current/A53Performance && gradle --no-daemon :app:assembleDebug)
+          mkdir -p upgrade
+          cp old/A53Performance/app/build/outputs/apk/debug/app-debug.apk upgrade/v11510.apk
+          cp current/A53Performance/app/build/outputs/apk/debug/app-debug.apk upgrade/v11511.apk
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS:="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            adb install upgrade/v11510.apk
+            adb shell am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n com.fer.a53performance/.MainActivity >/dev/null
+            adb shell am force-stop com.fer.a53performance
+            printf '%s' '<map><string name="last_profile">COOL</string><boolean name="auto_restore_profile" value="false" /></map>' > /tmp/a53_ui.xml
+            printf '%s' '<map><set name="user_packages"><string>com.example.keepme</string></set></map>' > /tmp/a53_protected_apps.xml
+            adb push /tmp/a53_ui.xml /data/local/tmp/a53_ui.xml >/dev/null
+            adb push /tmp/a53_protected_apps.xml /data/local/tmp/a53_protected_apps.xml >/dev/null
+            adb shell chmod 644 /data/local/tmp/a53_ui.xml /data/local/tmp/a53_protected_apps.xml
+            adb shell run-as com.fer.a53performance mkdir -p shared_prefs files
+            adb shell run-as com.fer.a53performance cp /data/local/tmp/a53_ui.xml shared_prefs/a53_ui.xml
+            adb shell run-as com.fer.a53performance cp /data/local/tmp/a53_protected_apps.xml shared_prefs/a53_protected_apps.xml
+            adb shell run-as com.fer.a53performance cp /data/local/tmp/a53_ui.xml files/upgrade_marker.txt
+            adb install -r upgrade/v11511.apk
+            adb shell dumpsys package com.fer.a53performance | grep -q 'versionName=1.15.11'
+            adb shell run-as com.fer.a53performance cat files/upgrade_marker.txt | grep -q COOL
+            adb shell run-as com.fer.a53performance cat shared_prefs/a53_ui.xml | grep -q COOL
+            adb shell run-as com.fer.a53performance cat shared_prefs/a53_protected_apps.xml | grep -q com.example.keepme
+            adb reboot
+            adb wait-for-device
+            i=0; while [ $i -lt 90 ]; do BOOT=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r'); if [ "$BOOT" = "1" ]; then break; fi; sleep 2; i=$((i+1)); done
+            test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1"
+            adb shell input keyevent 82 || true
+            adb logcat -c
+            adb shell am start -S -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n com.fer.a53performance/.MainActivity
+            i=0; PID=''; while [ $i -lt 15 ]; do PID=$(adb shell pidof com.fer.a53performance | tr -d '\r'); if [ -n "$PID" ]; then break; fi; sleep 1; i=$((i+1)); done
+            test -n "$PID"
+            adb shell run-as com.fer.a53performance cat files/upgrade_marker.txt | grep -q COOL
+            adb shell run-as com.fer.a53performance cat shared_prefs/a53_ui.xml | grep -q COOL
+            adb shell run-as com.fer.a53performance cat shared_prefs/a53_protected_apps.xml | grep -q com.example.keepme
+            if adb logcat -d -t 5000 | grep -A24 'FATAL EXCEPTION' | grep -q 'com.fer.a53performance'; then adb logcat -d -t 5000 | grep -A35 -B5 'FATAL EXCEPTION'; exit 1; fi
