@@ -1,0 +1,33 @@
+name: A53 Signing Tools
+on:
+  push:
+    paths:
+      - 'A53Performance/SIGN_TOOL_READY'
+permissions:
+  contents: read
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bundle official apksigner
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          BT="$SDK/build-tools/35.0.0"
+          if [ ! -f "$BT/apksigner" ]; then
+            yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" "build-tools;35.0.0" >/dev/null
+          fi
+          test -f "$BT/apksigner"
+          test -f "$BT/lib/apksigner.jar"
+          mkdir -p out/lib
+          cp "$BT/apksigner" out/apksigner
+          cp "$BT/lib/apksigner.jar" out/lib/apksigner.jar
+          chmod +x out/apksigner
+          sha256sum out/apksigner out/lib/apksigner.jar > out/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-35-apksigner
+          path: out/
+          if-no-files-found: error
+          retention-days: 1
