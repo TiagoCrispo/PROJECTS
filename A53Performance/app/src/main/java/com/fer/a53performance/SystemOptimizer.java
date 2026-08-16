@@ -26,21 +26,24 @@ public final class SystemOptimizer {
 
     public void cleanRam(Callback cb){
         int gen=ramGeneration.incrementAndGet();ramExecutor.execute(()->{
-            if(gen!=ramGeneration.get())return;if(!shell.permissionGranted()){cb.onDone(false,"Shizuku es necesario para identificar y cerrar procesos de usuario con seguridad.");return;}
-            long before=availableMemory();Set<String> running=runningUserPackagesRaw(),sensitive=sensitivePackages(),candidates=new LinkedHashSet<>();
+            if(gen!=ramGeneration.get())return;if(!shell.permissionGranted()){cb.onDone(false,"Shizuku es necesario para identificar y cerrar procesos de usuario con seguridad.");return;}if(!shell.selfTest()){cb.onDone(false,"Shizuku no respondió al autotest. No se cerró ninguna app.");return;}
+            ShizukuShell.Result runningResult=shell.listRunningUserPackages(),sensitiveResult=shell.listSensitiveUserPackages();
+            if(!runningResult.ok()||!sensitiveResult.ok()){cb.onDone(false,"No se pudo confirmar qué apps están activas/foreground. Por seguridad no se cerró ninguna app.");return;}
+            long before=availableMemory();Set<String> running=parsePackages(runningResult),sensitive=parsePackages(sensitiveResult),candidates=new LinkedHashSet<>();
             for(String pkg:running)if(!sensitive.contains(pkg)&&!AppProtection.isProtected(app,pkg))candidates.add(pkg);
             int requested=0,timeouts=0;LinkedHashSet<String> attempted=new LinkedHashSet<>();
             for(String pkg:candidates){if(gen!=ramGeneration.get())return;if(requested>=40)break;requested++;attempted.add(pkg);ShizukuShell.Result r=shell.forceStopPackage(pkg);if(r.code()==-2)timeouts++;}
-            SystemClock.sleep(700);Set<String> afterRunning=runningUserPackagesRaw();int disappeared=0;for(String pkg:attempted)if(!afterRunning.contains(pkg))disappeared++;
+            SystemClock.sleep(700);ShizukuShell.Result afterResult=shell.listRunningUserPackages();int disappeared=-1;if(afterResult.ok()){Set<String> afterRunning=parsePackages(afterResult);disappeared=0;for(String pkg:attempted)if(!afterRunning.contains(pkg))disappeared++;}
             long after=availableMemory(),delta=after-before;
-            String msg="RAM disponible: "+FileAdapter.formatBytes(before)+" → "+FileAdapter.formatBytes(after)+". Solicitudes: "+requested+" · procesos que ya no aparecen: "+disappeared+" · protegidos por actividad sensible: "+sensitive.size()+(timeouts>0?" · timeout: "+timeouts:"")+". "+(delta>0?"Cambio medido: +"+FileAdapter.formatBytes(delta):"Sin liberación neta medible; Android puede recrear procesos cuando los necesita.");
+            String disappearedText=disappeared>=0?Integer.toString(disappeared):"no verificable";
+            String msg="RAM disponible: "+FileAdapter.formatBytes(before)+" → "+FileAdapter.formatBytes(after)+". Solicitudes: "+requested+" · procesos que ya no aparecen: "+disappearedText+" · protegidos por actividad sensible: "+sensitive.size()+(timeouts>0?" · timeout: "+timeouts:"")+". "+(delta>0?"Cambio medido: +"+FileAdapter.formatBytes(delta):"Sin liberación neta medible; Android puede recrear procesos cuando los necesita.");
             cb.onDone(true,msg);
         });
     }
 
     public void applyProfile(Profile profile,Callback cb){
         int gen=profileGeneration.incrementAndGet();profileExecutor.execute(()->{
-            if(gen!=profileGeneration.get())return;if(!shell.permissionGranted()){cb.onDone(false,"Shizuku necesita permiso para aplicar el perfil real.");return;}if(!shell.warmUp(1800)){cb.onDone(false,"No se pudo iniciar el servicio privilegiado de Shizuku.");return;}
+            if(gen!=profileGeneration.get())return;if(!shell.permissionGranted()){cb.onDone(false,"Shizuku necesita permiso para aplicar el perfil real.");return;}if(!shell.selfTest()){cb.onDone(false,"Shizuku no respondió al autotest. No se aplicó ningún ajuste.");return;}
             ProfileResult result=applyProfileSync(profile,shell,()->gen==profileGeneration.get());if(gen!=profileGeneration.get())return;if(result.success())prefs.edit().putString("last_profile",profile.name()).putLong("last_profile_ok",System.currentTimeMillis()).apply();
             String tail=result.success()?". Estado verificado.":result.rollbackComplete()?". La aplicación parcial fue revertida y el estado anterior quedó verificado.":result.rollbackTotal()>0?". Se intentó restaurar el estado anterior: "+result.rollbackVerified()+"/"+result.rollbackTotal()+" ajustes confirmados.":". Android rechazó algún ajuste y no había estado previo legible para restaurarlo por completo.";
             cb.onDone(result.success(),"Perfil "+label(profile)+": "+result.ok()+"/"+result.total()+" aplicados · "+result.verified()+"/"+result.total()+" verificados"+tail);
@@ -61,8 +64,7 @@ public final class SystemOptimizer {
     private interface ContinueGate{boolean go();}
 
     public void cancelRam(){ramGeneration.incrementAndGet();}public void cancelProfiles(){profileGeneration.incrementAndGet();}
-    private Set<String> runningUserPackagesRaw(){LinkedHashSet<String> out=new LinkedHashSet<>();ShizukuShell.Result r=shell.listRunningUserPackages();if(r.ok()&&r.output()!=null)for(String line:r.output().split("\\R")){String p=line.trim();if(!p.isBlank())out.add(p);}return out;}
-    private Set<String> sensitivePackages(){LinkedHashSet<String> out=new LinkedHashSet<>();ShizukuShell.Result r=shell.listSensitiveUserPackages();if(r.ok()&&r.output()!=null)for(String line:r.output().split("\\R")){String p=line.trim();if(!p.isBlank())out.add(p);}return out;}
+    private static Set<String> parsePackages(ShizukuShell.Result r){LinkedHashSet<String> out=new LinkedHashSet<>();if(r!=null&&r.ok()&&r.output()!=null)for(String line:r.output().split("\\R")){String p=line.trim();if(!p.isBlank())out.add(p);}return out;}
     private long availableMemory(){ActivityManager.MemoryInfo m=new ActivityManager.MemoryInfo();((ActivityManager)app.getSystemService(Context.ACTIVITY_SERVICE)).getMemoryInfo(m);return m.availMem;}
     public static String label(Profile p){return switch(p){case CLASS->"Clases";case GAMING->"Gaming";case PERFORMANCE->"Rendimiento";case BALANCED->"Balanced";case COOL->"Cool";case BATTERY->"Batería";case DATA->"Datos";};}
     public static String description(Profile p){return switch(p){case CLASS->"60–120 Hz, ahorro y Data Saver desactivados. Conserva apps protegidas.";case GAMING->"120 Hz, ahorro y Data Saver desactivados. No altera CPU/GPU.";case PERFORMANCE->"120 Hz, ahorro y Data Saver desactivados para máxima fluidez disponible.";case BALANCED->"60–120 Hz, ahorro y Data Saver desactivados para uso diario.";case COOL->"60 Hz, ahorro y Data Saver desactivados; reduce carga de pantalla sin tocar CPU/GPU.";case BATTERY->"60 Hz, ahorro activado y Data Saver desactivado.";case DATA->"60–120 Hz, ahorro desactivado y Data Saver activado.";};}
