@@ -7,5 +7,9 @@ interface IPrivilegedService {
     int setLowPower(boolean enabled) = 3;
     int setRestrictBackground(boolean enabled) = 4;
     int forceStopPackage(String packageName) = 5;
-    String listProcessNames() = 6;
+    String listRunningUserPackages() = 6;
+    float getPeakRefreshRate() = 7;
+    float getMinRefreshRate() = 8;
+    int getLowPower() = 9;
+    int getRestrictBackground() = 10;
 }
