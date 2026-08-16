@@ -35,7 +35,7 @@ jobs:
       - name: Apply v0.5.21 privacy freeze
         run: |
           set -euo pipefail
-          base64 -d wa-vault-build-v0521/v0521.patch.gz.b64 | gzip -d > /tmp/v0521.patch
+          cat wa-vault-build-v0521/patch.part1 wa-vault-build-v0521/patch.part2 wa-vault-build-v0521/patch.part3 wa-vault-build-v0521/patch.part4 wa-vault-build-v0521/patch.part5 | base64 -d | gzip -d > /tmp/v0521.patch
           cd wa-vault-v0521-project
           patch -p1 < /tmp/v0521.patch
           rm -rf app/build build .gradle
