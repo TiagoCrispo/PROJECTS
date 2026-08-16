@@ -15,15 +15,17 @@ import java.text.DateFormat;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
 public final class FileAdapter extends RecyclerView.Adapter<FileAdapter.Holder> {
-    public interface Listener { void onSelectionChanged(int count,long bytes); }
+    public interface Listener{void onSelectionChanged(int count,long bytes);}
     private final ArrayList<StorageItem> items=new ArrayList<>();
     private final HashSet<String> selected=new HashSet<>();
+    private final HashMap<String,Long> selectedSizes=new HashMap<>();
     private final ThumbnailLoader thumbs;
     private final Listener listener;
 
@@ -31,11 +33,14 @@ public final class FileAdapter extends RecyclerView.Adapter<FileAdapter.Holder> 
     @Override public long getItemId(int position){return items.get(position).stableId();}
     @Override public int getItemCount(){return items.size();}
 
-    public void replace(List<StorageItem> list){items.clear();items.addAll(list);selected.retainAll(keys(list));notifyDataSetChanged();emitSelection();}
+    public void replace(List<StorageItem> list){items.clear();items.addAll(list);notifyDataSetChanged();emitSelection();}
     public void append(List<StorageItem> more){if(more.isEmpty())return;int start=items.size();items.addAll(more);notifyItemRangeInserted(start,more.size());}
-    public void removeAll(Collection<StorageItem> gone){Set<String> keys=keys(gone);for(int i=items.size()-1;i>=0;i--)if(keys.contains(items.get(i).stableKey())){selected.remove(items.get(i).stableKey());items.remove(i);notifyItemRemoved(i);}emitSelection();}
-    public List<StorageItem> selectedItems(){ArrayList<StorageItem> out=new ArrayList<>();for(StorageItem x:items)if(selected.contains(x.stableKey()))out.add(x);return out;}
-    public void clearSelection(){if(selected.isEmpty())return;selected.clear();notifyDataSetChanged();emitSelection();}
+    public void removeAll(Collection<StorageItem> gone){Set<String> keys=keys(gone);for(String key:keys){selected.remove(key);selectedSizes.remove(key);}for(int i=items.size()-1;i>=0;i--)if(keys.contains(items.get(i).stableKey())){items.remove(i);notifyItemRemoved(i);}emitSelection();}
+    public List<StorageItem> selectedItems(){return selectedItems(items);}
+    public List<StorageItem> selectedItems(Collection<StorageItem> universe){ArrayList<StorageItem> out=new ArrayList<>();for(StorageItem x:universe)if(selected.contains(x.stableKey()))out.add(x);return out;}
+    public Set<String> selectedKeys(){return new HashSet<>(selected);}
+    public void setSelection(Collection<StorageItem> selection){selected.clear();selectedSizes.clear();if(selection!=null)for(StorageItem x:selection){selected.add(x.stableKey());selectedSizes.put(x.stableKey(),x.size);}notifyDataSetChanged();emitSelection();}
+    public void clearSelection(){if(selected.isEmpty())return;selected.clear();selectedSizes.clear();notifyDataSetChanged();emitSelection();}
     public int displayedCount(){return items.size();}
     private Set<String> keys(Collection<StorageItem> xs){HashSet<String>s=new HashSet<>();for(StorageItem x:xs)s.add(x.stableKey());return s;}
 
@@ -55,8 +60,8 @@ public final class FileAdapter extends RecyclerView.Adapter<FileAdapter.Holder> 
         h.itemView.setOnClickListener(v->{boolean next=!selected.contains(x.stableKey());h.cb.setChecked(next);});thumbs.load(x,h.image);
     }
     @Override public void onViewRecycled(@NonNull Holder h){h.image.setTag(null);h.image.setImageDrawable(null);super.onViewRecycled(h);}
-    private void toggle(StorageItem x,boolean on){if(on)selected.add(x.stableKey());else selected.remove(x.stableKey());emitSelection();}
-    private void emitSelection(){long bytes=0;for(StorageItem x:items)if(selected.contains(x.stableKey()))bytes+=x.size;listener.onSelectionChanged(selected.size(),bytes);}
+    private void toggle(StorageItem x,boolean on){if(on){selected.add(x.stableKey());selectedSizes.put(x.stableKey(),x.size);}else{selected.remove(x.stableKey());selectedSizes.remove(x.stableKey());}emitSelection();}
+    private void emitSelection(){long bytes=0;for(long v:selectedSizes.values())bytes+=v;listener.onSelectionChanged(selected.size(),bytes);}
     private static String type(StorageItem x){if(x.isImage())return"Imagen";if(x.isVideo())return"Video";if(x.isAudio())return"Audio";return x.mime.isBlank()?"Archivo":x.mime;}
     public static String formatBytes(long v){if(v<1024)return v+" B";double n=v;String[]u={"KB","MB","GB","TB"};int i=-1;do{n/=1024d;i++;}while(n>=1024&&i<u.length-1);return String.format(Locale.getDefault(),n>=10?"%.1f %s":"%.2f %s",n,u[i]);}
     private static int dp(View v,int n){return Math.round(n*v.getResources().getDisplayMetrics().density);}
