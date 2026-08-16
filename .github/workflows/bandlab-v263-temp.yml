@@ -32,7 +32,34 @@ jobs:
       - name: Reconstruct BandLab source
         run: |
           set -euxo pipefail
-          cat bandlab-ci/p*.b64 | tr -d '\n\r' | base64 -d | xz -d > /tmp/bandlab.zip
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64, hashlib, lzma
+          root=Path('bandlab-ci')
+          expected='8fc4bb39cd28b6103da1a3107da536c2486c36cf'
+          p7=(root/'p07.b64').read_text().strip()
+          def blob_sha(s):
+              b=s.encode()
+              return hashlib.sha1(f'blob {len(b)}\0'.encode()+b).hexdigest()
+          if blob_sha(p7) != expected:
+              fixed=None
+              for i in range(len(p7)):
+                  c=p7[:i]+p7[i+1:]
+                  if blob_sha(c)==expected:
+                      fixed=c
+                      break
+              if fixed is None:
+                  raise SystemExit('Could not repair p07 payload')
+              p7=fixed
+          pieces=[]
+          for i in range(11):
+              if i==7:
+                  pieces.append(p7)
+              else:
+                  pieces.append((root/f'p{i:02d}.b64').read_text().strip())
+          packed=base64.b64decode(''.join(pieces), validate=True)
+          Path('/tmp/bandlab.zip').write_bytes(lzma.decompress(packed))
+          PY
           mkdir work
           unzip -q /tmp/bandlab.zip -d work
 
@@ -53,8 +80,6 @@ jobs:
           cp /tmp/Kodo/LICENSE third_party/Kodo/LICENSE
           cp /tmp/Kodo/NOTICE.md third_party/Kodo/NOTICE.md
           git -C /tmp/Kodo rev-parse HEAD > third_party/Kodo/COMMIT.txt
-
-          DRIVER=app/src/main/java/com/kidneyweakx/miband9active/xiaomi/protocol/MiBand9BleDriver.kt
           python3 - <<'PY'
           from pathlib import Path
           p=Path('app/src/main/java/com/kidneyweakx/miband9active/xiaomi/protocol/MiBand9BleDriver.kt')
