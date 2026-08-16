@@ -1,4 +1,4 @@
-name: BandLab v2.6.3 temp build
+name: BandLab v2.6.4 temp build
 on:
   push:
     branches: [ bandlab-v263-temp-build ]
@@ -47,14 +47,15 @@ jobs:
           s=s.replace('device.connectGatt(context, false, cb, BluetoothDevice.TRANSPORT_LE)','device.connectGatt(context, autoConnect, cb, BluetoothDevice.TRANSPORT_LE)').replace('device.connectGatt(context, false, cb)','device.connectGatt(context, autoConnect, cb)')
           p.write_text(s)
           PY
-      - name: Apply source compile fixes
+      - name: Apply 2.6.4 fixes and icon
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          p=Path('work/app/src/main/java/com/fer/bandlab/ui/screens/HistoryScreen.kt')
+          root=Path('work')
+          p=root/'app/src/main/java/com/fer/bandlab/ui/screens/HistoryScreen.kt'
           s=p.read_text().replace('heartRateZoneTimes.sumOf { it.elapsedMs }','heartRateZoneTimes.sumOf { it.durationMs }').replace('formatDuration(it.elapsedMs)) }','formatDuration(it.durationMs)) }')
           p.write_text(s)
-          p=Path('work/app/src/main/java/com/fer/bandlab/device/XiaomiBandManager.kt')
+          p=root/'app/src/main/java/com/fer/bandlab/device/XiaomiBandManager.kt'
           s=p.read_text()
           s=s.replace('HealthCommands.CMD_REALTIME_STATS_EVENT','HealthCommands.CMD_REALTIME_STATS')
           s=s.replace('HealthCommands.CMD_REALTIME_STATS_START','HealthCommands.CMD_REALTIME_STARTSTOP')
@@ -63,14 +64,47 @@ jobs:
           s=s.replace('SystemCommands.CMD_REALTIME_STATS_START','HealthCommands.CMD_REALTIME_STARTSTOP')
           s=s.replace('SystemCommands.CMD_REALTIME_STATS_STOP','HealthCommands.CMD_REALTIME_STARTSTOP')
           p.write_text(s)
+          p=root/'app/build.gradle.kts'
+          s=p.read_text().replace('versionCode = 263','versionCode = 264').replace('versionName = "2.6.3"','versionName = "2.6.4"').replace('buildConfigField("int", "FEATURE_STAGE", "263")','buildConfigField("int", "FEATURE_STAGE", "264")')
+          p.write_text(s)
+          p=root/'bandlab-version.properties'
+          s=p.read_text().replace('versionName=2.6.3','versionName=2.6.4').replace('versionCode=263','versionCode=264').replace('stage=263','stage=264')
+          p.write_text(s)
+          p=root/'app/src/main/AndroidManifest.xml'
+          s=p.read_text().replace('android:label="BandLab"\n        android:supportsRtl="true"','android:label="BandLab"\n        android:icon="@mipmap/ic_launcher"\n        android:roundIcon="@mipmap/ic_launcher_round"\n        android:supportsRtl="true"')
+          p.write_text(s)
+          p=root/'app/src/main/java/com/fer/bandlab/device/DeviceDiagnostics.kt'
+          s=p.read_text().replace('DiagnosticCheck("xiaomi_auth", "Xiaomi Auth", keyOk, if (keyOk) "Clave automática cifrada disponible" else "No hay clave Xiaomi válida")','DiagnosticCheck("xiaomi_auth", "Clave Xiaomi", keyOk, if (keyOk) "Lista y protegida automáticamente" else "No se pudo importar la clave incluida en esta APK")')
+          s=s.replace('DiagnosticCheck("keystore", "Android Keystore", SecretStore.hasKeystoreAlias(), if (SecretStore.hasKeystoreAlias()) "Alias bandlab_xiaomi_v1 presente" else "Alias no disponible")','DiagnosticCheck("keystore", "Protección segura", SecretStore.hasKeystoreAlias(), if (SecretStore.hasKeystoreAlias()) "Clave guardada en el almacenamiento seguro de Android" else "Se activará automáticamente al importar la clave")')
+          p.write_text(s)
           PY
+          mkdir -p work/app/src/main/res/mipmap-anydpi-v26 work/app/src/main/res/drawable
+          cat > work/app/src/main/res/drawable/ic_launcher_background.xml <<'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+              <path android:fillColor="#111418" android:pathData="M0,0h108v108h-108z"/>
+          </vector>
+          EOF
+          cat > work/app/src/main/res/drawable/ic_launcher_foreground.xml <<'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+              <path android:fillColor="#2AE88A" android:pathData="M31,25C24.4,25 19,30.4 19,37v34c0,6.6 5.4,12 12,12h46c6.6,0 12,-5.4 12,-12V37c0,-6.6 -5.4,-12 -12,-12z"/>
+              <path android:fillColor="#111418" android:pathData="M34,34h40c3.3,0 6,2.7 6,6v28c0,3.3 -2.7,6 -6,6H34c-3.3,0 -6,-2.7 -6,-6V40c0,-3.3 2.7,-6 6,-6z"/>
+              <path android:fillColor="#2AE88A" android:pathData="M32,55h10l5,-11 8,22 6,-14 4,3h11v6H62l-3,-2 -5,12 -8,-21 -1,2 -3,9H32z"/>
+          </vector>
+          EOF
+          cat > work/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml <<'EOF'
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@drawable/ic_launcher_background" />
+              <foreground android:drawable="@drawable/ic_launcher_foreground" />
+          </adaptive-icon>
+          EOF
+          cp work/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml work/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
       - name: Test and build
         run: cd work && gradle --no-daemon :app:testDebugUnitTest :app:assembleRelease
       - name: Prepare artifact
         run: |
           mkdir -p dist
-          cp work/app/build/outputs/apk/release/app-release-unsigned.apk dist/BandLab9Active_v2.6.3_unsigned.apk
+          cp work/app/build/outputs/apk/release/app-release-unsigned.apk dist/BandLab9Active_v2.6.4_unsigned.apk
           cp "$ANDROID_HOME/build-tools/36.0.0/lib/apksigner.jar" dist/apksigner.jar
           sha256sum dist/* > dist/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
-        with: {name: BandLab-v2.6.3-build, path: dist/, if-no-files-found: error}
+        with: {name: BandLab-v2.6.4-build, path: dist/, if-no-files-found: error}
