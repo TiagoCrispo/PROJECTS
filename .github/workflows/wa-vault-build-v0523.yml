@@ -41,6 +41,7 @@ jobs:
           cp ../wa-vault-build-v0523/extras/V0523_NOTES.md ./V0523_NOTES.md
           cp ../wa-vault-build-v0523/extras/MetadataPrivacy.java ./app/src/main/java/com/fer/wavault/MetadataPrivacy.java
           cp ../wa-vault-build-v0523/extras/v0523_regression_test.py ./tools/v0523_regression_test.py
+          python3 ../wa-vault-build-v0523/extras/fix_mediaarchiver_compile.py
           rm -rf app/build build .gradle
           python3 tools/v0523_regression_test.py
           grep -q 'versionCode = 73' app/build.gradle.kts
