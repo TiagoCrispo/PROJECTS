@@ -1,0 +1,62 @@
+name: A53 v1.15.11 Lifecycle Diagnose
+on:
+  push:
+    branches: [agent/a53-performance-v11511]
+    paths: [A53Performance/LIFECYCLE_DIAG_11511]
+permissions:
+  actions: read
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: A53Performance-v1.15.10-smoke
+          path: old
+          repository: TiagoCrispo/TiagoCrispo
+          run-id: 31927757936
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: A53Performance-v1.15.11-smoke
+          path: new
+          repository: TiagoCrispo/TiagoCrispo
+          run-id: 31928803090
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS:="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            adb install old/A53Performance_v1.15.10_debug.apk
+            adb shell pm grant com.fer.a53performance android.permission.READ_MEDIA_IMAGES || true
+            adb shell pm grant com.fer.a53performance android.permission.READ_MEDIA_VIDEO || true
+            adb shell pm grant com.fer.a53performance android.permission.READ_MEDIA_AUDIO || true
+            adb shell appops set com.fer.a53performance MANAGE_EXTERNAL_STORAGE allow || true
+            printf '%s' '<map><string name="last_profile">COOL</string><boolean name="auto_restore_profile" value="false" /><boolean name="permission_flow_v1154" value="true" /></map>' > /tmp/a53_ui.xml
+            adb push /tmp/a53_ui.xml /data/local/tmp/a53_ui.xml >/dev/null
+            adb shell chmod 644 /data/local/tmp/a53_ui.xml
+            adb shell run-as com.fer.a53performance mkdir -p shared_prefs files
+            adb shell run-as com.fer.a53performance cp /data/local/tmp/a53_ui.xml shared_prefs/a53_ui.xml
+            adb install -r new/A53Performance_v1.15.11_debug.apk
+            adb reboot
+            adb wait-for-device
+            i=0; while [ $i -lt 90 ]; do B=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r'); [ "$B" = "1" ] && break; sleep 2; i=$((i+1)); done
+            adb shell input keyevent 82 || true
+            adb logcat -c
+            adb shell am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n com.fer.a53performance/.MainActivity | tee launch.txt
+            echo '--- immediate ps ---'; adb shell ps -A | grep -E 'a53performance|PID' || true
+            echo '--- immediate activity ---'; adb shell dumpsys activity activities | grep -E -C4 'a53performance|mResumedActivity|topResumedActivity' || true
+            sleep 2
+            echo '--- after2 ps ---'; adb shell ps -A | grep -E 'a53performance|PID' || true
+            echo '--- exit info ---'; adb shell dumpsys activity exit-info com.fer.a53performance | head -120 || true
+            echo '--- activity log ---'; adb logcat -d -t 4000 | grep -E 'ActivityManager|ActivityTaskManager|AndroidRuntime|a53performance|Force stopping|Killing' | tail -250 || true
