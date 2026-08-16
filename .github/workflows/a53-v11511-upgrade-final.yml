@@ -77,9 +77,9 @@ jobs:
             adb shell am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n com.fer.a53performance/.MainActivity | tee launch.txt
             grep -q 'Status: ok' launch.txt
             grep -q 'Activity: com.fer.a53performance/.MainActivity' launch.txt
-            adb shell dumpsys window windows | grep -E 'mCurrentFocus|mFocusedApp' | grep -q 'com.fer.a53performance'
-            sleep 1
-            adb shell dumpsys window windows | grep -E 'mCurrentFocus|mFocusedApp' | grep -q 'com.fer.a53performance'
+            sleep 2
+            adb shell uiautomator dump /sdcard/a53_ui.xml >/dev/null
+            adb shell cat /sdcard/a53_ui.xml | grep -q 'A53 Performance'
             adb shell run-as com.fer.a53performance cat files/upgrade_marker.txt | grep -q COOL
             adb shell run-as com.fer.a53performance cat shared_prefs/a53_ui.xml | grep -q COOL
             adb shell run-as com.fer.a53performance cat shared_prefs/a53_protected_apps.xml | grep -q com.example.keepme
