@@ -152,10 +152,10 @@ jobs:
             adb shell run-as com.fer.a53performance mkdir -p shared_prefs files
             adb shell run-as com.fer.a53performance cp /data/local/tmp/a53_ui.xml shared_prefs/a53_ui.xml
             adb shell run-as com.fer.a53performance cp /data/local/tmp/a53_protected_apps.xml shared_prefs/a53_protected_apps.xml
-            adb shell run-as com.fer.a53performance sh -c 'echo upgrade-marker > files/upgrade_marker.txt'
+            adb shell run-as com.fer.a53performance cp /data/local/tmp/a53_ui.xml files/upgrade_marker.txt
             adb install -r upgrade/v11510.apk
             adb shell dumpsys package com.fer.a53performance | grep -q 'versionName=1.15.10'
-            adb shell run-as com.fer.a53performance cat files/upgrade_marker.txt | grep -q upgrade-marker
+            adb shell run-as com.fer.a53performance cat files/upgrade_marker.txt | grep -q COOL
             adb shell run-as com.fer.a53performance cat shared_prefs/a53_ui.xml | grep -q COOL
             adb shell run-as com.fer.a53performance cat shared_prefs/a53_protected_apps.xml | grep -q com.example.keepme
             adb shell am start -W -n com.fer.a53performance/.MainActivity >/dev/null
