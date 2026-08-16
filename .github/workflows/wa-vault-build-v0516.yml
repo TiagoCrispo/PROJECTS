@@ -32,11 +32,18 @@ jobs:
           grep -q 'versionCode = 65' wa-vault-v0516-project/app/build.gradle.kts
           grep -q 'versionName = "0.5.15"' wa-vault-v0516-project/app/build.gradle.kts
 
-      - name: Apply verified v0.5.16 patch and regressions
+      - name: Reconstruct and apply verified v0.5.16 patch
         run: |
           set -euo pipefail
-          echo 'eda31c0568e6ef93cfc423d4cab128db087dec6c238cd40ef6a655e5c9c72358  wa-vault-build-v0516/v0516.patch.gz' | sha256sum -c -
-          gzip -dc wa-vault-build-v0516/v0516.patch.gz > /tmp/v0516.patch
+          cat wa-vault-build-v0516/b64/part00 \
+              wa-vault-build-v0516/b64/part01 \
+              wa-vault-build-v0516/b64/part02 \
+              wa-vault-build-v0516/b64/part03 \
+              wa-vault-build-v0516/b64/part04 \
+              wa-vault-build-v0516/b64/part05 \
+            | tr -d '\r\n\t ' | base64 -d > /tmp/v0516.patch.gz
+          echo 'eda31c0568e6ef93cfc423d4cab128db087dec6c238cd40ef6a655e5c9c72358  /tmp/v0516.patch.gz' | sha256sum -c -
+          gzip -dc /tmp/v0516.patch.gz > /tmp/v0516.patch
           echo 'fea238d24125e88c81a05624277f090a371df630ec76516f682e571becf60564  /tmp/v0516.patch' | sha256sum -c -
           cd wa-vault-v0516-project
           patch -p1 --batch < /tmp/v0516.patch
@@ -49,7 +56,6 @@ jobs:
           grep -q 'versionName = "0.5.16"' app/build.gradle.kts
           test -s V0516_NOTES.md
           test -s tools/v0516_regression_test.py
-          git diff --check --no-index /dev/null /dev/null >/dev/null || true
           python3 tools/v0516_regression_test.py
 
       - uses: android-actions/setup-android@v3
