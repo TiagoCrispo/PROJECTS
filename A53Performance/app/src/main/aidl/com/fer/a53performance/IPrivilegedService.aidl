@@ -13,4 +13,5 @@ interface IPrivilegedService {
     int getLowPower() = 9;
     int getRestrictBackground() = 10;
     String listSensitiveUserPackages() = 11;
+    int ping() = 12;
 }
