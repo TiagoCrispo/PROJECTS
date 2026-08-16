@@ -24,13 +24,16 @@ public final class ShizukuShell {
     private final AtomicBoolean binding=new AtomicBoolean(false);
     private volatile long breakerUntil=0L;
 
+    private final Shizuku.OnBinderReceivedListener binderReceivedListener=()->{breakerUntil=0L;};
+    private final Shizuku.OnBinderDeadListener binderDeadListener=()->{service=null;binding.set(false);breakerUntil=System.currentTimeMillis()+BREAKER_MS;bindLatch.countDown();};
+
     private final ServiceConnection connection=new ServiceConnection(){
         @Override public void onServiceConnected(ComponentName name,IBinder binder){service=IPrivilegedService.Stub.asInterface(binder);binding.set(false);breakerUntil=0L;bindLatch.countDown();}
-        @Override public void onServiceDisconnected(ComponentName name){service=null;binding.set(false);breakerUntil=System.currentTimeMillis()+BREAKER_MS;}
+        @Override public void onServiceDisconnected(ComponentName name){service=null;binding.set(false);breakerUntil=System.currentTimeMillis()+BREAKER_MS;bindLatch.countDown();}
     };
 
-    public ShizukuShell(Context context){app=context.getApplicationContext();}
-    private Shizuku.UserServiceArgs args(){return new Shizuku.UserServiceArgs(new ComponentName(app.getPackageName(),PrivilegedUserService.class.getName())).daemon(false).processNameSuffix("privileged").debuggable(false).version(31);}
+    public ShizukuShell(Context context){app=context.getApplicationContext();try{Shizuku.addBinderReceivedListenerSticky(binderReceivedListener);Shizuku.addBinderDeadListener(binderDeadListener);}catch(Throwable ignored){}}
+    private Shizuku.UserServiceArgs args(){return new Shizuku.UserServiceArgs(new ComponentName(app.getPackageName(),PrivilegedUserService.class.getName())).daemon(false).processNameSuffix("privileged").debuggable(false).version(32);}
     public boolean available(){try{return Shizuku.pingBinder()&&!Shizuku.isPreV11();}catch(Throwable ignored){return false;}}
     public boolean permissionGranted(){try{return available()&&Shizuku.checkSelfPermission()==PackageManager.PERMISSION_GRANTED;}catch(Throwable ignored){return false;}}
     public void requestPermission(int requestCode){try{if(available()&&Shizuku.checkSelfPermission()!=PackageManager.PERMISSION_GRANTED&&!Shizuku.shouldShowRequestPermissionRationale())Shizuku.requestPermission(requestCode);}catch(Throwable ignored){}}
@@ -41,6 +44,7 @@ public final class ShizukuShell {
     private boolean reconnectOnce(long timeoutMs){invalidateBinder();return warmUp(timeoutMs);}
     private static boolean transportFailure(Result r){return r.code()==-2||r.code()==-3||r.code()==-5;}
 
+    public boolean selfTest(){return callInt(()->service.ping(),900L,true).ok();}
     public Result setPeakRefreshRate(float value){return callInt(()->service.setPeakRefreshRate(value),1800L,true);}
     public Result setMinRefreshRate(float value){return callInt(()->service.setMinRefreshRate(value),1800L,true);}
     public Result setLowPower(boolean enabled){return callInt(()->service.setLowPower(enabled),1800L,true);}
@@ -65,7 +69,7 @@ public final class ShizukuShell {
     }
     private <T>T callValue(Callable<T> call,T fallback){if(!permissionGranted()||!warmUp(1600L))return fallback;Future<T> f=timeoutPool.submit(call);try{return f.get(1800L,TimeUnit.MILLISECONDS);}catch(Throwable e){f.cancel(true);if(reconnectOnce(1400L)){Future<T> r=timeoutPool.submit(call);try{return r.get(1800L,TimeUnit.MILLISECONDS);}catch(Throwable ignored){r.cancel(true);}}breakerUntil=System.currentTimeMillis()+BREAKER_MS;return fallback;}}
 
-    public String health(){if(!available())return"Shizuku no disponible";if(!permissionGranted())return"Shizuku sin permiso";if(System.currentTimeMillis()<breakerUntil)return"Shizuku en pausa de reconexión";return warmUp(700L)?"Shizuku conectado":"Shizuku pendiente";}
-    public void shutdown(){timeoutPool.shutdownNow();try{if(available())Shizuku.unbindUserService(args(),connection,true);}catch(Throwable ignored){}service=null;}
+    public String health(){if(!available())return"Shizuku no disponible";if(!permissionGranted())return"Shizuku sin permiso";if(System.currentTimeMillis()<breakerUntil)return"Shizuku en pausa de reconexión";return selfTest()?"Shizuku conectado":"Shizuku pendiente";}
+    public void shutdown(){timeoutPool.shutdownNow();try{Shizuku.removeBinderReceivedListener(binderReceivedListener);Shizuku.removeBinderDeadListener(binderDeadListener);}catch(Throwable ignored){}try{if(available())Shizuku.unbindUserService(args(),connection,true);}catch(Throwable ignored){}service=null;}
     public record Result(boolean ok,String output,int code){}
 }
