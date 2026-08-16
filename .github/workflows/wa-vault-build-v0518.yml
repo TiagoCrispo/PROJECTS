@@ -39,6 +39,7 @@ jobs:
           cd wa-vault-v0518-project
           sed -i '/exec(compile(reg/d' apply_v0518.py
           python3 apply_v0518.py
+          python3 -c 'from pathlib import Path; p=Path("app/src/main/java/com/fer/wavault/MainActivity.java"); s=p.read_text(); a=s.index("private String buildTechnicalDiagnostics()"); b=s.index("private void showPartialAttemptsDialog",a); p.write_text(s[:a]+s[a:b].replace("\\\\n","\\n")+s[b:])'
           python3 tools/v0518_regression_test.py
           grep -q 'versionCode = 68' app/build.gradle.kts
           grep -q 'versionName = "0.5.18"' app/build.gradle.kts
