@@ -88,7 +88,7 @@ public final class ShizukuShell {
 
     public void shutdown(){
         timeoutPool.shutdownNow();
-        try{if(available())Shizuku.unbindUserService(args(),connection,false);}catch(Throwable ignored){}
+        try{if(available())Shizuku.unbindUserService(args(),connection,true);}catch(Throwable ignored){}
         service=null;
     }
 
