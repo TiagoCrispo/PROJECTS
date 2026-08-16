@@ -33,9 +33,7 @@ jobs:
           test -f "$APK"
           unzip -tq "$APK"
           $ANDROID_HOME/build-tools/35.0.0/aapt dump badging "$APK" | grep "package: name='com.fer.a53performance' versionCode='31' versionName='1.15.9'"
-          for P in android.permission.POST_NOTIFICATIONS android.permission.PACKAGE_USAGE_STATS android.permission.WRITE_SETTINGS android.permission.QUERY_ALL_PACKAGES; do
-            if $ANDROID_HOME/build-tools/35.0.0/aapt dump permissions "$APK" | grep -q "$P"; then echo "Unexpected permission $P"; exit 1; fi
-          done
+          for P in android.permission.POST_NOTIFICATIONS android.permission.PACKAGE_USAGE_STATS android.permission.WRITE_SETTINGS android.permission.QUERY_ALL_PACKAGES; do if $ANDROID_HOME/build-tools/35.0.0/aapt dump permissions "$APK" | grep -q "$P"; then echo "Unexpected permission $P"; exit 1; fi; done
           mkdir -p out smoke
           $ANDROID_HOME/build-tools/35.0.0/zipalign -f -p 4 "$APK" out/A53Performance_v1.15.9_STORAGE_SAFE_RAM_UNSIGNED.apk
           $ANDROID_HOME/build-tools/35.0.0/zipalign -c -v 4 out/A53Performance_v1.15.9_STORAGE_SAFE_RAM_UNSIGNED.apk
@@ -82,28 +80,19 @@ jobs:
           script: |
             adb install -r smoke/A53Performance_v1.15.9_debug.apk
             adb install -r smoke/A53Performance_v1.15.9_androidTest.apk
-            SDK=$(adb shell getprop ro.build.version.sdk | tr -d '\r')
-            if [ "$SDK" -ge 33 ]; then
-              adb shell pm grant com.fer.a53performance android.permission.READ_MEDIA_IMAGES || true
-              adb shell pm grant com.fer.a53performance android.permission.READ_MEDIA_VIDEO || true
-              adb shell pm grant com.fer.a53performance android.permission.READ_MEDIA_AUDIO || true
-            else
-              adb shell pm grant com.fer.a53performance android.permission.READ_EXTERNAL_STORAGE || true
-            fi
+            if [ ${{ matrix.api }} -ge 33 ]; then adb shell pm grant com.fer.a53performance android.permission.READ_MEDIA_IMAGES || true; adb shell pm grant com.fer.a53performance android.permission.READ_MEDIA_VIDEO || true; adb shell pm grant com.fer.a53performance android.permission.READ_MEDIA_AUDIO || true; else adb shell pm grant com.fer.a53performance android.permission.READ_EXTERNAL_STORAGE || true; fi
             adb shell appops set com.fer.a53performance MANAGE_EXTERNAL_STORAGE allow || true
             adb shell am instrument -w com.fer.a53performance.test/androidx.test.runner.AndroidJUnitRunner | tee instrument.txt
             grep -q 'OK (7 tests)' instrument.txt
             adb logcat -c
-            LOOPS=8; EVENTS=250
-            if [ "$SDK" -ge 35 ]; then LOOPS=12; EVENTS=700; fi
-            i=0; while [ $i -lt $LOOPS ]; do adb shell am force-stop com.fer.a53performance; adb shell am start -W -n com.fer.a53performance/.MainActivity >/dev/null; i=$((i+1)); done
+            if [ ${{ matrix.api }} -ge 35 ]; then i=0; while [ $i -lt 12 ]; do adb shell am force-stop com.fer.a53performance; adb shell am start -W -n com.fer.a53performance/.MainActivity >/dev/null; i=$((i+1)); done; else i=0; while [ $i -lt 8 ]; do adb shell am force-stop com.fer.a53performance; adb shell am start -W -n com.fer.a53performance/.MainActivity >/dev/null; i=$((i+1)); done; fi
             adb install -r smoke/A53Performance_v1.15.9_debug.apk >/dev/null
             adb shell am start -W -n com.fer.a53performance/.MainActivity >/dev/null
             adb shell settings put system accelerometer_rotation 0 || true
             adb shell settings put system user_rotation 1 || true
             adb shell am start -W -n com.fer.a53performance/.MainActivity >/dev/null
             adb shell settings put system user_rotation 0 || true
-            adb shell monkey -p com.fer.a53performance --pct-syskeys 0 --pct-appswitch 0 --throttle 8 $EVENTS >/dev/null || true
+            if [ ${{ matrix.api }} -ge 35 ]; then adb shell monkey -p com.fer.a53performance --pct-syskeys 0 --pct-appswitch 0 --throttle 8 700 >/dev/null || true; else adb shell monkey -p com.fer.a53performance --pct-syskeys 0 --pct-appswitch 0 --throttle 8 250 >/dev/null || true; fi
             adb shell am start -W -n com.fer.a53performance/.MainActivity >/dev/null
             sleep 3
             test -n "$(adb shell pidof com.fer.a53performance | tr -d '\r')"
