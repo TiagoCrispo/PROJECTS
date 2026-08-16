@@ -30,7 +30,7 @@ public final class ShizukuShell {
     };
 
     public ShizukuShell(Context context){app=context.getApplicationContext();}
-    private Shizuku.UserServiceArgs args(){return new Shizuku.UserServiceArgs(new ComponentName(app.getPackageName(),PrivilegedUserService.class.getName())).daemon(false).processNameSuffix("privileged").debuggable(false).version(29);}
+    private Shizuku.UserServiceArgs args(){return new Shizuku.UserServiceArgs(new ComponentName(app.getPackageName(),PrivilegedUserService.class.getName())).daemon(false).processNameSuffix("privileged").debuggable(false).version(30);}
     public boolean available(){try{return Shizuku.pingBinder()&&!Shizuku.isPreV11();}catch(Throwable ignored){return false;}}
     public boolean permissionGranted(){try{return available()&&Shizuku.checkSelfPermission()==PackageManager.PERMISSION_GRANTED;}catch(Throwable ignored){return false;}}
     public void requestPermission(int requestCode){try{if(available()&&Shizuku.checkSelfPermission()!=PackageManager.PERMISSION_GRANTED&&!Shizuku.shouldShowRequestPermissionRationale())Shizuku.requestPermission(requestCode);}catch(Throwable ignored){}}
@@ -51,16 +51,14 @@ public final class ShizukuShell {
 
     private void invalidateBinder(){service=null;binding.set(false);breakerUntil=0L;}
     private boolean reconnectOnce(long timeoutMs){invalidateBinder();return warmUp(timeoutMs);}
+    private static boolean transportFailure(Result r){return r.code()==-2||r.code()==-3||r.code()==-5;}
 
     public Result setPeakRefreshRate(float value){return callInt(()->service.setPeakRefreshRate(value),1800L,true);}
     public Result setMinRefreshRate(float value){return callInt(()->service.setMinRefreshRate(value),1800L,true);}
     public Result setLowPower(boolean enabled){return callInt(()->service.setLowPower(enabled),1800L,true);}
     public Result setRestrictBackground(boolean enabled){return callInt(()->service.setRestrictBackground(enabled),1800L,true);}
     public Result forceStopPackage(String pkg){return callInt(()->service.forceStopPackage(pkg),1400L,true);}
-
-    public Result listRunningUserPackages(){
-        return callString(()->service.listRunningUserPackages(),2400L,true);
-    }
+    public Result listRunningUserPackages(){return callString(()->service.listRunningUserPackages(),2400L,true);}
     public float getPeakRefreshRate(){return callValue(()->service.getPeakRefreshRate(),-1f);}
     public float getMinRefreshRate(){return callValue(()->service.getMinRefreshRate(),-1f);}
     public int getLowPower(){return callValue(()->service.getLowPower(),-1);}
@@ -70,23 +68,40 @@ public final class ShizukuShell {
         if(!permissionGranted())return new Result(false,"Shizuku sin permiso",-1);
         if(!warmUp(1800L))return new Result(false,"UserService no disponible",-5);
         Future<Result> f=timeoutPool.submit(()->{try{String out=call.call();return new Result(out!=null,out==null?"":out,0);}catch(Throwable t){return new Result(false,t.getClass().getSimpleName(),-3);}});
-        try{Result r=f.get(timeoutMs,TimeUnit.MILLISECONDS);if(!r.ok()&&retry&&reconnectOnce(1600L))return callString(call,timeoutMs,false);if(!r.ok())breakerUntil=System.currentTimeMillis()+BREAKER_MS;return r;}catch(Throwable e){f.cancel(true);if(retry&&reconnectOnce(1600L))return callString(call,timeoutMs,false);breakerUntil=System.currentTimeMillis()+BREAKER_MS;return new Result(false,"timeout",-2);}
+        try{
+            Result r=f.get(timeoutMs,TimeUnit.MILLISECONDS);
+            if(transportFailure(r)&&retry&&reconnectOnce(1600L))return callString(call,timeoutMs,false);
+            if(transportFailure(r))breakerUntil=System.currentTimeMillis()+BREAKER_MS;
+            return r;
+        }catch(Throwable e){
+            f.cancel(true);if(retry&&reconnectOnce(1600L))return callString(call,timeoutMs,false);breakerUntil=System.currentTimeMillis()+BREAKER_MS;return new Result(false,"timeout",-2);
+        }
     }
 
     private Result callInt(Callable<Integer> call,long timeoutMs,boolean retry){
         if(!permissionGranted())return new Result(false,"Shizuku sin permiso",-1);
         if(!warmUp(Math.min(1800L,timeoutMs+400L)))return new Result(false,"UserService no disponible",-5);
         Future<Result> f=timeoutPool.submit(()->{try{int code=call.call();return new Result(code==0,"",code);}catch(Throwable t){return new Result(false,t.getClass().getSimpleName(),-3);}});
-        try{Result r=f.get(Math.max(900L,timeoutMs+500L),TimeUnit.MILLISECONDS);if(!r.ok()&&retry&&reconnectOnce(1600L))return callInt(call,timeoutMs,false);if(!r.ok())breakerUntil=System.currentTimeMillis()+BREAKER_MS;return r;}catch(Throwable e){f.cancel(true);if(retry&&reconnectOnce(1600L))return callInt(call,timeoutMs,false);breakerUntil=System.currentTimeMillis()+BREAKER_MS;return new Result(false,"timeout",-2);}
+        try{
+            Result r=f.get(Math.max(900L,timeoutMs+500L),TimeUnit.MILLISECONDS);
+            if(transportFailure(r)&&retry&&reconnectOnce(1600L))return callInt(call,timeoutMs,false);
+            if(transportFailure(r))breakerUntil=System.currentTimeMillis()+BREAKER_MS;
+            return r;
+        }catch(Throwable e){
+            f.cancel(true);if(retry&&reconnectOnce(1600L))return callInt(call,timeoutMs,false);breakerUntil=System.currentTimeMillis()+BREAKER_MS;return new Result(false,"timeout",-2);
+        }
     }
 
-    private <T> T callValue(Callable<T> call,T fallback){
+    private <T>T callValue(Callable<T> call,T fallback){
         if(!permissionGranted()||!warmUp(1600L))return fallback;
         Future<T> f=timeoutPool.submit(call);
-        try{return f.get(1800L,TimeUnit.MILLISECONDS);}catch(Throwable e){f.cancel(true);if(reconnectOnce(1400L)){Future<T> r=timeoutPool.submit(call);try{return r.get(1800L,TimeUnit.MILLISECONDS);}catch(Throwable ignored){r.cancel(true);}}breakerUntil=System.currentTimeMillis()+BREAKER_MS;return fallback;}
+        try{return f.get(1800L,TimeUnit.MILLISECONDS);}catch(Throwable e){
+            f.cancel(true);if(reconnectOnce(1400L)){Future<T> r=timeoutPool.submit(call);try{return r.get(1800L,TimeUnit.MILLISECONDS);}catch(Throwable ignored){r.cancel(true);}}
+            breakerUntil=System.currentTimeMillis()+BREAKER_MS;return fallback;
+        }
     }
 
-    public String health(){if(!available())return "Shizuku no disponible";if(!permissionGranted())return "Shizuku sin permiso";if(System.currentTimeMillis()<breakerUntil)return "Shizuku en pausa de reconexión";return warmUp(700L)?"Shizuku conectado":"Shizuku pendiente";}
+    public String health(){if(!available())return"Shizuku no disponible";if(!permissionGranted())return"Shizuku sin permiso";if(System.currentTimeMillis()<breakerUntil)return"Shizuku en pausa de reconexión";return warmUp(700L)?"Shizuku conectado":"Shizuku pendiente";}
     public void shutdown(){timeoutPool.shutdownNow();try{if(available())Shizuku.unbindUserService(args(),connection,true);}catch(Throwable ignored){}service=null;}
     public record Result(boolean ok,String output,int code){}
 }
