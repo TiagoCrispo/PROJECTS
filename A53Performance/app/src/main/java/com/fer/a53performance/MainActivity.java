@@ -56,6 +56,8 @@ public final class MainActivity extends Activity {
     private FileAdapter fileAdapter;
     private ShizukuShell shell;
     private SystemOptimizer optimizer;
+    private PermissionController permissionController;
+    private DiagnosticsStore diagnosticsStore;
     private RecyclerView fileList;
     private TextView storageSummary,selectionSummary,scanStatus;
     private EditText search;
@@ -79,7 +81,7 @@ public final class MainActivity extends Activity {
         super.onCreate(state);
         getWindow().setStatusBarColor(BG);getWindow().setNavigationBarColor(BG);
         prefs=getSharedPreferences("a53_ui",MODE_PRIVATE);
-        shell=new ShizukuShell(this);storage=new StorageRepository(this);analyzer=new StorageAnalyzer(this);thumbnails=new ThumbnailLoader(this);optimizer=new SystemOptimizer(this,shell);
+        shell=new ShizukuShell(this);storage=new StorageRepository(this);analyzer=new StorageAnalyzer(this);thumbnails=new ThumbnailLoader(this);optimizer=new SystemOptimizer(this,shell);permissionController=new PermissionController(this,shell);diagnosticsStore=new DiagnosticsStore(this);
         try{Shizuku.addRequestPermissionResultListener(shizukuPermissionListener);}catch(Throwable ignored){}
         buildShell();
         if(state!=null){currentPage=state.getString("page","home");savedAnchor=state.getInt("anchor",-1);savedAnchorOffset=state.getInt("anchorOffset",0);savedVisible=state.getInt("visible",PAGE_SIZE);visibleLimit=savedVisible;}
@@ -169,7 +171,7 @@ public final class MainActivity extends Activity {
         analyzer.cancel();analysisRunning=true;
         analyzer.analyzeDuplicatesAsync(items,new StorageAnalyzer.Callback<StorageAnalyzer.DuplicateResult>(){
             @Override public void onPhase(String phase){runOnUiThread(()->{if(currentPage.equals("cleaner")&&scanStatus!=null)scanStatus.setText(phase+" Resultado guardado en caché.");});}
-            @Override public void onDone(StorageAnalyzer.DuplicateResult result){runOnUiThread(()->{analysisRunning=false;duplicateKeys=result.keys;duplicateGroups=result.groups;duplicateReady=true;if(currentPage.equals("cleaner")&&scanStatus!=null){scanStatus.setText(duplicateGroups+" grupos duplicados");if(filterSpinner!=null&&filterSpinner.getSelectedItemPosition()==5)applyFilter(true);}});}
+            @Override public void onDone(StorageAnalyzer.DuplicateResult result){runOnUiThread(()->{analysisRunning=false;duplicateKeys=result.keys;duplicateGroups=result.groups;duplicateReady=true;if(currentPage.equals("cleaner")&&scanStatus!=null){diagnosticsStore.record("analysis",duplicateGroups+" grupos duplicados");scanStatus.setText(duplicateGroups+" grupos duplicados");if(filterSpinner!=null&&filterSpinner.getSelectedItemPosition()==5)applyFilter(true);}});}
         });
     }
 
@@ -180,7 +182,7 @@ public final class MainActivity extends Activity {
         analyzer.cancel();analysisRunning=true;
         analyzer.analyzeSimilarAsync(items,new StorageAnalyzer.Callback<StorageAnalyzer.SimilarResult>(){
             @Override public void onPhase(String phase){runOnUiThread(()->{if(currentPage.equals("cleaner")&&scanStatus!=null)scanStatus.setText(phase+" Solo se ejecuta al abrir este filtro.");});}
-            @Override public void onDone(StorageAnalyzer.SimilarResult result){runOnUiThread(()->{analysisRunning=false;similarKeys=result.keys;similarGroups=result.groups;similarReady=true;if(currentPage.equals("cleaner")&&scanStatus!=null){scanStatus.setText(similarGroups+" grupos de fotos similares");if(filterSpinner!=null&&filterSpinner.getSelectedItemPosition()==6)applyFilter(true);}});}
+            @Override public void onDone(StorageAnalyzer.SimilarResult result){runOnUiThread(()->{analysisRunning=false;similarKeys=result.keys;similarGroups=result.groups;similarReady=true;if(currentPage.equals("cleaner")&&scanStatus!=null){diagnosticsStore.record("analysis",similarGroups+" grupos de fotos similares");scanStatus.setText(similarGroups+" grupos de fotos similares");if(filterSpinner!=null&&filterSpinner.getSelectedItemPosition()==6)applyFilter(true);}});}
         });
     }
 
@@ -191,12 +193,8 @@ public final class MainActivity extends Activity {
 
     private void applyFilter(boolean preserveAnchor){
         if(fileAdapter==null)return;int anchor=-1,offset=0;if(preserveAnchor&&fileList!=null){LinearLayoutManager lm=(LinearLayoutManager)fileList.getLayoutManager();anchor=lm.findFirstVisibleItemPosition();View v=lm.findViewByPosition(anchor);offset=v==null?0:v.getTop();}
-        String q=search==null?"":search.getText().toString().trim().toLowerCase(Locale.ROOT);int f=filterSpinner==null?0:filterSpinner.getSelectedItemPosition();int sort=sortSpinner==null?0:sortSpinner.getSelectedItemPosition();
-        filtered.clear();for(StorageItem x:storage.snapshot()){
-            boolean type=switch(f){case 1->x.isImage();case 2->x.isVideo();case 3->x.isAudio();case 4->x.isLarge();case 5->duplicateKeys.contains(x.stableKey());case 6->similarKeys.contains(x.stableKey());default->true;};
-            if(!type)continue;if(!q.isEmpty()&&!x.name.toLowerCase(Locale.ROOT).contains(q)&&!x.path.toLowerCase(Locale.ROOT).contains(q))continue;filtered.add(x);
-        }
-        Comparator<StorageItem> cmp=switch(sort){case 1->Comparator.comparingLong((StorageItem x)->x.size).reversed();case 2->Comparator.comparingLong(x->x.size);case 3->Comparator.comparing(x->x.name.toLowerCase(Locale.ROOT));default->Comparator.comparingLong((StorageItem x)->x.modified).reversed();};filtered.sort(cmp);
+        String q=search==null?"":search.getText().toString();int f=filterSpinner==null?0:filterSpinner.getSelectedItemPosition();int sort=sortSpinner==null?0:sortSpinner.getSelectedItemPosition();
+        filtered.clear();filtered.addAll(CleanerController.filterAndSort(storage.snapshot(),q,f,sort,duplicateKeys,similarKeys));
         int n=Math.min(Math.max(PAGE_SIZE,visibleLimit),filtered.size());fileAdapter.replace(new ArrayList<>(filtered.subList(0,n)));visibleLimit=n;updateCleanerSummary();
         if(preserveAnchor&&anchor>=0&&fileAdapter.getItemCount()>0){int a=Math.min(anchor,fileAdapter.getItemCount()-1);int off=offset;fileList.post(()->((LinearLayoutManager)fileList.getLayoutManager()).scrollToPositionWithOffset(a,off));}
     }
@@ -207,7 +205,7 @@ public final class MainActivity extends Activity {
     private void deleteSelection(){
         if(fileAdapter==null)return;List<StorageItem> selected=fileAdapter.selectedItems();if(selected.isEmpty())return;int beforeCount=fileAdapter.displayedCount();deleteSelected.setEnabled(false);if(trashSelected!=null)trashSelected.setEnabled(false);deleteSelected.setText("Eliminando…");
         storage.deleteAsync(selected,(deleted,failed)->runOnUiThread(()->{
-            if(!currentPage.equals("cleaner")||fileAdapter==null)return;fileAdapter.removeAll(deleted);visibleLimit=Math.max(PAGE_SIZE,beforeCount);applyFilter(true);deleteSelected.setText("Eliminar");deleteSelected.setEnabled(false);if(trashSelected!=null)trashSelected.setEnabled(false);updateCleanerSummary();scanStatus.setText(deleted.size()+" eliminados definitivamente"+(failed.isEmpty()?"":" · "+failed.size()+" no pudieron borrarse"));invalidateAnalysisAndMaybeRun();
+            if(!currentPage.equals("cleaner")||fileAdapter==null)return;fileAdapter.removeAll(deleted);visibleLimit=Math.max(PAGE_SIZE,beforeCount);applyFilter(true);deleteSelected.setText("Eliminar");deleteSelected.setEnabled(false);if(trashSelected!=null)trashSelected.setEnabled(false);updateCleanerSummary();diagnosticsStore.record("operation",failed.isEmpty()?deleted.size()+" eliminados correctamente":failed.size()+" fallos al eliminar");scanStatus.setText(deleted.size()+" eliminados definitivamente"+(failed.isEmpty()?"":" · "+failed.size()+" no pudieron borrarse"));invalidateAnalysisAndMaybeRun();
         }));
     }
 
@@ -239,9 +237,10 @@ public final class MainActivity extends Activity {
         LinearLayout sh=card();sh.addView(text("Shizuku",16,Color.WHITE,true));sh.addView(text(shell.permissionGranted()?"Autorizado":"Necesario para perfiles y force-stop real",13,MUTED,false));Button b=button(shell.permissionGranted()?"Shizuku autorizado":"Autorizar Shizuku");b.setOnClickListener(v->shell.requestPermission(SHIZUKU_REQUEST));sh.addView(b);box.addView(sh);
         LinearLayout files=card();files.addView(text("Acceso a archivos",16,Color.WHITE,true));files.addView(text(Environment.isExternalStorageManager()?"Acceso completo activo":"Necesario para gestionar archivos fuera de las colecciones estándar",13,MUTED,false));Button all=button(Environment.isExternalStorageManager()?"Acceso activo":"Conceder acceso");all.setOnClickListener(v->openAllFilesSettings());files.addView(all);box.addView(files);
         LinearLayout diagnostics=card();diagnostics.addView(text("Diagnóstico de permisos",16,Color.WHITE,true));TextView diagnosticText=text(permissionStatus(),13,MUTED,false);diagnostics.addView(diagnosticText);Button repair=button("Reparar permisos faltantes");repair.setOnClickListener(v->{prefs.edit().putBoolean("permission_flow_v1154",false).apply();startPermissionFlow();diagnosticText.setText(permissionStatus());});diagnostics.addView(repair);box.addView(diagnostics);
+        LinearLayout runtimeDiag=card();runtimeDiag.addView(text("Diagnóstico interno",16,Color.WHITE,true));runtimeDiag.addView(text(permissionController.status()+"\n"+diagnosticsStore.summary(),12,MUTED,false));box.addView(runtimeDiag);
         LinearLayout protectedCard=card();protectedCard.addView(text("Apps protegidas por defecto",16,Color.WHITE,true));protectedCard.addView(text("Gmail · Mensajes Google/Samsung · Reloj Google/Samsung · Brave · ChatGPT · Samsung Voice Recorder · Teléfono/Contactos · servicios críticos del sistema",13,MUTED,false));protectedCard.addView(text("La protección se aplica a acciones por app. Battery Saver, Data Saver y frecuencia de pantalla son ajustes globales de Android.",12,MUTED,false));box.addView(protectedCard);
         LinearLayout auto=card();auto.addView(text("Auto después de reiniciar",16,Color.WHITE,true));auto.addView(text("Opcional: reaplica el último perfil exitoso mediante trabajo persistente. No borra archivos ni cierra apps automáticamente.",13,MUTED,false));Switch autoSwitch=new Switch(this);autoSwitch.setText("Reaplicar último perfil");autoSwitch.setTextColor(Color.WHITE);autoSwitch.setChecked(prefs.getBoolean("auto_restore_profile",false));autoSwitch.setOnCheckedChangeListener((button,checked)->prefs.edit().putBoolean("auto_restore_profile",checked).apply());auto.addView(autoSwitch);box.addView(auto);
-        LinearLayout about=card();about.addView(text("v1.15.6 HARDENED",16,ACCENT,true));about.addView(text("Shizuku con operaciones cerradas, menos mantenimiento, duplicados con prefiltro rápido, similitud indexada, IDs 64-bit y diagnóstico reparable de permisos.",13,MUTED,false));box.addView(about);
+        LinearLayout about=card();about.addView(text("v1.15.7 THERMAL / ANALYSIS",16,ACCENT,true));about.addView(text("Análisis completo por bloques, doble hash perceptual, pausa térmica con progreso guardado, Shizuku con reconexión controlada y diagnóstico local.",13,MUTED,false));box.addView(about);
     }
 
     private void startPermissionFlow(){
@@ -255,17 +254,7 @@ public final class MainActivity extends Activity {
     @Override protected void onResume(){super.onResume();if(waitingForAllFiles){waitingForAllFiles=false;main.postDelayed(this::requestShizukuIfNeeded,300);}}
     private void openAllFilesSettings(){try{Intent i=new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,Uri.parse("package:"+getPackageName()));startActivity(i);}catch(Throwable e){startActivity(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));}}
 
-    private String permissionStatus(){
-        ArrayList<String> missing=new ArrayList<>();
-        if(Build.VERSION.SDK_INT>=33){
-            if(checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES)!=PackageManager.PERMISSION_GRANTED)missing.add("imágenes");
-            if(checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO)!=PackageManager.PERMISSION_GRANTED)missing.add("videos");
-            if(checkSelfPermission(Manifest.permission.READ_MEDIA_AUDIO)!=PackageManager.PERMISSION_GRANTED)missing.add("audio");
-        }else if(checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE)!=PackageManager.PERMISSION_GRANTED)missing.add("archivos");
-        if(Build.VERSION.SDK_INT>=30&&!Environment.isExternalStorageManager())missing.add("acceso completo a archivos");
-        if(!shell.available())missing.add("Shizuku activo");else if(!shell.permissionGranted())missing.add("permiso Shizuku");
-        return missing.isEmpty()?"Todo listo.":"Falta: "+String.join(" · ",missing)+".";
-    }
+    private String permissionStatus(){return permissionController.status();}
 
     private void saveListAnchor(){if(fileList==null)return;LinearLayoutManager lm=(LinearLayoutManager)fileList.getLayoutManager();savedAnchor=lm.findFirstVisibleItemPosition();View v=lm.findViewByPosition(savedAnchor);savedAnchorOffset=v==null?0:v.getTop();savedVisible=fileAdapter==null?PAGE_SIZE:Math.max(PAGE_SIZE,fileAdapter.displayedCount());}
     private void restoreListAnchorLater(){if(fileList==null||savedAnchor<0||fileAdapter==null||fileAdapter.getItemCount()==0)return;int a=Math.min(savedAnchor,fileAdapter.getItemCount()-1),o=savedAnchorOffset;fileList.post(()->((LinearLayoutManager)fileList.getLayoutManager()).scrollToPositionWithOffset(a,o));savedAnchor=-1;}
