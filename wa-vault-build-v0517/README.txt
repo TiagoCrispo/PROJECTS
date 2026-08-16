@@ -1,0 +1,1 @@
+WA Vault v0.5.17 build transport. Source is reconstructed from the verified v0.5.16 artifact and v0517.patch.
