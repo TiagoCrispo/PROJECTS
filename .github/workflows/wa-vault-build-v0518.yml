@@ -37,6 +37,7 @@ jobs:
           set -euo pipefail
           cp wa-vault-build-v0518/apply_v0518.py wa-vault-v0518-project/apply_v0518.py
           cd wa-vault-v0518-project
+          sed -i '/exec(compile(reg/d' apply_v0518.py
           python3 apply_v0518.py
           python3 tools/v0518_regression_test.py
           grep -q 'versionCode = 68' app/build.gradle.kts
