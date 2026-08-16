@@ -4,6 +4,7 @@ import android.content.ContentResolver;
 import android.content.Context;
 import android.database.Cursor;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Environment;
 import android.os.StatFs;
 import android.provider.MediaStore;
@@ -56,7 +57,8 @@ public final class StorageRepository {
                 MediaStore.Files.FileColumns.MIME_TYPE,
                 MediaStore.Files.FileColumns.DATA
         };
-        try (Cursor c = cr.query(base, projection, null, null,
+        String selection = Build.VERSION.SDK_INT >= 30 ? MediaStore.MediaColumns.IS_TRASHED + "=0" : null;
+        try (Cursor c = cr.query(base, projection, selection, null,
                 MediaStore.Files.FileColumns.DATE_MODIFIED + " DESC")) {
             if (c == null) return;
             int idIx = c.getColumnIndex(MediaStore.Files.FileColumns._ID);
@@ -97,15 +99,16 @@ public final class StorageRepository {
                 }
                 (ok ? deleted : failed).add(item);
             }
-            if (!deleted.isEmpty()) {
-                synchronized (lock) {
-                    Map<String, Boolean> gone = new HashMap<>();
-                    for (StorageItem x : deleted) gone.put(x.stableKey(), true);
-                    master.removeIf(x -> gone.containsKey(x.stableKey()));
-                }
-            }
+            if (!deleted.isEmpty()) removeFromIndex(deleted);
             callback.onFinished(deleted, failed);
         });
+    }
+
+    public void removeFromIndex(Collection<StorageItem> selected) {
+        if (selected == null || selected.isEmpty()) return;
+        Map<String, Boolean> gone = new HashMap<>();
+        for (StorageItem x : selected) gone.put(x.stableKey(), true);
+        synchronized (lock) { master.removeIf(x -> gone.containsKey(x.stableKey())); }
     }
 
     public List<StorageItem> snapshot() { synchronized (lock) { return new ArrayList<>(master); } }
