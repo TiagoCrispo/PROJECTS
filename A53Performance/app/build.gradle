@@ -8,9 +8,11 @@ android {
         applicationId 'com.fer.a53performance'
         minSdk 26
         targetSdk 35
-        versionCode 26
-        versionName '1.15.4'
+        versionCode 27
+        versionName '1.15.5'
     }
+
+    buildFeatures { aidl true }
 
     buildTypes {
         release {
@@ -27,6 +29,7 @@ android {
 
 dependencies {
     implementation 'androidx.recyclerview:recyclerview:1.4.0'
+    implementation 'androidx.work:work-runtime:2.10.1'
     implementation 'dev.rikka.shizuku:api:13.1.5'
     implementation 'dev.rikka.shizuku:provider:13.1.5'
 }
