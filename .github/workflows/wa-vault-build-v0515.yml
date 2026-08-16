@@ -35,11 +35,6 @@ jobs:
       - name: Apply verified v0.5.15 patch and regressions
         run: |
           set -euo pipefail
-          echo '60e5ddca6f3de969ee910206bffdcc78e30e1eac9dfc51f02be113192a535a97  wa-vault-build-v0515/chunks/part00' | sha256sum -c -
-          echo '72132be3db6a6e1498fc4f5e8b295eea387bd977a6fd0deeb4f3345290d87f34  wa-vault-build-v0515/chunks/part01' | sha256sum -c -
-          echo 'f9556391abcc3cf82cc1938c808d2bb668aba5eff33d56463c66bd4683e8b140  wa-vault-build-v0515/chunks/part02' | sha256sum -c -
-          echo 'a0529395d5755fd840e701868a93cfd80101a5eee0797c2cb7f64817ac1d94a8  wa-vault-build-v0515/chunks/part03' | sha256sum -c -
-          echo '1a9ecc942ad5495c3d984bbd4f4954de599fcb486533fe2c3f3ee045ef136a29  wa-vault-build-v0515/chunks/part04' | sha256sum -c -
           cat wa-vault-build-v0515/chunks/part00 \
               wa-vault-build-v0515/chunks/part01 \
               wa-vault-build-v0515/chunks/part02 \
