@@ -5,17 +5,20 @@ import android.content.SharedPreferences;
 import androidx.annotation.NonNull;
 import androidx.work.Worker;
 import androidx.work.WorkerParameters;
-import java.util.List;
 
 public final class AutoWorker extends Worker {
     public AutoWorker(@NonNull Context context,@NonNull WorkerParameters params){super(context,params);}
 
     @NonNull @Override public Result doWork(){
         Context app=getApplicationContext();
-        AnalysisCacheDb cache=new AnalysisCacheDb(app);
-        try{cache.prune();}finally{cache.close();}
-
+        boolean maintenance=getInputData().getBoolean("maintenance",false);
         boolean restoreProfile=getInputData().getBoolean("restore_profile",false);
+
+        if(maintenance){
+            AnalysisCacheDb cache=new AnalysisCacheDb(app);
+            try{cache.prune();}finally{cache.close();}
+            app.getSharedPreferences("a53_ui",Context.MODE_PRIVATE).edit().putLong("last_cache_prune",System.currentTimeMillis()).apply();
+        }
         if(!restoreProfile)return Result.success();
 
         SharedPreferences prefs=app.getSharedPreferences("a53_ui",Context.MODE_PRIVATE);
@@ -30,12 +33,8 @@ public final class AutoWorker extends Worker {
             if(!shell.available())return Result.retry();
             if(!shell.permissionGranted())return Result.success();
             if(!shell.warmUp(1800))return Result.retry();
-            List<String> commands=SystemOptimizer.commands(profile);
-            for(String command:commands){
-                ShizukuShell.Result r=shell.exec(command,1600);
-                if(!r.ok())return Result.retry();
-            }
-            return Result.success();
+            SystemOptimizer.ProfileResult result=SystemOptimizer.applyProfileSync(profile,shell);
+            return result.success()?Result.success():Result.retry();
         }finally{shell.shutdown();}
     }
 }
