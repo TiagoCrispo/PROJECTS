@@ -18,6 +18,7 @@ public final class PrivilegedUserService extends IPrivilegedService.Stub {
     public PrivilegedUserService() {}
     @Keep public PrivilegedUserService(Context context) {}
     @Override public void destroy(){System.exit(0);}
+    @Override public int ping(){return 0;}
 
     @Override public int setPeakRefreshRate(float value)throws RemoteException{return validRefresh(value)?runFixed("settings","put","system","peak_refresh_rate",Float.toString(value)):-4;}
     @Override public int setMinRefreshRate(float value)throws RemoteException{return validRefresh(value)?runFixed("settings","put","system","min_refresh_rate",Float.toString(value)):-4;}
