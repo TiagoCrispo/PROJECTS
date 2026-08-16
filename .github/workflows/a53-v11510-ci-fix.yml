@@ -1,0 +1,33 @@
+name: A53 v1.15.10 CI Harness Fix
+on:
+  push:
+    branches: [agent/a53-performance-v11510]
+    paths: [A53Performance/CI_FIX_READY_11510]
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/a53-performance-v11510
+      - name: Fix upgrade marker command
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/workflows/a53-v11510.yml')
+          s=p.read_text()
+          old="adb shell run-as com.fer.a53performance sh -c 'echo upgrade-marker > files/upgrade_marker.txt'"
+          new="adb shell run-as com.fer.a53performance cp /data/local/tmp/a53_ui.xml files/upgrade_marker.txt"
+          if old not in s: raise SystemExit('upgrade marker command not found')
+          p.write_text(s.replace(old,new,1))
+          b=Path('A53Performance/BUILD_READY_11510')
+          b.write_text('build v1.15.10 device hardening final\n')
+          PY
+      - run: |
+          git config user.name "Damián Crispo"
+          git config user.email "116601726+TiagoCrispo@users.noreply.github.com"
+          git add .github/workflows/a53-v11510.yml A53Performance/BUILD_READY_11510
+          git commit -m "Fix v1.15.10 upgrade smoke harness"
+          git push
