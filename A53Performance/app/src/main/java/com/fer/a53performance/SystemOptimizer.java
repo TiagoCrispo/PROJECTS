@@ -2,6 +2,7 @@ package com.fer.a53performance;
 
 import android.app.ActivityManager;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.os.SystemClock;
@@ -14,21 +15,22 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public final class SystemOptimizer {
-    public interface Callback { void onDone(boolean ok, String message); }
-    public enum Profile { CLASS, GAMING, PERFORMANCE, BALANCED, COOL, BATTERY, DATA }
+    public interface Callback { void onDone(boolean ok,String message); }
+    public enum Profile { CLASS,GAMING,PERFORMANCE,BALANCED,COOL,BATTERY,DATA }
 
     private final Context app;
     private final ShizukuShell shell;
-    private final ExecutorService ramExecutor = Executors.newSingleThreadExecutor(r -> new Thread(r,"a53-ram"));
-    private final ExecutorService profileExecutor = Executors.newSingleThreadExecutor(r -> new Thread(r,"a53-profile"));
-    private final AtomicInteger ramGeneration = new AtomicInteger();
-    private final AtomicInteger profileGeneration = new AtomicInteger();
+    private final SharedPreferences prefs;
+    private final ExecutorService ramExecutor=Executors.newSingleThreadExecutor(r->new Thread(r,"a53-ram"));
+    private final ExecutorService profileExecutor=Executors.newSingleThreadExecutor(r->new Thread(r,"a53-profile"));
+    private final AtomicInteger ramGeneration=new AtomicInteger();
+    private final AtomicInteger profileGeneration=new AtomicInteger();
 
-    public SystemOptimizer(Context context, ShizukuShell shell) { this.app=context.getApplicationContext();this.shell=shell; }
+    public SystemOptimizer(Context context,ShizukuShell shell){app=context.getApplicationContext();this.shell=shell;prefs=app.getSharedPreferences("a53_ui",Context.MODE_PRIVATE);}
 
-    public void cleanRam(Callback cb) {
+    public void cleanRam(Callback cb){
         int gen=ramGeneration.incrementAndGet();
-        ramExecutor.execute(() -> {
+        ramExecutor.execute(()->{
             if(gen!=ramGeneration.get())return;
             long before=availableMemory();
             Set<String> candidates=runningUserPackages();
@@ -41,15 +43,14 @@ public final class SystemOptimizer {
                 boolean ok=false;
                 if(shell.permissionGranted()){
                     ShizukuShell.Result r=shell.exec("am force-stop "+safePackage(pkg),900);
-                    ok=r.ok(); if(r.code()==-2)timeouts++;
-                } else {
+                    ok=r.ok();if(r.code()==-2)timeouts++;
+                }else{
                     try{am.killBackgroundProcesses(pkg);ok=true;}catch(Throwable ignored){}
                 }
                 if(ok)closed++;
             }
             SystemClock.sleep(550);
-            long after=availableMemory();
-            long delta=after-before;
+            long after=availableMemory();long delta=after-before;
             String msg="RAM disponible: "+FileAdapter.formatBytes(before)+" → "+FileAdapter.formatBytes(after)+
                     ". Apps tratadas: "+attempted+", cerradas: "+closed+(timeouts>0?", timeout: "+timeouts:"")+". "+
                     (delta>0?"Cambio medido: +"+FileAdapter.formatBytes(delta):"Android no mostró una liberación neta medible; no se inventa un porcentaje.");
@@ -57,59 +58,43 @@ public final class SystemOptimizer {
         });
     }
 
-    public void applyProfile(Profile profile, Callback cb) {
+    public void applyProfile(Profile profile,Callback cb){
         int gen=profileGeneration.incrementAndGet();
-        profileExecutor.execute(() -> {
+        profileExecutor.execute(()->{
             if(gen!=profileGeneration.get())return;
             if(!shell.permissionGranted()){cb.onDone(false,"Shizuku necesita permiso para aplicar el perfil real.");return;}
-            ArrayList<String> commands=new ArrayList<>();
-            switch(profile){
-                case CLASS, BALANCED -> {
-                    commands.add("settings put system peak_refresh_rate 120.0");
-                    commands.add("settings put system min_refresh_rate 60.0");
-                    commands.add("settings put global low_power 0");
-                    commands.add("cmd netpolicy set restrict-background false");
-                }
-                case GAMING, PERFORMANCE -> {
-                    commands.add("settings put system peak_refresh_rate 120.0");
-                    commands.add("settings put system min_refresh_rate 120.0");
-                    commands.add("settings put global low_power 0");
-                    commands.add("cmd netpolicy set restrict-background false");
-                }
-                case COOL -> {
-                    commands.add("settings put system peak_refresh_rate 60.0");
-                    commands.add("settings put system min_refresh_rate 60.0");
-                    commands.add("settings put global low_power 0");
-                    commands.add("cmd netpolicy set restrict-background false");
-                }
-                case BATTERY -> {
-                    commands.add("settings put system peak_refresh_rate 60.0");
-                    commands.add("settings put system min_refresh_rate 60.0");
-                    commands.add("settings put global low_power 1");
-                }
-                case DATA -> {
-                    commands.add("cmd netpolicy set restrict-background true");
-                    commands.add("settings put system peak_refresh_rate 120.0");
-                    commands.add("settings put system min_refresh_rate 60.0");
-                }
-            }
+            shell.warmUp(1800);
+            List<String> commands=commands(profile);
             int ok=0;
             for(String command:commands){
                 if(gen!=profileGeneration.get())return;
-                ShizukuShell.Result r=shell.exec(command,1400);
+                ShizukuShell.Result r=shell.exec(command,1600);
                 if(r.ok())ok++;
             }
             if(gen!=profileGeneration.get())return;
-            cb.onDone(ok==commands.size(),"Perfil "+label(profile)+" aplicado en segundo plano: "+ok+"/"+commands.size()+" ajustes"+(ok==commands.size()?".":". Algunos ajustes fueron rechazados por Android."));
+            boolean success=ok==commands.size();
+            if(success)prefs.edit().putString("last_profile",profile.name()).apply();
+            cb.onDone(success,"Perfil "+label(profile)+" aplicado en segundo plano: "+ok+"/"+commands.size()+" ajustes"+(success?".":". Algunos ajustes fueron rechazados por Android."));
         });
+    }
+
+    public static List<String> commands(Profile profile){
+        ArrayList<String> out=new ArrayList<>();
+        switch(profile){
+            case CLASS,BALANCED->{out.add("settings put system peak_refresh_rate 120.0");out.add("settings put system min_refresh_rate 60.0");out.add("settings put global low_power 0");out.add("cmd netpolicy set restrict-background false");}
+            case GAMING,PERFORMANCE->{out.add("settings put system peak_refresh_rate 120.0");out.add("settings put system min_refresh_rate 120.0");out.add("settings put global low_power 0");out.add("cmd netpolicy set restrict-background false");}
+            case COOL->{out.add("settings put system peak_refresh_rate 60.0");out.add("settings put system min_refresh_rate 60.0");out.add("settings put global low_power 0");out.add("cmd netpolicy set restrict-background false");}
+            case BATTERY->{out.add("settings put system peak_refresh_rate 60.0");out.add("settings put system min_refresh_rate 60.0");out.add("settings put global low_power 1");}
+            case DATA->{out.add("cmd netpolicy set restrict-background true");out.add("settings put system peak_refresh_rate 120.0");out.add("settings put system min_refresh_rate 60.0");}
+        }
+        return out;
     }
 
     public void cancelRam(){ramGeneration.incrementAndGet();}
     public void cancelProfiles(){profileGeneration.incrementAndGet();}
 
     private Set<String> runningUserPackages(){
-        LinkedHashSet<String> out=new LinkedHashSet<>();
-        ActivityManager am=(ActivityManager)app.getSystemService(Context.ACTIVITY_SERVICE);
+        LinkedHashSet<String> out=new LinkedHashSet<>();ActivityManager am=(ActivityManager)app.getSystemService(Context.ACTIVITY_SERVICE);
         try{
             List<ActivityManager.RunningAppProcessInfo> ps=am.getRunningAppProcesses();
             if(ps!=null)for(ActivityManager.RunningAppProcessInfo p:ps){
@@ -117,11 +102,10 @@ public final class SystemOptimizer {
                 if(p.pkgList!=null)for(String pkg:p.pkgList)addCandidate(out,pkg);
             }
         }catch(Throwable ignored){}
-        if(out.size()<3 && shell.permissionGranted()){
+        if(out.size()<3&&shell.permissionGranted()){
             ShizukuShell.Result r=shell.exec("ps -A -o NAME",1500);
             if(r.ok()&&r.output()!=null)for(String line:r.output().split("\\R")){
-                String pkg=line.trim();int colon=pkg.indexOf(':');if(colon>0)pkg=pkg.substring(0,colon);
-                if(pkg.contains("."))addCandidate(out,pkg);
+                String pkg=line.trim();int colon=pkg.indexOf(':');if(colon>0)pkg=pkg.substring(0,colon);if(pkg.contains("."))addCandidate(out,pkg);
             }
         }
         return out;
