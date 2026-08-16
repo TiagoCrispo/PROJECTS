@@ -38,6 +38,9 @@ jobs:
           cat wa-vault-build-v0523/v0523.patch.gz.b64.part* | base64 -d | gzip -d > /tmp/v0523.patch
           cd wa-vault-v0523-project
           patch -p1 < /tmp/v0523.patch
+          cp ../wa-vault-build-v0523/extras/V0523_NOTES.md ./V0523_NOTES.md
+          cp ../wa-vault-build-v0523/extras/MetadataPrivacy.java ./app/src/main/java/com/fer/wavault/MetadataPrivacy.java
+          cp ../wa-vault-build-v0523/extras/v0523_regression_test.py ./tools/v0523_regression_test.py
           rm -rf app/build build .gradle
           python3 tools/v0523_regression_test.py
           grep -q 'versionCode = 73' app/build.gradle.kts
