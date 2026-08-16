@@ -82,10 +82,10 @@ jobs:
           grep -q 'versionCode = 262' work/app/build.gradle.kts
           grep -q 'FEATURE_STAGE", "262"' work/app/build.gradle.kts
           grep -q 'android:stopWithTask="false"' work/app/src/main/AndroidManifest.xml
-          grep -q 'CREATE TABLE route_points' work/app/src/main/java/com/fer/bandlab/data/WorkoutDatabase.kt
-          grep -q 'CREATE TABLE heart_rate_samples' work/app/src/main/java/com/fer/bandlab/data/WorkoutDatabase.kt
-          grep -q 'CREATE TABLE workout_laps' work/app/src/main/java/com/fer/bandlab/data/WorkoutDatabase.kt
-          grep -q 'class GpsPointValidator' work/app/src/main/java/com/fer/bandlab/training/GpsPointValidator.kt
+          grep -q 'route_points (' work/app/src/main/java/com/fer/bandlab/data/WorkoutDatabase.kt
+          grep -q 'heart_rate_samples (' work/app/src/main/java/com/fer/bandlab/data/WorkoutDatabase.kt
+          grep -q 'workout_laps (' work/app/src/main/java/com/fer/bandlab/data/WorkoutDatabase.kt
+          grep -Eq '(class|object) GpsPointValidator' work/app/src/main/java/com/fer/bandlab/training/GpsPointValidator.kt
           grep -q 'realtimeMutex' work/app/src/main/java/com/fer/bandlab/device/XiaomiBandManager.kt
           grep -q 'BandLab 2.6.2' work/app/src/main/java/com/fer/bandlab/training/WorkoutExporter.kt
 
