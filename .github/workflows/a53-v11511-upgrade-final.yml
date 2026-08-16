@@ -74,7 +74,7 @@ jobs:
             test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1"
             adb shell input keyevent 82 || true
             adb logcat -c
-            adb shell am start -S -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n com.fer.a53performance/.MainActivity | tee launch.txt
+            adb shell am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n com.fer.a53performance/.MainActivity | tee launch.txt
             grep -q 'Status: ok' launch.txt
             grep -q 'Activity: com.fer.a53performance/.MainActivity' launch.txt
             i=0; PID=''; while [ $i -lt 15 ]; do PID=$(adb shell pidof com.fer.a53performance | tr -d '\r'); if [ -n "$PID" ]; then break; fi; sleep 1; i=$((i+1)); done
