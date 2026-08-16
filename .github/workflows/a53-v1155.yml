@@ -1,0 +1,82 @@
+name: A53 Performance v1.15.5
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'A53Performance/BUILD_READY_1155'
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Android SDK 35
+        run: yes | sdkmanager "platforms;android-35" "build-tools;35.0.0" >/dev/null
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Build release and debug
+        working-directory: A53Performance
+        run: gradle --no-daemon clean :app:assembleRelease :app:assembleDebug
+      - name: Validate release APK
+        run: |
+          APK=A53Performance/app/build/outputs/apk/release/app-release-unsigned.apk
+          test -f "$APK"
+          unzip -tq "$APK"
+          $ANDROID_HOME/build-tools/35.0.0/aapt dump badging "$APK" | grep "package: name='com.fer.a53performance' versionCode='27' versionName='1.15.5'"
+          mkdir -p out smoke
+          $ANDROID_HOME/build-tools/35.0.0/zipalign -f -p 4 "$APK" out/A53Performance_v1.15.5_STABILITY_CORE_UNSIGNED.apk
+          $ANDROID_HOME/build-tools/35.0.0/zipalign -c -v 4 out/A53Performance_v1.15.5_STABILITY_CORE_UNSIGNED.apk
+          cp A53Performance/app/build/outputs/apk/debug/app-debug.apk smoke/A53Performance_v1.15.5_debug.apk
+          sha256sum out/A53Performance_v1.15.5_STABILITY_CORE_UNSIGNED.apk > out/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: A53Performance-v1.15.5-unsigned
+          path: out/
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: A53Performance-v1.15.5-smoke
+          path: smoke/
+          if-no-files-found: error
+          retention-days: 1
+  emulator-smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: A53Performance-v1.15.5-smoke
+          path: smoke
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS:="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            adb install -r smoke/A53Performance_v1.15.5_debug.apk
+            adb shell pm grant com.fer.a53performance android.permission.READ_MEDIA_IMAGES || true
+            adb shell pm grant com.fer.a53performance android.permission.READ_MEDIA_VIDEO || true
+            adb shell pm grant com.fer.a53performance android.permission.READ_MEDIA_AUDIO || true
+            adb shell pm grant com.fer.a53performance android.permission.POST_NOTIFICATIONS || true
+            adb shell appops set com.fer.a53performance MANAGE_EXTERNAL_STORAGE allow || true
+            adb logcat -c
+            adb shell am start -W -n com.fer.a53performance/.MainActivity
+            sleep 5
+            test -n "$(adb shell pidof com.fer.a53performance | tr -d '\r')"
+            if adb logcat -d -t 600 | grep -A12 'FATAL EXCEPTION' | grep -q 'com.fer.a53performance'; then exit 1; fi
