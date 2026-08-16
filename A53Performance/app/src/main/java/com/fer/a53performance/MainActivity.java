@@ -153,6 +153,7 @@ public final class MainActivity extends Activity {
     private android.widget.AdapterView.OnItemSelectedListener simpleSelection(Runnable r){return new android.widget.AdapterView.OnItemSelectedListener(){public void onItemSelected(android.widget.AdapterView<?>p,View v,int pos,long id){r.run();}public void onNothingSelected(android.widget.AdapterView<?>p){}};}
 
     private void startScan(){
+        if(fileAdapter!=null)fileAdapter.clearSelection();
         if(scanRunning){storage.cancelScan();scanRunning=false;}analyzer.cancel();analysisRunning=false;duplicateReady=false;similarReady=false;duplicateResult=null;duplicateKeys=Collections.emptySet();similarKeys=Collections.emptySet();duplicateGroups=0;similarGroups=0;
         scanRunning=true;if(scanButton!=null){scanButton.setEnabled(false);scanButton.setText("Escaneando…");scanProgress.setVisibility(View.VISIBLE);scanStatus.setText("Leyendo metadatos en segundo plano…");}
         storage.scanAsync((gen,items,error)->runOnUiThread(()->{
