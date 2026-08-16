@@ -1,0 +1,205 @@
+name: BandLab 2.6.1 Stability Polish Verification
+
+on:
+  push:
+    branches: [ bandlab-build-v261 ]
+  workflow_dispatch:
+
+concurrency:
+  group: bandlab-v261-final
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    env:
+      SOURCE_SHA256: 7d696773dea791c0637db14082e71f9e537799e84c46221f6c90b3e4d9455f5a
+      V22_PATCH_SHA256: a18aba0039255ea2b19ae5cf5c4de286161c82dcd85f2c0b1867e6dd982e4b5b
+      V23_PATCH_SHA256: 5820a5a20a39aab3d80ebe11b3342102a06cb12f816931d7f29b192c52009fa8
+      V24_PATCH_SHA256: e7684fcb4dbdc7a97bfd2a66a6fdd6385353824939334a028af94675a4424cbc
+      V25_PATCH_SHA256: a8c666c116711500457690f088b61a18845bce3c0fa294b7e8d268da1fb9c2cb
+      V25_XZ_SHA256: 6f0ef1a6a494206a9ed4489e344310f7d54f1d35c6811238c23d1cfbc1c933af
+      V26_PATCH_SHA256: 3a8f29c3740f2f124960851c0efdd9281a214ff547ccffb190b2add889d8deeb
+      V26_XZ_SHA256: 6e453f7869e8d018553755491db81085e8d41173380b6f2c0f373ab90a895251
+      V261_PATCH_SHA256: ca8bb5e36a985279c6c00c56626a79feceb05c12a7203172c76b16fac01467dd
+      V261_XZ_SHA256: ec65fbd05c95656fa7d12aee9a7815b4f599810f8ceff6cf469902770b8a0aef
+      KODO_COMMIT: 8152ffdd3f384e0563a39db7bf77a8b70d3a6e84
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct verified BandLab 2.5 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat src_chunks/00.b64 src_chunks/01a.b64 src_chunks/01b.b64 src_chunks/02.b64 src_chunks/03.b64 src_chunks/04.b64 src_chunks/05.b64 src_chunks/06.b64 | base64 -d > /tmp/base.tar.xz
+          echo "$SOURCE_SHA256  /tmp/base.tar.xz" | sha256sum -c -
+          mkdir work && tar -xJf /tmp/base.tar.xz -C work
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('work/app/build.gradle.kts')
+          p.write_text(p.read_text().replace('builtins { named("java") { option("lite") } }','builtins { maybeCreate("java").apply { option("lite") } }'))
+          p=Path('work/app/src/main/java/com/fer/bandlab/ui/BandLabApp.kt')
+          s=p.read_text()
+          if 'import androidx.compose.foundation.layout.RowScope' not in s:
+              s=s.replace('import androidx.compose.foundation.layout.WindowInsets\n','import androidx.compose.foundation.layout.WindowInsets\nimport androidx.compose.foundation.layout.RowScope\n')
+          s=s.replace('private fun NavItem(current: AppTab, target: AppTab, icon: ImageVector, onClick: (AppTab) -> Unit) {','private fun RowScope.NavItem(current: AppTab, target: AppTab, icon: ImageVector, onClick: (AppTab) -> Unit) {')
+          p.write_text(s)
+          p=Path('work/app/src/main/java/com/fer/bandlab/ui/screens/HealthScreen.kt')
+          p.write_text(p.read_text().replace('import androidx.compose.material.icons.rounded.Walk\n',''))
+          PY
+          python3 ci/patch_v21.py work
+          cat ci/patch_v22_0*.txt > /tmp/patch_v22.py
+          echo "$V22_PATCH_SHA256  /tmp/patch_v22.py" | sha256sum -c -
+          python3 /tmp/patch_v22.py work
+          cat ci/v23_patch_00.b64 ci/v23_patch_01.b64 ci/v23_patch_02.b64 ci/v23_patch_03.b64 ci/v23_patch_04.b64 ci/v23_patch_05.b64 ci/v23_patch_06.b64 | base64 -d > /tmp/v23.patch
+          echo "$V23_PATCH_SHA256  /tmp/v23.patch" | sha256sum -c -
+          patch -d work -p4 --batch < /tmp/v23.patch
+          printf 'versionName=2.3.0\nversionCode=230\nstage=DynamicHomeRecovery\n' > work/bandlab-version.properties
+          cat ci/patch_v24_0*.txt > /tmp/v24.patch
+          echo "$V24_PATCH_SHA256  /tmp/v24.patch" | sha256sum -c -
+          patch -d work -p1 --batch < /tmp/v24.patch
+          cat ci/v25_patch_xz_00.b64 ci/v25_patch_xz_01.b64 ci/v25_patch_xz_02.b64 ci/v25_patch_xz_03.b64 | base64 -d > /tmp/v25.patch.xz
+          echo "$V25_XZ_SHA256  /tmp/v25.patch.xz" | sha256sum -c -
+          xz -dc /tmp/v25.patch.xz > /tmp/v25.patch
+          echo "$V25_PATCH_SHA256  /tmp/v25.patch" | sha256sum -c -
+          patch -d work -p4 --batch < /tmp/v25.patch
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools" "emulator" "system-images;android-30;default;x86_64"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Import pinned Xiaomi protocol
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none https://github.com/kidneyweakx/Kodo.git /tmp/Kodo
+          git -C /tmp/Kodo checkout "$KODO_COMMIT"
+          test "$(git -C /tmp/Kodo rev-parse HEAD)" = "$KODO_COMMIT"
+          X=/tmp/Kodo/android-port/src/main/java/com/kidneyweakx/miband9active/xiaomi
+          D=work/app/src/main/java/com/kidneyweakx/miband9active/xiaomi
+          mkdir -p "$D" "$D/services" work/app/src/main/proto work/third_party/Kodo
+          cp -R "$X/auth" "$X/protocol" "$X/activity" "$D/"
+          cp "$X/services/SystemCommands.kt" "$X/services/MiBand9DataUploader.kt" "$D/services/"
+          cp /tmp/Kodo/android-port/src/main/proto/xiaomi.proto work/app/src/main/proto/
+          cp /tmp/Kodo/LICENSE /tmp/Kodo/NOTICE.md work/third_party/Kodo/
+          echo "$KODO_COMMIT" > work/third_party/Kodo/COMMIT.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('work/app/src/main/java/com/kidneyweakx/miband9active/xiaomi/protocol/MiBand9BleDriver.kt')
+          s=p.read_text()
+          old='''            is XiaomiSppPacketV2.Data -> {\n                sendAck(packet.sequenceNumber)\n                val plain = packet.decryptedPayload(authSession)\n                val cmd = runCatching { XiaomiProto.Command.parseFrom(plain) }.getOrNull()\n'''
+          new='''            is XiaomiSppPacketV2.Data -> {\n                sendAck(packet.sequenceNumber)\n                val plain = packet.decryptedPayload(authSession)\n                if (packet.channel == XiaomiChannel.ACTIVITY) {\n                    _activityChunks.tryEmit(plain)\n                    return\n                }\n                val cmd = runCatching { XiaomiProto.Command.parseFrom(plain) }.getOrNull()\n'''
+          if old not in s: raise SystemExit('activity patch anchor missing')
+          s=s.replace(old,new,1)
+          s=s.replace('''        if (channel == XiaomiChannel.ACTIVITY) {\n            _activityChunks.tryEmit(cmd.toByteArray())\n            return\n        }\n''','')
+          p.write_text(s)
+          PY
+          printf '%s\n' 'BandLab patch: raw ACTIVITY chunks bypass protobuf parsing.' > work/third_party/Kodo/BANDLAB_PATCHES.txt
+          ! find work -type f \( -iname '*.p12' -o -iname '*.jks' -o -iname '*.pem' -o -iname '*.key' \) | grep -q .
+
+      - name: Apply verified 2.6 patch and build upgrade base
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat ci/v26_final_xz_00.b64 ci/v26_final_xz_01.b64 ci/v26_final_xz_02.b64 ci/v26_final_xz_03.b64 ci/v26_final_xz_04.b64 ci/v26_final_xz_05.b64 | base64 -d > /tmp/v26.patch.xz
+          echo "$V26_XZ_SHA256  /tmp/v26.patch.xz" | sha256sum -c -
+          xz -dc /tmp/v26.patch.xz > /tmp/v26.patch
+          echo "$V26_PATCH_SHA256  /tmp/v26.patch" | sha256sum -c -
+          patch -d work -p1 --batch < /tmp/v26.patch
+          (cd work && gradle --no-daemon :app:assembleDebug)
+          cp work/app/build/outputs/apk/debug/app-debug.apk /tmp/bandlab-v260-debug.apk
+
+      - name: Apply verified 2.6.1 patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat ci/v261p3_00.b64 ci/v261p3_01.b64 ci/v261p3_02.b64 ci/v261p3_03.b64 ci/v261p3_04.b64 ci/v261p3_05.b64 | base64 -d > /tmp/v261.patch.xz
+          echo "$V261_XZ_SHA256  /tmp/v261.patch.xz" | sha256sum -c -
+          xz -dc /tmp/v261.patch.xz > /tmp/v261.patch
+          echo "$V261_PATCH_SHA256  /tmp/v261.patch" | sha256sum -c -
+          patch -d work -p1 --batch < /tmp/v261.patch
+          grep -q 'versionName = "2.6.1"' work/app/build.gradle.kts
+          grep -q 'versionCode = 261' work/app/build.gradle.kts
+          grep -q 'startup_261_attempted' work/app/src/main/java/com/fer/bandlab/MainActivity.kt
+          grep -q 'AtomicFile' work/app/src/main/java/com/fer/bandlab/training/WorkoutRecoveryStore.kt
+          grep -q 'creator="BandLab 2.6.1"' work/app/src/main/java/com/fer/bandlab/training/WorkoutExporter.kt
+
+      - name: Gate 2.6.1 - tests and builds
+        working-directory: work
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease
+
+      - name: Validate APK metadata and permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          D=work/app/build/outputs/apk/debug/app-debug.apk
+          R=work/app/build/outputs/apk/release/app-release-unsigned.apk
+          test -s "$D"; test -s "$R"; unzip -t "$D" >/dev/null; unzip -t "$R" >/dev/null
+          mkdir -p verification
+          "$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging "$D" | tee verification/badging-v261.txt
+          grep -q "package: name='com.fer.bandlab'" verification/badging-v261.txt
+          grep -q "versionCode='261'" verification/badging-v261.txt
+          grep -q "versionName='2.6.1'" verification/badging-v261.txt
+          "$ANDROID_HOME/build-tools/36.0.0/aapt2" dump permissions "$D" | tee verification/permissions-v261.txt
+          for p in ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION ACTIVITY_RECOGNITION BLUETOOTH_SCAN BLUETOOTH_CONNECT POST_NOTIFICATIONS FOREGROUND_SERVICE FOREGROUND_SERVICE_LOCATION FOREGROUND_SERVICE_HEALTH VIBRATE; do grep -q "android.permission.$p" verification/permissions-v261.txt; done
+
+      - name: Upgrade smoke test 2.6.0 to 2.6.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/android-avd"; mkdir -p "$ANDROID_AVD_HOME" verification
+          echo no | avdmanager create avd -n bandlab_ci -k "system-images;android-30;default;x86_64" --device pixel_4 --force
+          nohup "$ANDROID_HOME/emulator/emulator" -avd bandlab_ci -no-window -noaudio -no-boot-anim -gpu swiftshader_indirect -accel off -no-snapshot -no-metrics -memory 2048 -cores 2 >/tmp/emulator.log 2>&1 &
+          timeout 180s adb wait-for-device
+          for i in $(seq 1 180); do [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] && break; sleep 2; done
+          test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = 1
+          V261=work/app/build/outputs/apk/debug/app-debug.apk
+          timeout 240s adb install /tmp/bandlab-v260-debug.apk
+          timeout 60s adb shell am start -n com.fer.bandlab/.MainActivity >/dev/null
+          sleep 8; test -n "$(adb shell pidof com.fer.bandlab | tr -d '\r')"
+          timeout 240s adb install -r "$V261"
+          adb shell pm grant com.fer.bandlab android.permission.ACCESS_FINE_LOCATION || true
+          adb shell pm grant com.fer.bandlab android.permission.ACCESS_COARSE_LOCATION || true
+          adb shell pm grant com.fer.bandlab android.permission.ACTIVITY_RECOGNITION || true
+          adb shell am force-stop com.fer.bandlab; adb logcat -c
+          timeout 60s adb shell am start -n com.fer.bandlab/.MainActivity | tee verification/v261-start.txt
+          sleep 10; test -n "$(adb shell pidof com.fer.bandlab | tr -d '\r')"
+          adb shell run-as com.fer.bandlab ls databases > verification/v261-databases.txt || true
+          grep -q 'bandlab_training.db' verification/v261-databases.txt
+          adb shell dumpsys package com.fer.bandlab | grep -E 'versionCode|versionName|WorkoutService' > verification/v261-package.txt
+          grep -q 'versionCode=261' verification/v261-package.txt; grep -q 'versionName=2.6.1' verification/v261-package.txt
+          adb logcat -d -t 2500 > verification/v261-logcat.txt
+          ! grep -E 'FATAL EXCEPTION|Process: com\.fer\.bandlab.*has died|AndroidRuntime.*com\.fer\.bandlab|SQLiteException|SQLiteDatabaseCorruptException' verification/v261-logcat.txt
+          echo '2.6.0 -> 2.6.1 UPDATE + SQLITE + STARTUP PASS' > verification/v261-PASS.txt
+
+      - name: Package unsigned release and signing tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/signing-tools/lib dist/verification
+          cp work/app/build/outputs/apk/debug/app-debug.apk dist/BandLab9Active_v2.6.1_DEBUG_VERIFIED.apk
+          cp work/app/build/outputs/apk/release/app-release-unsigned.apk dist/BandLab9Active_v2.6.1_RELEASE_UNSIGNED.apk
+          cp -R verification/. dist/verification/; cp /tmp/emulator.log dist/emulator.log || true
+          cp "$ANDROID_HOME/build-tools/36.0.0/apksigner" "$ANDROID_HOME/build-tools/36.0.0/zipalign" "$ANDROID_HOME/build-tools/36.0.0/aapt2" dist/signing-tools/
+          cp "$ANDROID_HOME/build-tools/36.0.0/lib/apksigner.jar" dist/signing-tools/lib/
+          if [ -d "$ANDROID_HOME/build-tools/36.0.0/lib64" ]; then cp -R "$ANDROID_HOME/build-tools/36.0.0/lib64" dist/signing-tools/; fi
+          chmod +x dist/signing-tools/* || true
+          (cd work && zip -qr ../dist/BandLab9Active_v2.6.1_FINAL_SOURCE.zip . -x 'app/build/*' '.gradle/*' 'build/*')
+          sha256sum dist/*.apk dist/*.zip > dist/SHA256SUMS_UNSIGNED.txt
+          printf '%s\n' 'BandLab 2.6.1: tests, builds, metadata, permissions, 2.6.0->2.6.1 update, SQLite open and fatal-crash scan passed.' 'Physical Xiaomi BLE/HR and outdoor GNSS require real hardware validation.' > dist/VERIFICATION_REPORT.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BandLab-v2.6.1-stability-unsigned
+          path: dist/
+          if-no-files-found: error
