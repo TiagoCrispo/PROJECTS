@@ -26,11 +26,7 @@ object ImageStore {
     fun createCameraUri(context: Context): Pair<Uri, File> {
         val cameraDir = File(context.cacheDir, "camera").apply { mkdirs() }
         val file = File(cameraDir, "capture_${System.currentTimeMillis()}.jpg")
-        val uri = FileProvider.getUriForFile(
-            context,
-            "${context.packageName}.fileprovider",
-            file,
-        )
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
         return uri to file
     }
 
@@ -54,11 +50,9 @@ object ImageStore {
         return destination
     }
 
-    fun loadPreview(path: String, maxDimension: Int = 1600): Bitmap =
-        decodeOriented(File(path), maxDimension)
+    fun loadPreview(path: String, maxDimension: Int = 1600): Bitmap = decodeOriented(File(path), maxDimension)
 
-    fun loadForProcessing(path: String, maxDimension: Int = 4096): Bitmap =
-        decodeOriented(File(path), maxDimension)
+    fun loadForProcessing(path: String, maxDimension: Int = 4096): Bitmap = decodeOriented(File(path), maxDimension)
 
     fun saveResult(originalPath: String, bitmap: Bitmap): File {
         val original = File(originalPath)
@@ -80,15 +74,11 @@ object ImageStore {
             val values = ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
                 put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-                put(
-                    MediaStore.Images.Media.RELATIVE_PATH,
-                    Environment.DIRECTORY_PICTURES + "/FurnitureShot AI",
-                )
+                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/FurnitureShot AI")
                 put(MediaStore.Images.Media.IS_PENDING, 1)
             }
             val resolver = context.contentResolver
-            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-                ?: return null
+            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return null
             try {
                 resolver.openOutputStream(uri).use { output ->
                     requireNotNull(output)
@@ -111,13 +101,17 @@ object ImageStore {
                 destination.outputStream().use { output -> input.copyTo(output, 128 * 1024) }
             }
             var scannedUri: Uri? = null
-            MediaScannerConnection.scanFile(
-                context,
-                arrayOf(destination.absolutePath),
-                arrayOf("image/jpeg"),
-            ) { _, uri -> scannedUri = uri }
+            MediaScannerConnection.scanFile(context, arrayOf(destination.absolutePath), arrayOf("image/jpeg")) { _, uri ->
+                scannedUri = uri
+            }
             scannedUri ?: Uri.fromFile(destination)
         }
+    }
+
+    fun shareUriForResult(context: Context, resultPath: String): Uri {
+        val resultFile = File(resultPath)
+        require(resultFile.exists()) { "No existe el resultado a compartir." }
+        return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", resultFile)
     }
 
     fun appendHistory(context: Context, originalPath: String, resultPath: String): HistoryItem {
@@ -147,9 +141,7 @@ object ImageStore {
                         resultPath = obj.getString("resultPath"),
                         createdAt = obj.getLong("createdAt"),
                     )
-                    if (File(item.originalPath).exists() && File(item.resultPath).exists()) {
-                        add(item)
-                    }
+                    if (File(item.originalPath).exists() && File(item.resultPath).exists()) add(item)
                 }
             }
         }.getOrDefault(emptyList())
@@ -180,9 +172,7 @@ object ImageStore {
         require(bounds.outWidth > 0 && bounds.outHeight > 0) { "Formato de imagen no compatible." }
 
         var sample = 1
-        while (maxOf(bounds.outWidth / sample, bounds.outHeight / sample) > maxDimension * 2) {
-            sample *= 2
-        }
+        while (maxOf(bounds.outWidth / sample, bounds.outHeight / sample) > maxDimension * 2) sample *= 2
         val options = BitmapFactory.Options().apply {
             inSampleSize = sample
             inPreferredConfig = Bitmap.Config.ARGB_8888
@@ -200,15 +190,10 @@ object ImageStore {
             )
             if (scaled !== decoded) decoded.recycle()
             scaled
-        } else {
-            decoded
-        }
+        } else decoded
 
         val orientation = runCatching {
-            ExifInterface(file).getAttributeInt(
-                ExifInterface.TAG_ORIENTATION,
-                ExifInterface.ORIENTATION_NORMAL,
-            )
+            ExifInterface(file).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
         }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
 
         val matrix = Matrix()
