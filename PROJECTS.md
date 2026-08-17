@@ -119,6 +119,37 @@ Don't rename it every time device support expands.
 
 ---
 
+## 🏃 BandLab
+
+**Repository name:** `bandlab`  
+**Area:** Android / fitness / Xiaomi Smart Band 9 Active / BLE  
+**Continuation:** [`continuity/bandlab.md`](./continuity/bandlab.md)
+
+A local-first Android training and health utility built around a Samsung Galaxy A53 5G and a Xiaomi Smart Band 9 Active (M2435B1).
+
+The project combines phone-side workout tracking with direct Band integration while keeping sensor results honest: when the Band has no real sample, the app should not invent one.
+
+Current areas include:
+
+- direct Xiaomi BLE connection and encrypted V2 authentication
+- automatic reconnect and secure auth provisioning
+- direct activity, sleep, battery and live heart-rate integration
+- walking, running, cycling and jump-rope workout tracking
+- phone GPS/GNSS, auto-pause, splits, laps and return-to-start guidance
+- local SQLite workout history and personal records
+- offline/local route viewing
+- GPX / TCX / CSV export
+- Health Connect fallback/merge
+- local diagnostics and privacy-first behavior
+
+<!--
+APPS BANDLAB V2 and BandLab9Active are aliases for this project.
+Never put Xiaomi auth keys, APK signing keys, keystores or secure blobs in the public repository.
+The runtime baseline may be newer than the latest preserved source archive, so always read continuity/bandlab.md before rebuilding.
+-->
+
+---
+
 ## 🗃️ WA Vault
 
 **Repository name:** `wa-vault`  
@@ -234,6 +265,12 @@ A53 Performance
 - A53Performance
 - app Galaxy
 
+BandLab
+- APPS BANDLAB V2
+- BandLab V2
+- BandLab9Active
+- Xiaomi Smart Band 9 Active app
+
 WA Vault
 - app para recuperar mensajes
 - WSP V2
@@ -246,5 +283,6 @@ Canonical repository slugs
 - forge3d-studio
 - proaim
 - a53-performance
+- bandlab
 - wa-vault
 -->
