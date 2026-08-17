@@ -21,23 +21,35 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Reconstruct verified v0.5.28 source
+      - name: Restore exact verified v0.5.27 source
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          cat wa-vault-build-v0528/b64/part00 \
-              wa-vault-build-v0528/b64/part01 \
-              wa-vault-build-v0528/b64/part02 \
-              wa-vault-build-v0528/b64/part03 \
-              wa-vault-build-v0528/b64/part04 \
-              wa-vault-build-v0528/b64/part05 \
-              wa-vault-build-v0528/b64/part06 \
-            | tr -d '\r\n\t ' | base64 -d > /tmp/WA-Vault-v0.5.28-source.zip
-          echo '813f1cb948edd414dd5ac53960f7f818e67bd3f6abea9bbbfaabebc1e47ff0f8  /tmp/WA-Vault-v0.5.28-source.zip' | sha256sum -c -
           mkdir wa-vault-v0528-project
-          unzip -q /tmp/WA-Vault-v0.5.28-source.zip -d wa-vault-v0528-project
-          grep -q 'versionCode = 78' wa-vault-v0528-project/app/build.gradle.kts
-          grep -q 'versionName = "0.5.28"' wa-vault-v0528-project/app/build.gradle.kts
-          python3 wa-vault-v0528-project/tools/v0528_regression_test.py
+          gh run download 31929789590 -n WA-Vault-v0.5.27-source -D wa-vault-v0528-project
+          grep -q 'versionCode = 77' wa-vault-v0528-project/app/build.gradle.kts
+          grep -q 'versionName = "0.5.27"' wa-vault-v0528-project/app/build.gradle.kts
+
+      - name: Apply verified v0.5.28 hotfix
+        run: |
+          set -euo pipefail
+          tr -d '\r\n\t ' < wa-vault-build-v0528/v0528.patch.gz.b64 | base64 -d > /tmp/v0528.patch.gz
+          echo '9ef7bfc80e3aca64d474157f5d1d4a8e26a52cf5c6ba50e2a7cf34923b206dd5  /tmp/v0528.patch.gz' | sha256sum -c -
+          gzip -dc /tmp/v0528.patch.gz > /tmp/v0528.patch
+          echo '77f2d7ae850209a795f5b0b0090efca1ae1d64eb5cf176fb28daec4a8a668219  /tmp/v0528.patch' | sha256sum -c -
+          cd wa-vault-v0528-project
+          patch -p1 --batch < /tmp/v0528.patch
+          find . -name '*.orig' -delete
+          if find . -name '*.rej' -print -quit | grep -q .; then
+            find . -name '*.rej' -print
+            exit 1
+          fi
+          grep -q 'versionCode = 78' app/build.gradle.kts
+          grep -q 'versionName = "0.5.28"' app/build.gradle.kts
+          python3 tools/v0528_regression_test.py
+          zip -qr /tmp/WA-Vault-v0.5.28-source.zip . -x './build/*' './app/build/*' './.gradle/*'
+          sha256sum /tmp/WA-Vault-v0.5.28-source.zip > /tmp/SOURCE_SHA256.txt
 
       - uses: android-actions/setup-android@v3
       - name: Install Android SDK 35
@@ -84,6 +96,7 @@ jobs:
           cp wa-vault-v0528-project/TEST_MATRIX.md wa-vault-v0528-output/
           cp wa-vault-v0528-project/tools/v0528_regression_test.py wa-vault-v0528-output/
           cp /tmp/WA-Vault-v0.5.28-source.zip wa-vault-v0528-output/
+          cp /tmp/SOURCE_SHA256.txt wa-vault-v0528-output/
 
       - uses: actions/upload-artifact@v4
         with:
@@ -94,5 +107,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: WA-Vault-v0.5.28-source
-          path: /tmp/WA-Vault-v0.5.28-source.zip
+          path: |
+            /tmp/WA-Vault-v0.5.28-source.zip
+            /tmp/SOURCE_SHA256.txt
           retention-days: 30
