@@ -4,16 +4,21 @@ This is the index I use to keep the names and purpose of my projects consistent.
 
 Some of them started with very temporary names while I was experimenting. I keep the old names in comments at the bottom of this file so I can still recognize older folders, notes and conversations without bringing that mess into the public-facing names.
 
+> **Before updating an active project:** read its latest handoff in [`continuity/`](./continuity/README.md). That folder records the current baseline, behavior that must not regress, validation limits and the exact next continuation point.
+
 <!--
 Maintenance note:
 This file is intentionally more practical than the profile README.
 The README is for people visiting the profile; this one is also for me when I come back to a project after a while.
+
+Do not start a project update from chat memory alone. Resolve the project here, read its continuity file, then inspect the actual latest source/package.
 -->
 
 ## 🧊 Forge3D Studio
 
 **Repository name:** `forge3d-studio`  
-**Area:** 3D tools / Roblox / asset pipelines
+**Area:** 3D tools / Roblox / asset pipelines  
+**Continuation:** [`continuity/forge3d-studio.md`](./continuity/forge3d-studio.md)
 
 A desktop toolkit for preparing 3D content for Roblox-oriented workflows.
 
@@ -39,7 +44,8 @@ The broader goal is a small 3D production environment/toolkit.
 ## ⚡ ProAim
 
 **Repository name:** `proaim`  
-**Area:** Windows / gaming performance / input latency
+**Area:** Windows / gaming performance / input latency  
+**Continuation:** [`continuity/proaim.md`](./continuity/proaim.md)
 
 A Windows utility focused on understanding and tuning the parts of the system that affect how games and input feel.
 
@@ -64,7 +70,8 @@ Use ProAim publicly from now on.
 ## 🎓 UTN Scholar
 
 **Repository name:** `utn-scholar`  
-**Area:** Education / documents / AI-assisted study
+**Area:** Education / documents / AI-assisted study  
+**Continuation:** [`continuity/utn-scholar.md`](./continuity/utn-scholar.md)
 
 A study tool centered on university material.
 
@@ -90,7 +97,8 @@ That's useful internally, but UTN Scholar is the project name.
 ## 📱 A53 Performance
 
 **Repository name:** `a53-performance`  
-**Area:** Android / device utilities
+**Area:** Android / device utilities  
+**Continuation:** [`continuity/a53-performance.md`](./continuity/a53-performance.md)
 
 An Android maintenance utility that originally grew out of things I wanted on my Samsung Galaxy A53.
 
@@ -114,7 +122,8 @@ Don't rename it every time device support expands.
 ## 🗃️ WA Vault
 
 **Repository name:** `wa-vault`  
-**Area:** Android / local data / event reliability
+**Area:** Android / local data / event reliability  
+**Continuation:** [`continuity/wa-vault.md`](./continuity/wa-vault.md)
 
 An Android project for preserving and organizing message-related events and media locally.
 
@@ -140,7 +149,8 @@ Don't describe it as breaking into, spying on or bypassing another app.
 ## 🌦️ Meteora Weather
 
 **Repository name:** `meteora-weather`  
-**Area:** Weather / data presentation
+**Area:** Weather / data presentation  
+**Continuation:** [`continuity/meteora-weather.md`](./continuity/meteora-weather.md)
 
 A weather application built around a simple idea: show the information that matters without making the user fight the interface.
 
@@ -170,6 +180,7 @@ When one of these projects gets cleaned up for public viewing, I want it to have
 - [ ] a license when appropriate
 - [ ] sensible commit messages
 - [ ] no temporary APKs, random ZIP names or old exports cluttering the root
+- [ ] continuity file updated after the release/change
 
 <!--
 This checklist is for maintenance, not decoration.
