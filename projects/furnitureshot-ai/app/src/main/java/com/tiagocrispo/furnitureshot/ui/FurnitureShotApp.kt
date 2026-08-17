@@ -58,10 +58,13 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import com.tiagocrispo.furnitureshot.data.ImageStore
+import com.tiagocrispo.furnitureshot.processing.FinishPassEngine
 import com.tiagocrispo.furnitureshot.processing.LocalEnhancementEngine
 import com.tiagocrispo.furnitureshot.processing.PromptPolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -234,22 +237,41 @@ fun FurnitureShotApp() {
                                     message = null
                                     resultPath = null
                                     try {
-                                        val result = LocalEnhancementEngine.process(
-                                            context = context,
-                                            originalPath = path,
-                                            settings = PromptPolicy.automaticSettings(),
-                                            onProgress = { percent, stage ->
-                                                processingPercent = percent
-                                                processingStage = stage
-                                            },
-                                        )
-                                        resultPath = result.resultPath
-                                        processingPercent = 100
-                                        processingStage = "Foto lista"
+                                        val ticker = launch {
+                                            while (isActive && processingPercent < 68) {
+                                                delay(450)
+                                                processingPercent = (processingPercent + 2).coerceAtMost(68)
+                                                processingStage = when {
+                                                    processingPercent < 22 -> "Preparando la foto"
+                                                    processingPercent < 48 -> "Recortando el mueble"
+                                                    else -> "Mejorando luz y detalle"
+                                                }
+                                            }
+                                        }
+                                        val result = try {
+                                            processingPercent = 6
+                                            LocalEnhancementEngine.process(
+                                                context = context,
+                                                originalPath = path,
+                                                settings = PromptPolicy.automaticSettings(),
+                                            )
+                                        } finally {
+                                            ticker.cancel()
+                                        }
+                                        processingPercent = 74
+                                        processingStage = "Afinando bordes y sombra"
+                                        val finishedPath = withContext(Dispatchers.IO) {
+                                            FinishPassEngine.apply(result.resultPath)
+                                        }
+                                        processingPercent = 96
+                                        processingStage = "Guardando resultado"
+                                        resultPath = finishedPath
                                         message = result.warning
                                         withContext(Dispatchers.IO) {
-                                            ImageStore.appendHistory(context, path, result.resultPath)
+                                            ImageStore.appendHistory(context, path, finishedPath)
                                         }
+                                        processingPercent = 100
+                                        processingStage = "Foto lista"
                                     } catch (_: kotlinx.coroutines.CancellationException) {
                                         processingPercent = 0
                                         processingStage = null
