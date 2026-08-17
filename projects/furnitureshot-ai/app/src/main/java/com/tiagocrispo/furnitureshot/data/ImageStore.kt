@@ -50,19 +50,54 @@ object ImageStore {
         return destination
     }
 
-    fun loadPreview(path: String, maxDimension: Int = 1600): Bitmap = decodeOriented(File(path), maxDimension)
+    fun loadPreview(path: String, maxDimension: Int = 1600): Bitmap =
+        decodeOriented(File(path), maxDimension)
 
-    fun loadForProcessing(path: String, maxDimension: Int = 4096): Bitmap = decodeOriented(File(path), maxDimension)
+    fun loadForProcessing(path: String, maxDimension: Int = 4096): Bitmap =
+        decodeOriented(File(path), maxDimension)
 
     fun saveResult(originalPath: String, bitmap: Bitmap): File {
         val original = File(originalPath)
         val result = File(original.parentFile, "result.jpg")
-        FileOutputStream(result).use { output ->
-            check(bitmap.compress(Bitmap.CompressFormat.JPEG, 97, output)) {
-                "No se pudo guardar el resultado interno."
+        val highQuality = prepareHighQualityResult(bitmap)
+        try {
+            FileOutputStream(result).use { output ->
+                check(highQuality.compress(Bitmap.CompressFormat.JPEG, 99, output)) {
+                    "No se pudo guardar el resultado interno."
+                }
+            }
+        } finally {
+            if (highQuality !== bitmap && !highQuality.isRecycled) {
+                highQuality.recycle()
             }
         }
         return result
+    }
+
+    private fun prepareHighQualityResult(source: Bitmap): Bitmap {
+        val maxMemoryMb = Runtime.getRuntime().maxMemory() / (1024L * 1024L)
+        val maxLongEdge = when {
+            maxMemoryMb <= 192L -> 2200
+            maxMemoryMb <= 256L -> 2600
+            maxMemoryMb <= 384L -> 3000
+            else -> 3200
+        }
+
+        val currentLongEdge = maxOf(source.width, source.height)
+        if (currentLongEdge >= maxLongEdge) return source
+
+        val targetLongEdge = minOf(currentLongEdge * 2, maxLongEdge)
+        if (targetLongEdge <= currentLongEdge) return source
+
+        val scale = targetLongEdge.toFloat() / currentLongEdge.toFloat()
+        val targetWidth = (source.width * scale).toInt().coerceAtLeast(1)
+        val targetHeight = (source.height * scale).toInt().coerceAtLeast(1)
+
+        return try {
+            Bitmap.createScaledBitmap(source, targetWidth, targetHeight, true)
+        } catch (_: OutOfMemoryError) {
+            source
+        }
     }
 
     fun exportToGallery(context: Context, resultPath: String): Uri? {
@@ -74,11 +109,15 @@ object ImageStore {
             val values = ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
                 put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/FurnitureShot AI")
+                put(
+                    MediaStore.Images.Media.RELATIVE_PATH,
+                    Environment.DIRECTORY_PICTURES + "/FurnitureShot AI",
+                )
                 put(MediaStore.Images.Media.IS_PENDING, 1)
             }
             val resolver = context.contentResolver
-            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return null
+            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                ?: return null
             try {
                 resolver.openOutputStream(uri).use { output ->
                     requireNotNull(output)
@@ -101,7 +140,11 @@ object ImageStore {
                 destination.outputStream().use { output -> input.copyTo(output, 128 * 1024) }
             }
             var scannedUri: Uri? = null
-            MediaScannerConnection.scanFile(context, arrayOf(destination.absolutePath), arrayOf("image/jpeg")) { _, uri ->
+            MediaScannerConnection.scanFile(
+                context,
+                arrayOf(destination.absolutePath),
+                arrayOf("image/jpeg"),
+            ) { _, uri ->
                 scannedUri = uri
             }
             scannedUri ?: Uri.fromFile(destination)
@@ -141,7 +184,9 @@ object ImageStore {
                         resultPath = obj.getString("resultPath"),
                         createdAt = obj.getLong("createdAt"),
                     )
-                    if (File(item.originalPath).exists() && File(item.resultPath).exists()) add(item)
+                    if (File(item.originalPath).exists() && File(item.resultPath).exists()) {
+                        add(item)
+                    }
                 }
             }
         }.getOrDefault(emptyList())
@@ -169,10 +214,14 @@ object ImageStore {
         require(file.exists()) { "La imagen ya no existe." }
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(file.absolutePath, bounds)
-        require(bounds.outWidth > 0 && bounds.outHeight > 0) { "Formato de imagen no compatible." }
+        require(bounds.outWidth > 0 && bounds.outHeight > 0) {
+            "Formato de imagen no compatible."
+        }
 
         var sample = 1
-        while (maxOf(bounds.outWidth / sample, bounds.outHeight / sample) > maxDimension * 2) sample *= 2
+        while (maxOf(bounds.outWidth / sample, bounds.outHeight / sample) > maxDimension * 2) {
+            sample *= 2
+        }
         val options = BitmapFactory.Options().apply {
             inSampleSize = sample
             inPreferredConfig = Bitmap.Config.ARGB_8888
@@ -190,10 +239,15 @@ object ImageStore {
             )
             if (scaled !== decoded) decoded.recycle()
             scaled
-        } else decoded
+        } else {
+            decoded
+        }
 
         val orientation = runCatching {
-            ExifInterface(file).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+            ExifInterface(file).getAttributeInt(
+                ExifInterface.TAG_ORIENTATION,
+                ExifInterface.ORIENTATION_NORMAL,
+            )
         }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
 
         val matrix = Matrix()
@@ -217,7 +271,15 @@ object ImageStore {
         }
         if (matrix.isIdentity) return resized
 
-        val oriented = Bitmap.createBitmap(resized, 0, 0, resized.width, resized.height, matrix, true)
+        val oriented = Bitmap.createBitmap(
+            resized,
+            0,
+            0,
+            resized.width,
+            resized.height,
+            matrix,
+            true,
+        )
         if (oriented !== resized) resized.recycle()
         return oriented
     }
