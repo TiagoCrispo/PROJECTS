@@ -31,6 +31,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -57,10 +58,13 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import com.tiagocrispo.furnitureshot.data.ImageStore
+import com.tiagocrispo.furnitureshot.processing.FinishPassEngine
 import com.tiagocrispo.furnitureshot.processing.LocalEnhancementEngine
 import com.tiagocrispo.furnitureshot.processing.PromptPolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -75,25 +79,27 @@ fun FurnitureShotApp() {
     var originalPath by rememberSaveable { mutableStateOf<String?>(null) }
     var resultPath by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingCameraPath by rememberSaveable { mutableStateOf<String?>(null) }
-    var viewerPath by rememberSaveable { mutableStateOf<String?>(null) }
     var isProcessing by remember { mutableStateOf(false) }
+    var processingPercent by remember { mutableStateOf(0) }
+    var processingStage by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     var job by remember { mutableStateOf<Job?>(null) }
     var permissionRevision by remember { mutableStateOf(0) }
+    var viewerPath by rememberSaveable { mutableStateOf<String?>(null) }
 
     fun hasPermission(permission: String): Boolean =
         ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
 
     fun missingPermissions(): Array<String> = buildList {
         add(Manifest.permission.CAMERA)
-        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
-            add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-        }
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
     }.filterNot(::hasPermission).toTypedArray()
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
-    ) { permissionRevision++ }
+    ) {
+        permissionRevision++
+    }
 
     LaunchedEffect(Unit) {
         val missing = missingPermissions()
@@ -116,6 +122,8 @@ fun FurnitureShotApp() {
                     val file = withContext(Dispatchers.IO) { ImageStore.importUri(context, uri) }
                     originalPath = file.absolutePath
                     resultPath = null
+                    processingPercent = 0
+                    processingStage = null
                     message = null
                 }.onFailure { message = "No se pudo abrir la foto." }
             }
@@ -130,11 +138,11 @@ fun FurnitureShotApp() {
         if (success && path != null) {
             scope.launch {
                 runCatching {
-                    val file = withContext(Dispatchers.IO) {
-                        ImageStore.importCameraFile(context, File(path))
-                    }
+                    val file = withContext(Dispatchers.IO) { ImageStore.importCameraFile(context, File(path)) }
                     originalPath = file.absolutePath
                     resultPath = null
+                    processingPercent = 0
+                    processingStage = null
                     message = null
                 }.onFailure { message = "No se pudo abrir la foto." }
             }
@@ -143,18 +151,17 @@ fun FurnitureShotApp() {
 
     val cameraGranted = remember(permissionRevision) { hasPermission(Manifest.permission.CAMERA) }
     val legacyStorageGranted = remember(permissionRevision) {
-        Build.VERSION.SDK_INT > Build.VERSION_CODES.P ||
-            hasPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        Build.VERSION.SDK_INT > Build.VERSION_CODES.P || hasPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)
     }
 
     fun savePhoto(path: String) {
         if (!legacyStorageGranted && Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
             permissionLauncher.launch(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE))
-            return
-        }
-        scope.launch {
-            runCatching { withContext(Dispatchers.IO) { ImageStore.exportToGallery(context, path) } }
-                .onFailure { message = "No se pudo guardar la foto." }
+        } else {
+            scope.launch {
+                runCatching { withContext(Dispatchers.IO) { ImageStore.exportToGallery(context, path) } }
+                    .onFailure { message = "No se pudo guardar la foto." }
+            }
         }
     }
 
@@ -195,13 +202,10 @@ fun FurnitureShotApp() {
                     ) {
                         Button(
                             onClick = {
-                                galleryLauncher.launch(
-                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                                )
+                                galleryLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                             },
                             modifier = Modifier.weight(1f),
                         ) { Text("Galería") }
-
                         OutlinedButton(
                             onClick = {
                                 if (!cameraGranted) {
@@ -218,7 +222,7 @@ fun FurnitureShotApp() {
                 }
 
                 originalPath?.let { path ->
-                    ImageCard("Foto original", path) { viewerPath = it }
+                    ImageCard(title = "Foto original", path = path, onOpen = { viewerPath = it })
 
                     Button(
                         onClick = {
@@ -228,24 +232,57 @@ fun FurnitureShotApp() {
                             } else {
                                 job = scope.launch {
                                     isProcessing = true
+                                    processingPercent = 0
+                                    processingStage = "Preparando la foto"
                                     message = null
                                     resultPath = null
                                     try {
-                                        val result = LocalEnhancementEngine.process(
-                                            context = context,
-                                            originalPath = path,
-                                            settings = PromptPolicy.automaticSettings(),
-                                        )
-                                        resultPath = result.resultPath
+                                        val ticker = launch {
+                                            while (isActive && processingPercent < 68) {
+                                                delay(450)
+                                                processingPercent = (processingPercent + 2).coerceAtMost(68)
+                                                processingStage = when {
+                                                    processingPercent < 22 -> "Preparando la foto"
+                                                    processingPercent < 48 -> "Recortando el mueble"
+                                                    else -> "Mejorando luz y detalle"
+                                                }
+                                            }
+                                        }
+                                        val result = try {
+                                            processingPercent = 6
+                                            LocalEnhancementEngine.process(
+                                                context = context,
+                                                originalPath = path,
+                                                settings = PromptPolicy.automaticSettings(),
+                                            )
+                                        } finally {
+                                            ticker.cancel()
+                                        }
+                                        processingPercent = 74
+                                        processingStage = "Afinando bordes y sombra"
+                                        val finishedPath = withContext(Dispatchers.IO) {
+                                            FinishPassEngine.apply(result.resultPath)
+                                        }
+                                        processingPercent = 96
+                                        processingStage = "Guardando resultado"
+                                        resultPath = finishedPath
                                         message = result.warning
                                         withContext(Dispatchers.IO) {
-                                            ImageStore.appendHistory(context, path, result.resultPath)
+                                            ImageStore.appendHistory(context, path, finishedPath)
                                         }
+                                        processingPercent = 100
+                                        processingStage = "Foto lista"
                                     } catch (_: kotlinx.coroutines.CancellationException) {
+                                        processingPercent = 0
+                                        processingStage = null
                                         message = null
                                     } catch (_: OutOfMemoryError) {
-                                        message = "La foto es demasiado grande para procesarla."
+                                        processingPercent = 0
+                                        processingStage = null
+                                        message = "La foto es demasiado grande para procesarla en este dispositivo."
                                     } catch (_: Throwable) {
+                                        processingPercent = 0
+                                        processingStage = null
                                         message = "No se pudo procesar la foto. Intenta nuevamente."
                                     } finally {
                                         isProcessing = false
@@ -264,17 +301,26 @@ fun FurnitureShotApp() {
                             Text("Procesar")
                         }
                     }
+
+                    if (isProcessing) {
+                        LinearProgressIndicator(
+                            progress = { (processingPercent.coerceIn(0, 100) / 100f) },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(
+                            text = "${processingPercent.coerceIn(0, 100)}% · ${processingStage ?: "Procesando"}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF6C625C),
+                            modifier = Modifier.padding(horizontal = 4.dp),
+                        )
+                    }
                 }
 
                 resultPath?.let { path ->
-                    ImageCard("Resultado", path) { viewerPath = it }
+                    ImageCard(title = "Resultado", path = path, onOpen = { viewerPath = it })
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Button(onClick = { savePhoto(path) }, modifier = Modifier.weight(1f)) {
-                            Text("Guardar")
-                        }
-                        OutlinedButton(onClick = { sharePhoto(path) }, modifier = Modifier.weight(1f)) {
-                            Text("Compartir")
-                        }
+                        Button(onClick = { savePhoto(path) }, modifier = Modifier.weight(1f)) { Text("Guardar") }
+                        OutlinedButton(onClick = { sharePhoto(path) }, modifier = Modifier.weight(1f)) { Text("Compartir") }
                     }
                 }
 
@@ -303,10 +349,7 @@ fun FurnitureShotApp() {
 @Composable
 private fun ImageCard(title: String, path: String, onOpen: (String) -> Unit) {
     Card {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(title, fontWeight = FontWeight.SemiBold)
             FileImage(path = path, maxDimension = 1280, onOpen = onOpen)
         }
@@ -366,7 +409,7 @@ private fun FullscreenImageDialog(
         onDismissRequest = onClose,
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
-        Surface(modifier = Modifier.fillMaxSize(), color = Color(0xF0000000)) {
+        Surface(modifier = Modifier.fillMaxSize(), color = Color(0xCC000000)) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
