@@ -14,8 +14,8 @@ android {
         applicationId = "com.tiagocrispo.furnitureshot"
         minSdk = 26
         targetSdk = 36
-        versionCode = 9
-        versionName = "0.3.2-alpha09"
+        versionCode = 11
+        versionName = "0.4.1-alpha11"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

@@ -4,11 +4,11 @@ import com.tiagocrispo.furnitureshot.model.ProcessSettings
 
 object PromptPolicy {
     fun automaticSettings(): ProcessSettings = ProcessSettings(
-        brightness = 0.024f,
-        contrast = 1.038f,
-        warmth = 0.008f,
-        shadowStrength = 0.62f,
-        saturation = 1.015f,
-        detailStrength = 0.18f,
+        brightness = 0.030f,
+        contrast = 1.052f,
+        warmth = 0.010f,
+        shadowStrength = 0.74f,
+        saturation = 1.022f,
+        detailStrength = 0.27f,
     )
 }
