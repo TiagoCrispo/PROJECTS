@@ -25,6 +25,7 @@ The point is simple: a new chat, machine or work session should not have to reco
 | [UTN Scholar](./utn-scholar.md) | **UTN AI 0.55.0+55 · Block 55** | physical Flutter/Windows/Android quality gates before claiming a release |
 | [ProAim](./proaim.md) | **V25.0 · Block 11** | target-PC lifecycle/update validation |
 | [A53 Performance](./a53-performance.md) | **v1.15.7 · THERMAL / ANALYSIS** | physical Galaxy A53 verification before further risky tuning |
+| [BandLab](./bandlab.md) | **v2.6.4 runtime · v2.6.0 verified source** | recover/preserve the v2.6.4 source delta, then physical Band BLE/auth validation |
 | [WA Vault](./wa-vault.md) | **v0.5.21 · Stable Privacy Freeze** | continue without reintroducing backup paths or plaintext storage |
 | [Meteora Weather](./meteora-weather.md) | **Mendoza Meteo Pro GPS v1.2 source baseline** | preserve behavior while migrating to the Meteora name/structure |
 
