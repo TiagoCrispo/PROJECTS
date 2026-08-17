@@ -21,3 +21,11 @@ data class HistoryItem(
     val resultPath: String,
     val createdAt: Long,
 )
+
+data class SellerShotItem(
+    val id: String,
+    val originalPath: String,
+    val resultPath: String? = null,
+    val viewLabel: String? = null,
+    val sortRank: Int = 999,
+)
