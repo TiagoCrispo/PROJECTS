@@ -3,4 +3,7 @@
     <cache-path
         name="camera_capture"
         path="camera/" />
+    <files-path
+        name="job_results"
+        path="jobs/" />
 </paths>
