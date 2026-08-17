@@ -48,6 +48,18 @@ It began as a practical tool for storage cleanup and device maintenance and slow
 
 `Android` · `storage` · `device utilities` · `performance`
 
+### 🏃 BandLab
+**Local-first workout tracking with Xiaomi Smart Band 9 Active integration.**
+
+An Android project built around my Galaxy A53 and Xiaomi Smart Band 9 Active. It combines phone-side GPS/workout tracking with direct Band data such as heart rate, activity, sleep and battery while keeping unavailable sensor data explicit instead of inventing values.
+
+`Android` · `fitness` · `Bluetooth LE` · `Xiaomi Smart Band`
+
+<!--
+BandLab here refers to this personal Band/fitness project, previously called APPS BANDLAB V2 / BandLab9Active in working chats and files.
+Never publish Xiaomi authentication secrets or APK signing keys in the repository.
+-->
+
 ### 🗃️ WA Vault
 **Local message and media preservation experiments on Android.**
 
@@ -68,8 +80,9 @@ Project order is intentional:
 2. ProAim
 3. UTN Scholar
 4. A53 Performance
-5. WA Vault
-6. Meteora Weather
+5. BandLab
+6. WA Vault
+7. Meteora Weather
 
 The first three show the widest range of technical work, so they should stay visible without scrolling too far.
 -->
