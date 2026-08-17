@@ -1,29 +1,10 @@
 package com.tiagocrispo.furnitureshot.model
 
-enum class CatalogPreset(val title: String) {
-    QUICK_SALE("Venta rápida"),
-    CATALOG("Catálogo"),
-    NATURAL("Natural"),
-    MARKETPLACE("Marketplace"),
-}
-
-enum class PreviewMode {
-    ORIGINAL,
-    RESULT,
-}
-
-enum class BackgroundMode {
-    KEEP_ORIGINAL,
-    STUDIO_WHITE,
-}
-
 data class ProcessSettings(
-    val backgroundMode: BackgroundMode,
     val brightness: Float,
     val contrast: Float,
     val warmth: Float,
     val shadowStrength: Float,
-    val fidelityWarning: String? = null,
 )
 
 data class ProcessResult(
