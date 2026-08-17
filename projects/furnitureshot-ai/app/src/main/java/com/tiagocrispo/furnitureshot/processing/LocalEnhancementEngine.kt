@@ -1,5 +1,6 @@
 package com.tiagocrispo.furnitureshot.processing
 
+import android.app.ActivityManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BlurMaskFilter
@@ -7,26 +8,28 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
+import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.graphics.RectF
+import android.graphics.Shader
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.segmentation.subject.SubjectSegmentation
 import com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions
 import com.tiagocrispo.furnitureshot.data.ImageStore
-import com.tiagocrispo.furnitureshot.model.BackgroundMode
 import com.tiagocrispo.furnitureshot.model.ProcessResult
 import com.tiagocrispo.furnitureshot.model.ProcessSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.coroutineContext
-import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 object LocalEnhancementEngine {
     suspend fun process(
@@ -34,50 +37,98 @@ object LocalEnhancementEngine {
         originalPath: String,
         settings: ProcessSettings,
     ): ProcessResult = withContext(Dispatchers.Default) {
-        val source = ImageStore.loadForProcessing(originalPath)
-        coroutineContext.ensureActive()
-
-        val enhanced = applySafeToneEnhancement(source, settings)
-        if (enhanced !== source) source.recycle()
-        coroutineContext.ensureActive()
-
-        val matte = when (settings.backgroundMode) {
-            BackgroundMode.KEEP_ORIGINAL -> MatteResult(
-                bitmap = enhanced,
-                replaced = false,
-                warning = null,
+        val primaryMaxDimension = chooseProcessingDimension(context)
+        try {
+            processAttempt(
+                originalPath = originalPath,
+                settings = settings,
+                maxDimension = primaryMaxDimension,
+                memoryWarning = null,
             )
-            BackgroundMode.STUDIO_WHITE -> MlKitStudioComposer.compose(
+        } catch (_: OutOfMemoryError) {
+            System.gc()
+            processAttempt(
+                originalPath = originalPath,
+                settings = settings,
+                maxDimension = 1280,
+                memoryWarning = "La foto era muy grande; se procesó en modo seguro para evitar un cierre de la app.",
+            )
+        }
+    }
+
+    private suspend fun processAttempt(
+        originalPath: String,
+        settings: ProcessSettings,
+        maxDimension: Int,
+        memoryWarning: String?,
+    ): ProcessResult {
+        var source: Bitmap? = null
+        var enhanced: Bitmap? = null
+        var finalBitmap: Bitmap? = null
+
+        try {
+            source = ImageStore.loadForProcessing(originalPath, maxDimension)
+            coroutineContext.ensureActive()
+
+            enhanced = applySafeToneEnhancement(source, settings)
+            if (enhanced !== source) {
+                source.recycle()
+                source = null
+            }
+            coroutineContext.ensureActive()
+
+            val matte = MlKitStudioComposer.compose(
                 source = enhanced,
                 shadowStrength = settings.shadowStrength,
             )
-        }
-        coroutineContext.ensureActive()
+            finalBitmap = matte.bitmap
+            coroutineContext.ensureActive()
 
-        val resultFile = withContext(Dispatchers.IO) {
-            ImageStore.saveResult(originalPath, matte.bitmap)
-        }
+            val resultFile = withContext(Dispatchers.IO) {
+                ImageStore.saveResult(originalPath, finalBitmap)
+            }
 
-        if (matte.bitmap !== enhanced) enhanced.recycle()
-        matte.bitmap.recycle()
-
-        ProcessResult(
-            resultPath = resultFile.absolutePath,
-            backgroundReplaced = matte.replaced,
-            warning = listOfNotNull(settings.fidelityWarning, matte.warning)
+            val warning = listOfNotNull(memoryWarning, matte.warning)
                 .joinToString(" ")
-                .ifBlank { null },
-        )
+                .ifBlank { null }
+
+            return ProcessResult(
+                resultPath = resultFile.absolutePath,
+                backgroundReplaced = matte.replaced,
+                warning = warning,
+            )
+        } finally {
+            finalBitmap?.let { bitmap ->
+                if (!bitmap.isRecycled) bitmap.recycle()
+            }
+            enhanced?.let { bitmap ->
+                if (bitmap !== finalBitmap && !bitmap.isRecycled) bitmap.recycle()
+            }
+            source?.let { bitmap ->
+                if (bitmap !== enhanced && bitmap !== finalBitmap && !bitmap.isRecycled) bitmap.recycle()
+            }
+        }
+    }
+
+    private fun chooseProcessingDimension(context: Context): Int {
+        val activityManager = context.getSystemService(ActivityManager::class.java)
+        val memoryClassMb = activityManager?.memoryClass ?: 256
+        return when {
+            memoryClassMb <= 192 -> 1280
+            memoryClassMb <= 256 -> 1440
+            memoryClassMb <= 384 -> 1600
+            else -> 1920
+        }
     }
 
     private fun applySafeToneEnhancement(source: Bitmap, settings: ProcessSettings): Bitmap {
         val output = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(output)
 
-        val contrast = settings.contrast.coerceIn(0.97f, 1.08f)
-        val brightnessOffset = settings.brightness.coerceIn(-0.04f, 0.065f) * 255f
+        val contrast = settings.contrast.coerceIn(0.98f, 1.07f)
+        val brightnessOffset = settings.brightness.coerceIn(-0.03f, 0.05f) * 255f
         val translate = (1f - contrast) * 128f + brightnessOffset
-        val warmthOffset = settings.warmth.coerceIn(-0.025f, 0.035f) * 255f
+        val warmthOffset = settings.warmth.coerceIn(-0.02f, 0.025f) * 255f
 
         val matrix = ColorMatrix(
             floatArrayOf(
@@ -102,51 +153,72 @@ private data class MatteResult(
 )
 
 private object MlKitStudioComposer {
-    private const val ML_MAX_DIMENSION = 1536
-    private const val MIN_COVERAGE = 0.07f
-    private const val MAX_COVERAGE = 0.82f
-    private const val LOW_CONFIDENCE = 0.18f
-    private const val HIGH_CONFIDENCE = 0.78f
+    private const val ML_MAX_DIMENSION = 1024
+    private const val SEGMENTATION_TIMEOUT_MS = 35_000L
+    private const val LOW_CONFIDENCE = 0.14f
+    private const val HIGH_CONFIDENCE = 0.74f
+    private const val COMPONENT_THRESHOLD = 0.22f
+    private const val MIN_COVERAGE = 0.04f
+    private const val MAX_COVERAGE = 0.76f
 
     suspend fun compose(source: Bitmap, shadowStrength: Float): MatteResult {
         val working = scaledForMl(source)
         val options = SubjectSegmenterOptions.Builder()
             .enableForegroundConfidenceMask()
-            .enableMultipleSubjects(
-                SubjectSegmenterOptions.SubjectResultOptions.Builder()
-                    .enableConfidenceMask()
-                    .build(),
-            )
             .build()
         val segmenter = SubjectSegmentation.getClient(options)
 
         val alpha = try {
-            val input = InputImage.fromBitmap(working, 0)
-            val result = segmenter.process(input).await()
+            val result = withTimeoutOrNull(SEGMENTATION_TIMEOUT_MS) {
+                segmenter.process(InputImage.fromBitmap(working, 0)).await()
+            }
             coroutineContext.ensureActive()
-            buildBestSubjectAlpha(result, working.width, working.height)
-        } catch (t: Throwable) {
+            val foreground = result?.foregroundConfidenceMask
+            if (foreground == null) {
+                null
+            } else {
+                val values = FloatArray(working.width * working.height)
+                val copy = foreground.duplicate().apply { rewind() }
+                var index = 0
+                while (copy.hasRemaining() && index < values.size) {
+                    values[index++] = softenConfidence(copy.get().coerceIn(0f, 1f))
+                }
+                if (index < values.size) null else AlphaMask(values, working.width, working.height)
+            }
+        } catch (_: Exception) {
             null
         } finally {
             segmenter.close()
         }
 
-        if (working !== source) working.recycle()
+        if (working !== source && !working.isRecycled) working.recycle()
 
         if (alpha == null) {
             return MatteResult(
                 bitmap = source,
                 replaced = false,
-                warning = "El módulo IA de recorte todavía no estuvo disponible o no pudo aislar el mueble con seguridad. Se conservó la foto sin destruir el fondo; con conexión a internet, vuelve a procesarla cuando Google Play Services termine de preparar el modelo.",
+                warning = "El recorte no estuvo disponible. Intenta procesar de nuevo en unos segundos.",
             )
         }
+
+        coroutineContext.ensureActive()
+        if (!retainMainComponent(alpha.values, alpha.width, alpha.height)) {
+            return MatteResult(
+                bitmap = source,
+                replaced = false,
+                warning = "No se pudo separar el mueble del fondo con suficiente seguridad.",
+            )
+        }
+
+        protectThinDetails(alpha.values, alpha.width, alpha.height)
+        featherEdges(alpha.values, alpha.width, alpha.height)
 
         val validation = validateAlpha(alpha.values, alpha.width, alpha.height)
         if (!validation.accepted) {
             return MatteResult(
                 bitmap = source,
                 replaced = false,
-                warning = "Fidelity Lock rechazó un recorte poco confiable y conservó el fondo original.",
+                warning = "No se pudo separar el mueble del fondo con suficiente seguridad.",
             )
         }
 
@@ -159,7 +231,7 @@ private object MlKitStudioComposer {
 
         val output = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(output)
-        canvas.drawColor(Color.rgb(250, 250, 248))
+        drawStudioBackground(canvas, source.width, source.height)
 
         if (shadowStrength > 0f) {
             drawContactShadow(
@@ -182,8 +254,8 @@ private object MlKitStudioComposer {
         maskPaint.xfermode = null
         canvas.restoreToCount(layer)
 
-        if (maskFull !== maskSmall) maskFull.recycle()
-        maskSmall.recycle()
+        if (maskFull !== maskSmall && !maskFull.isRecycled) maskFull.recycle()
+        if (!maskSmall.isRecycled) maskSmall.recycle()
 
         return MatteResult(bitmap = output, replaced = true, warning = null)
     }
@@ -211,84 +283,118 @@ private object MlKitStudioComposer {
         )
     }
 
-    private fun buildBestSubjectAlpha(
-        result: com.google.mlkit.vision.segmentation.subject.SubjectSegmentationResult,
-        width: Int,
-        height: Int,
-    ): AlphaMask? {
-        val subjects = result.subjects
-        if (subjects.isNotEmpty()) {
-            val centerX = width / 2f
-            val centerY = height / 2f
-            val imageArea = width.toFloat() * height.toFloat()
-
-            val best = subjects.maxByOrNull { subject ->
-                val area = subject.width.toFloat() * subject.height.toFloat()
-                val cx = subject.startX + subject.width / 2f
-                val cy = subject.startY + subject.height / 2f
-                val dx = abs(cx - centerX) / width.toFloat()
-                val dy = abs(cy - centerY) / height.toFloat()
-                val centerScore = 1f - (dx + dy).coerceIn(0f, 1f)
-                val areaScore = (area / imageArea).coerceIn(0f, 1f)
-                areaScore * 0.78f + centerScore * 0.22f
-            }
-
-            if (best != null && best.width > 0 && best.height > 0) {
-                val subjectBuffer = best.confidenceMask
-                if (subjectBuffer != null) {
-                    val full = FloatArray(width * height)
-                    val copy = subjectBuffer.duplicate().apply { rewind() }
-                    for (sy in 0 until best.height) {
-                        for (sx in 0 until best.width) {
-                            if (!copy.hasRemaining()) break
-                            val confidence = copy.get().coerceIn(0f, 1f)
-                            val x = best.startX + sx
-                            val y = best.startY + sy
-                            if (x in 0 until width && y in 0 until height) {
-                                full[y * width + x] = softenConfidence(confidence)
-                            }
-                        }
-                    }
-                    feather(full, width, height)
-                    return AlphaMask(full, width, height)
-                }
-            }
-        }
-
-        val foreground = result.foregroundConfidenceMask ?: return null
-        val duplicate = foreground.duplicate().apply { rewind() }
-        val full = FloatArray(width * height)
-        var i = 0
-        while (duplicate.hasRemaining() && i < full.size) {
-            full[i++] = softenConfidence(duplicate.get().coerceIn(0f, 1f))
-        }
-        feather(full, width, height)
-        return AlphaMask(full, width, height)
-    }
-
     private fun softenConfidence(confidence: Float): Float {
         if (confidence <= LOW_CONFIDENCE) return 0f
         if (confidence >= HIGH_CONFIDENCE) return 1f
-        val t = ((confidence - LOW_CONFIDENCE) / (HIGH_CONFIDENCE - LOW_CONFIDENCE)).coerceIn(0f, 1f)
+        val t = ((confidence - LOW_CONFIDENCE) / (HIGH_CONFIDENCE - LOW_CONFIDENCE))
+            .coerceIn(0f, 1f)
         return t * t * (3f - 2f * t)
     }
 
-    private fun feather(alpha: FloatArray, width: Int, height: Int) {
+    private fun retainMainComponent(alpha: FloatArray, width: Int, height: Int): Boolean {
+        val size = alpha.size
+        val labels = IntArray(size)
+        val queue = IntArray(size)
+        var nextLabel = 0
+        var bestLabel = 0
+        var bestScore = Float.NEGATIVE_INFINITY
+        val centerX = width / 2f
+        val centerY = height / 2f
+        val imageArea = size.toFloat()
+
+        for (start in 0 until size) {
+            if (labels[start] != 0 || alpha[start] < COMPONENT_THRESHOLD) continue
+
+            nextLabel++
+            var head = 0
+            var tail = 0
+            queue[tail++] = start
+            labels[start] = nextLabel
+            var area = 0
+            var sumX = 0L
+            var sumY = 0L
+            var borderPixels = 0
+
+            while (head < tail) {
+                val index = queue[head++]
+                val x = index % width
+                val y = index / width
+                area++
+                sumX += x.toLong()
+                sumY += y.toLong()
+                if (x == 0 || y == 0 || x == width - 1 || y == height - 1) borderPixels++
+
+                fun add(next: Int) {
+                    if (labels[next] == 0 && alpha[next] >= COMPONENT_THRESHOLD) {
+                        labels[next] = nextLabel
+                        queue[tail++] = next
+                    }
+                }
+
+                if (x > 0) add(index - 1)
+                if (x + 1 < width) add(index + 1)
+                if (y > 0) add(index - width)
+                if (y + 1 < height) add(index + width)
+            }
+
+            if (area < 12) continue
+            val componentCenterX = sumX.toFloat() / area.toFloat()
+            val componentCenterY = sumY.toFloat() / area.toFloat()
+            val dx = (componentCenterX - centerX) / width.toFloat()
+            val dy = (componentCenterY - centerY) / height.toFloat()
+            val distance = sqrt(dx * dx + dy * dy)
+            val centerScore = (1f - distance / 0.72f).coerceIn(0f, 1f)
+            val areaScore = (area.toFloat() / imageArea).coerceIn(0f, 1f)
+            val edgePenalty = (borderPixels.toFloat() / area.toFloat()).coerceIn(0f, 1f)
+            val score = areaScore * 0.82f + centerScore * 0.18f - edgePenalty * 0.22f
+
+            if (score > bestScore) {
+                bestScore = score
+                bestLabel = nextLabel
+            }
+        }
+
+        if (bestLabel == 0) return false
+
+        for (i in alpha.indices) {
+            if (labels[i] != bestLabel) alpha[i] = 0f
+        }
+        return true
+    }
+
+    private fun protectThinDetails(alpha: FloatArray, width: Int, height: Int) {
         val original = alpha.clone()
         for (y in 1 until height - 1) {
             for (x in 1 until width - 1) {
-                val index = y * width + x
-                val center = original[index]
-                if (center <= 0.02f || center >= 0.98f) continue
-                var sum = 0f
-                var count = 0
+                var strongest = original[y * width + x]
                 for (dy in -1..1) {
                     for (dx in -1..1) {
-                        sum += original[(y + dy) * width + (x + dx)]
-                        count++
+                        strongest = max(strongest, original[(y + dy) * width + (x + dx)] * 0.92f)
                     }
                 }
-                alpha[index] = (sum / count.toFloat()).coerceIn(0f, 1f)
+                alpha[y * width + x] = strongest.coerceIn(0f, 1f)
+            }
+        }
+    }
+
+    private fun featherEdges(alpha: FloatArray, width: Int, height: Int) {
+        repeat(2) {
+            val original = alpha.clone()
+            for (y in 1 until height - 1) {
+                for (x in 1 until width - 1) {
+                    val index = y * width + x
+                    val center = original[index]
+                    if (center <= 0.01f || center >= 0.995f) continue
+                    var sum = 0f
+                    var count = 0
+                    for (dy in -1..1) {
+                        for (dx in -1..1) {
+                            sum += original[(y + dy) * width + (x + dx)]
+                            count++
+                        }
+                    }
+                    alpha[index] = (sum / count.toFloat()).coerceIn(0f, 1f)
+                }
             }
         }
     }
@@ -299,15 +405,19 @@ private object MlKitStudioComposer {
         var right = -1
         var top = height
         var bottom = -1
+        var edgeCount = 0
+        val perimeter = (width * 2 + height * 2 - 4).coerceAtLeast(1)
 
         for (y in 0 until height) {
             for (x in 0 until width) {
-                if (alpha[y * width + x] >= 0.48f) {
+                val value = alpha[y * width + x]
+                if (value >= 0.45f) {
                     count++
                     left = min(left, x)
                     right = max(right, x)
                     top = min(top, y)
                     bottom = max(bottom, y)
+                    if (x == 0 || y == 0 || x == width - 1 || y == height - 1) edgeCount++
                 }
             }
         }
@@ -318,22 +428,50 @@ private object MlKitStudioComposer {
 
         val coverage = count.toFloat() / alpha.size.toFloat()
         val bounds = RectF(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat())
-        val touchesTooMuch = (left <= 1 && right >= width - 2) || (top <= 1 && bottom >= height - 2)
-        val usefulSize = bounds.width() >= width * 0.12f && bounds.height() >= height * 0.18f
+        val usefulSize = bounds.width() >= width * 0.10f && bounds.height() >= height * 0.15f
+        val spansWholeWidth = left <= 1 && right >= width - 2
+        val spansWholeHeight = top <= 1 && bottom >= height - 2
+        val edgeRatio = edgeCount.toFloat() / perimeter.toFloat()
+        val centerX = (left + right) / 2f
+        val centerY = (top + bottom) / 2f
+        val dx = (centerX - width / 2f) / width.toFloat()
+        val dy = (centerY - height / 2f) / height.toFloat()
+        val centerDistance = sqrt(dx * dx + dy * dy)
+
         return MaskValidation(
-            accepted = coverage in MIN_COVERAGE..MAX_COVERAGE && !touchesTooMuch && usefulSize,
+            accepted = coverage in MIN_COVERAGE..MAX_COVERAGE &&
+                usefulSize &&
+                !spansWholeWidth &&
+                !spansWholeHeight &&
+                edgeRatio < 0.35f &&
+                centerDistance < 0.55f,
             bounds = bounds,
         )
     }
 
     private fun alphaToBitmap(alpha: FloatArray, width: Int, height: Int): Bitmap {
-        val pixels = IntArray(alpha.size) { i ->
-            val a = (alpha[i].coerceIn(0f, 1f) * 255f).roundToInt()
+        val pixels = IntArray(alpha.size) { index ->
+            val a = (alpha[index].coerceIn(0f, 1f) * 255f).roundToInt()
             Color.argb(a, 255, 255, 255)
         }
         return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also {
             it.setPixels(pixels, 0, width, 0, 0, width, height)
         }
+    }
+
+    private fun drawStudioBackground(canvas: Canvas, width: Int, height: Int) {
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = LinearGradient(
+                0f,
+                0f,
+                0f,
+                height.toFloat(),
+                Color.rgb(253, 253, 252),
+                Color.rgb(246, 246, 244),
+                Shader.TileMode.CLAMP,
+            )
+        }
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), paint)
     }
 
     private fun drawContactShadow(
@@ -353,16 +491,16 @@ private object MlKitStudioComposer {
         val objectWidth = (right - left).coerceAtLeast(outputWidth * 0.12f)
 
         val shadowRect = RectF(
-            (left + objectWidth * 0.05f).coerceAtLeast(0f),
-            (bottom - outputHeight * 0.012f).coerceAtLeast(0f),
-            (right - objectWidth * 0.05f).coerceAtMost(outputWidth.toFloat()),
-            (bottom + outputHeight * 0.035f).coerceAtMost(outputHeight.toFloat()),
+            (left + objectWidth * 0.07f).coerceAtLeast(0f),
+            (bottom - outputHeight * 0.010f).coerceAtLeast(0f),
+            (right - objectWidth * 0.07f).coerceAtMost(outputWidth.toFloat()),
+            (bottom + outputHeight * 0.032f).coerceAtMost(outputHeight.toFloat()),
         )
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            val alpha = (42f * strength.coerceIn(0f, 1f)).roundToInt().coerceIn(0, 55)
+            val alpha = (38f * strength.coerceIn(0f, 1f)).roundToInt().coerceIn(0, 48)
             color = Color.argb(alpha, 20, 20, 20)
             maskFilter = BlurMaskFilter(
-                max(outputWidth, outputHeight) * 0.009f,
+                max(outputWidth, outputHeight) * 0.008f,
                 BlurMaskFilter.Blur.NORMAL,
             )
         }
