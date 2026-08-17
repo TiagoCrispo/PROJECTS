@@ -11,6 +11,7 @@ import android.graphics.RectF
 import android.graphics.Shader
 import java.io.File
 import java.io.FileOutputStream
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -49,7 +50,31 @@ object FinishPassEngine {
         val height = bitmap.height
         val pixels = IntArray(width * height)
         bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+
+        val cornerSamples = ArrayList<Int>(32)
+        fun sampleBlock(startX: Int, startY: Int, endX: Int, endY: Int) {
+            val stepX = max(1, (endX - startX) / 6)
+            val stepY = max(1, (endY - startY) / 6)
+            for (y in startY until endY step stepY) {
+                for (x in startX until endX step stepX) {
+                    cornerSamples += pixels[y * width + x]
+                }
+            }
+        }
+        val sx = max(1, width / 8)
+        val sy = max(1, height / 8)
+        sampleBlock(0, 0, sx, sy)
+        sampleBlock(width - sx, 0, width, sy)
+        sampleBlock(0, height - sy, sx, height)
+        sampleBlock(width - sx, height - sy, width, height)
+
+        val bgR = cornerSamples.map { Color.red(it) }.average().toFloat()
+        val bgG = cornerSamples.map { Color.green(it) }.average().toFloat()
+        val bgB = cornerSamples.map { Color.blue(it) }.average().toFloat()
+
+        val candidateBackground = BooleanArray(width * height)
         val alpha = FloatArray(width * height)
+
         for (i in pixels.indices) {
             val c = pixels[i]
             val r = Color.red(c)
@@ -59,23 +84,68 @@ object FinishPassEngine {
             val minC = min(r, min(g, b))
             val sat = maxC - minC
             val lum = (r * 30 + g * 59 + b * 11) / 100
-            val nearNeutral = sat <= 24
-            val studioSurface = nearNeutral || (r >= 236 && g >= 236 && b >= 234)
-            val warmFurniture = sat >= 24 && r >= g && g >= b - 8
-            val darkColoredFurniture = lum <= 120 && sat >= 18
+            val dist = abs(r - bgR) + abs(g - bgG) + abs(b - bgB)
+
+            val nearBg = dist <= 26f && sat <= 28
+            val likelyBg = dist <= 40f && sat <= 34 && lum >= 180
+            candidateBackground[i] = nearBg || likelyBg
+
             alpha[i] = when {
-                studioSurface -> 0f
-                warmFurniture || darkColoredFurniture -> 1f
-                sat >= 18 -> 0.78f
-                else -> 0f
+                nearBg -> 0f
+                sat >= 22 -> 1f
+                lum <= 165 -> 1f
+                else -> 0.65f
+            }
+        }
+
+        val trueBackground = floodBorderBackground(candidateBackground, width, height)
+        for (i in alpha.indices) {
+            if (trueBackground[i]) {
+                alpha[i] = 0f
+            } else if (alpha[i] < 0.78f) {
+                alpha[i] = 0.96f
             }
         }
         return alpha
     }
 
+    private fun floodBorderBackground(candidate: BooleanArray, width: Int, height: Int): BooleanArray {
+        val visited = BooleanArray(width * height)
+        val queue = IntArray(width * height)
+        var head = 0
+        var tail = 0
+
+        fun push(index: Int) {
+            if (!visited[index] && candidate[index]) {
+                visited[index] = true
+                queue[tail++] = index
+            }
+        }
+
+        for (x in 0 until width) {
+            push(x)
+            push((height - 1) * width + x)
+        }
+        for (y in 0 until height) {
+            push(y * width)
+            push(y * width + (width - 1))
+        }
+
+        while (head < tail) {
+            val idx = queue[head++]
+            val x = idx % width
+            val y = idx / width
+            if (x > 0) push(idx - 1)
+            if (x + 1 < width) push(idx + 1)
+            if (y > 0) push(idx - width)
+            if (y + 1 < height) push(idx + width)
+        }
+        return visited
+    }
+
     private fun refineMask(mask: FloatArray, width: Int, height: Int): FloatArray {
         val out = mask.clone()
-        repeat(3) {
+        repeat(2) {
             val copy = out.clone()
             for (y in 1 until height - 1) {
                 for (x in 1 until width - 1) {
@@ -92,16 +162,53 @@ object FinishPassEngine {
                         }
                     }
                     out[i] = when {
-                        v < 0.30f && strong >= 7 -> 0.98f
-                        v > 0.70f && weak >= 6 -> 0.02f
-                        v in 0.30f..0.70f && strong >= 5 -> 0.94f
-                        v in 0.30f..0.70f && weak >= 5 -> 0.06f
+                        v < 0.25f && strong >= 7 -> 0.98f
+                        v > 0.75f && weak >= 7 -> 0.02f
+                        v in 0.25f..0.75f && strong >= 5 -> 0.95f
+                        v in 0.25f..0.75f && weak >= 5 -> 0.05f
                         else -> v
                     }
                 }
             }
         }
+        reinforceObjectBridges(out, width, height)
+        suppressBackgroundLeaks(out, width, height)
         return out
+    }
+
+    private fun reinforceObjectBridges(mask: FloatArray, width: Int, height: Int) {
+        val copy = mask.clone()
+        for (y in 1 until height - 1) {
+            for (x in 1 until width - 1) {
+                val i = y * width + x
+                if (copy[i] >= 0.85f) continue
+                val l = copy[y * width + (x - 1)]
+                val r = copy[y * width + (x + 1)]
+                val t = copy[(y - 1) * width + x]
+                val b = copy[(y + 1) * width + x]
+                if ((l >= 0.92f && r >= 0.92f) || (t >= 0.92f && b >= 0.92f)) {
+                    mask[i] = max(mask[i], 0.92f)
+                }
+            }
+        }
+    }
+
+    private fun suppressBackgroundLeaks(mask: FloatArray, width: Int, height: Int) {
+        val copy = mask.clone()
+        for (y in 1 until height - 1) {
+            for (x in 1 until width - 1) {
+                val i = y * width + x
+                if (copy[i] <= 0.20f) continue
+                var bgCount = 0
+                for (dy in -1..1) {
+                    for (dx in -1..1) {
+                        if (dx == 0 && dy == 0) continue
+                        if (copy[(y + dy) * width + (x + dx)] <= 0.12f) bgCount++
+                    }
+                }
+                if (bgCount >= 6) mask[i] = min(mask[i], 0.18f)
+            }
+        }
     }
 
     private fun computeBounds(mask: FloatArray, width: Int, height: Int): RectF? {
@@ -136,10 +243,10 @@ object FinishPassEngine {
 
         val contentWidth = bounds.width().coerceAtLeast(1f)
         val contentHeight = bounds.height().coerceAtLeast(1f)
-        val targetWidth = width * 0.86f
-        val targetHeight = height * 0.74f
+        val targetWidth = width * 0.885f
+        val targetHeight = height * 0.785f
         val scale = min(targetWidth / contentWidth, targetHeight / contentHeight)
-        val desiredBottom = height * 0.89f
+        val desiredBottom = height * 0.912f
         val placedWidth = contentWidth * scale
         val placedHeight = contentHeight * scale
         val left = (width - placedWidth) / 2f
@@ -180,17 +287,25 @@ object FinishPassEngine {
                 0f,
                 0f,
                 height.toFloat(),
-                Color.rgb(242, 238, 231),
-                Color.rgb(232, 227, 220),
+                Color.rgb(236, 232, 226),
+                Color.rgb(226, 220, 212),
                 Shader.TileMode.CLAMP,
             )
         }
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bgPaint)
 
-        val floorGlow = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(22, 255, 255, 255)
+        val floorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = LinearGradient(
+                0f,
+                height * 0.60f,
+                0f,
+                height.toFloat(),
+                Color.argb(0, 255, 255, 255),
+                Color.argb(50, 255, 255, 255),
+                Shader.TileMode.CLAMP,
+            )
         }
-        canvas.drawRect(0f, height * 0.60f, width.toFloat(), height.toFloat(), floorGlow)
+        canvas.drawRect(0f, height * 0.60f, width.toFloat(), height.toFloat(), floorPaint)
     }
 
     private fun drawGroundedShadow(
@@ -204,51 +319,51 @@ object FinishPassEngine {
     ) {
         val objectWidth = placedBounds.width().coerceAtLeast(width * 0.20f)
         val baseY = placedBounds.bottom
+        val shiftX = width * 0.020f
 
         val broadPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(48, 38, 31, 25)
-            maskFilter = BlurMaskFilter(max(width, height) * 0.016f, BlurMaskFilter.Blur.NORMAL)
+            color = Color.argb(54, 48, 40, 34)
+            maskFilter = BlurMaskFilter(max(width, height) * 0.018f, BlurMaskFilter.Blur.NORMAL)
         }
         val mediumPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(64, 32, 27, 23)
-            maskFilter = BlurMaskFilter(max(width, height) * 0.009f, BlurMaskFilter.Blur.NORMAL)
+            color = Color.argb(76, 40, 33, 28)
+            maskFilter = BlurMaskFilter(max(width, height) * 0.010f, BlurMaskFilter.Blur.NORMAL)
         }
         val contactPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(104, 24, 21, 18)
-            maskFilter = BlurMaskFilter(max(width, height) * 0.0038f, BlurMaskFilter.Blur.NORMAL)
+            color = Color.argb(120, 24, 20, 18)
+            maskFilter = BlurMaskFilter(max(width, height) * 0.0036f, BlurMaskFilter.Blur.NORMAL)
         }
 
-        val shadowShiftX = width * 0.018f
         canvas.drawOval(
             RectF(
-                placedBounds.left + objectWidth * 0.07f + shadowShiftX,
-                baseY - height * 0.006f,
-                placedBounds.right - objectWidth * 0.02f + shadowShiftX,
-                baseY + height * 0.052f,
+                placedBounds.left + objectWidth * 0.03f + shiftX,
+                baseY - height * 0.002f,
+                placedBounds.right - objectWidth * 0.01f + shiftX,
+                baseY + height * 0.050f,
             ),
             broadPaint,
         )
         canvas.drawOval(
             RectF(
-                placedBounds.left + objectWidth * 0.16f + shadowShiftX * 0.5f,
-                baseY - height * 0.004f,
-                placedBounds.right - objectWidth * 0.10f + shadowShiftX * 0.5f,
-                baseY + height * 0.028f,
+                placedBounds.left + objectWidth * 0.12f + shiftX * 0.6f,
+                baseY - height * 0.001f,
+                placedBounds.right - objectWidth * 0.08f + shiftX * 0.6f,
+                baseY + height * 0.026f,
             ),
             mediumPaint,
         )
 
-        val sourceWidth = width
-        val sourceHeight = height
+        val srcWidth = width
+        val srcHeight = height
         val startX = max(0, sourceBounds.left.toInt())
-        val endX = min(sourceWidth - 1, sourceBounds.right.toInt())
-        val nearBottom = sourceBounds.bottom - sourceHeight * 0.055f
-        val bottomByColumn = IntArray(sourceWidth) { -1 }
+        val endX = min(srcWidth - 1, sourceBounds.right.toInt())
+        val nearBottom = sourceBounds.bottom - srcHeight * 0.060f
+        val bottomByColumn = IntArray(srcWidth) { -1 }
         for (x in startX..endX) {
-            var y = min(sourceHeight - 1, sourceBounds.bottom.toInt())
+            var y = min(srcHeight - 1, sourceBounds.bottom.toInt())
             val topLimit = max(0, sourceBounds.top.toInt())
             while (y >= topLimit) {
-                if (mask[y * sourceWidth + x] >= 0.55f) {
+                if (mask[y * srcWidth + x] >= 0.55f) {
                     bottomByColumn[x] = y
                     break
                 }
@@ -267,15 +382,24 @@ object FinishPassEngine {
                 if (runWidth >= max(2, (sourceBounds.width() * 0.008f).roundToInt())) {
                     val srcCenter = (runStart + runEnd) / 2f
                     val outCenter = placedBounds.left + (srcCenter - sourceBounds.left) * scale
-                    val half = max(runWidth * scale * 0.75f, objectWidth * 0.024f)
+                    val half = max(runWidth * scale * 0.95f, objectWidth * 0.028f)
                     canvas.drawOval(
                         RectF(
                             outCenter - half,
-                            baseY - height * 0.0025f,
+                            baseY - height * 0.0015f,
                             outCenter + half,
-                            baseY + height * 0.012f,
+                            baseY + height * 0.010f,
                         ),
                         contactPaint,
+                    )
+                    canvas.drawOval(
+                        RectF(
+                            outCenter - half * 0.55f + shiftX * 0.35f,
+                            baseY + height * 0.001f,
+                            outCenter + half * 1.05f + shiftX * 0.35f,
+                            baseY + height * 0.017f,
+                        ),
+                        mediumPaint,
                     )
                 }
                 runStart = -1
@@ -295,9 +419,9 @@ object FinishPassEngine {
             val g = Color.green(c) / 255f
             val b = Color.blue(c) / 255f
             fun curve(v: Float): Float {
-                val lifted = if (v < 0.40f) v + (0.40f - v) * 0.10f else v
-                val mid = ((lifted - 0.5f) * 1.09f + 0.5f).coerceIn(0f, 1f)
-                return if (mid > 0.84f) 0.84f + (mid - 0.84f) * 0.70f else mid
+                val lifted = if (v < 0.36f) v + (0.36f - v) * 0.08f else v
+                val mid = ((lifted - 0.5f) * 1.07f + 0.5f).coerceIn(0f, 1f)
+                return if (mid > 0.86f) 0.86f + (mid - 0.86f) * 0.62f else mid
             }
             val nr = (curve(r) * 255f).roundToInt().coerceIn(0, 255)
             val ng = (curve(g) * 255f).roundToInt().coerceIn(0, 255)
@@ -307,7 +431,7 @@ object FinishPassEngine {
         val toned = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also {
             it.setPixels(pixels, 0, width, 0, 0, width, height)
         }
-        return unsharpMask(toned, amount = 0.20f)
+        return unsharpMask(toned, amount = 0.19f)
     }
 
     private fun unsharpMask(source: Bitmap, amount: Float): Bitmap {
