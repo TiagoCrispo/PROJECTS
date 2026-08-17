@@ -12,6 +12,7 @@ This folder contains the public-facing documentation for the projects shown on m
 | [BandLab](./bandlab.md) | Android · fitness · Bluetooth LE |
 | [A53 Performance](./a53-performance.md) | Android · storage · device utilities |
 | [WA Vault](./wa-vault.md) | Android · local data · reliability |
+| [FurnitureShot AI](./furnitureshot-ai.md) | Android · product photography · local image processing |
 | [Meteora Weather](./meteora-weather.md) | Weather · web · data presentation |
 
 ## Earlier work
