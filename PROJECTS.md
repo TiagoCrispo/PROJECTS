@@ -2,14 +2,14 @@
 
 A concise index of the projects I am actively developing and refining.
 
-| Project | Suggested repository name | Area | Focus |
+| Project | Canonical repository name | Area | Focus |
 |---|---|---|---|
 | **Meteora Weather** | `meteora-weather` | Weather / Data | Forecasts, local weather information and clear presentation |
 | **UTN Scholar** | `utn-scholar` | Education / AI | University study workspace, document analysis and guided learning |
 | **Forge3D Studio** | `forge3d-studio` | 3D / Roblox | 3D asset inspection, conversion, assembly and Roblox-oriented workflows |
-| **LatencyForge** | `latencyforge` | Windows / Performance | Mouse, display, latency, diagnostics and gaming-performance tooling |
-| **Galaxy Toolkit** | `galaxy-toolkit` | Android / Utilities | Storage, cleanup, performance and device-management workflows |
-| **MessageVault** | `messagevault` | Android / Reliability | Local message-event and media preservation/recovery workflows |
+| **ProAim** | `proaim` | Windows / Performance | Mouse, display, latency, diagnostics and gaming-performance tooling |
+| **A53 Performance** | `a53-performance` | Android / Utilities | Storage, cleanup, performance and device-management workflows |
+| **WA Vault** | `wa-vault` | Android / Reliability | Local message-event and media preservation/recovery workflows |
 
 ## Naming convention
 
@@ -29,20 +29,20 @@ Each project should progressively include:
 - Clean commit history and descriptive commit messages
 
 <!--
-INTERNAL PROJECT ALIASES — kept here as a durable migration map for future maintenance.
+INTERNAL PROJECT ALIASES — durable migration map for future maintenance.
 
 Meteora Weather = "servicio meteorológico", "app meteorológica"
 UTN Scholar = "NotebookLM para la UTN", "APPS UTN V2", "app UTN"
 Forge3D Studio = "generador 3D para Roblox", "Forge3D", "Forge3D Studio"
-LatencyForge = "app para optimizar mi PC", "optimización mouse y pantalla", "PC optimizer"
-Galaxy Toolkit = "app para mi Galaxy A53", "APP - GALAXY", "Galaxy app"
-MessageVault = "app para recuperar mensajes", "WSP V2", "recuperar mensajes"
+ProAim = "app para optimizar mi PC", "optimización mouse y pantalla", "PC optimizer", "ProAim Optimizer"
+A53 Performance = "app para mi Galaxy A53", "APP - GALAXY", "Galaxy app", "A53Performance"
+WA Vault = "app para recuperar mensajes", "WSP V2", "recuperar mensajes"
 
 Canonical repository slugs:
 meteora-weather
 utn-scholar
 forge3d-studio
-latencyforge
-galaxy-toolkit
-messagevault
+proaim
+a53-performance
+wa-vault
 -->
