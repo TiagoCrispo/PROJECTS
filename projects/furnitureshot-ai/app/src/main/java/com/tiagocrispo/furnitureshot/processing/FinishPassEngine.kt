@@ -59,11 +59,15 @@ object FinishPassEngine {
             val minC = min(r, min(g, b))
             val sat = maxC - minC
             val lum = (r * 30 + g * 59 + b * 11) / 100
-            val bgLike = r >= 236 && g >= 236 && b >= 234 && sat <= 22
+            val nearNeutral = sat <= 24
+            val studioSurface = nearNeutral || (r >= 236 && g >= 236 && b >= 234)
+            val warmFurniture = sat >= 24 && r >= g && g >= b - 8
+            val darkColoredFurniture = lum <= 120 && sat >= 18
             alpha[i] = when {
-                bgLike -> 0f
-                sat >= 24 || lum <= 230 -> 1f
-                else -> 0.75f
+                studioSurface -> 0f
+                warmFurniture || darkColoredFurniture -> 1f
+                sat >= 18 -> 0.78f
+                else -> 0f
             }
         }
         return alpha
@@ -126,21 +130,23 @@ object FinishPassEngine {
 
         drawCatalogBackground(canvas, width, height)
 
-        val objectBitmap = applyPhotographerLook(source)
-        val objectRect = RectF(bounds)
-        val contentWidth = objectRect.width().coerceAtLeast(1f)
-        val contentHeight = objectRect.height().coerceAtLeast(1f)
+        val toned = applyPhotographerLook(source)
+        val objectBitmap = applyMask(toned, mask)
+        if (toned !== objectBitmap && !toned.isRecycled) toned.recycle()
+
+        val contentWidth = bounds.width().coerceAtLeast(1f)
+        val contentHeight = bounds.height().coerceAtLeast(1f)
         val targetWidth = width * 0.86f
-        val targetHeight = height * 0.72f
+        val targetHeight = height * 0.74f
         val scale = min(targetWidth / contentWidth, targetHeight / contentHeight)
-        val desiredBottom = height * 0.84f
+        val desiredBottom = height * 0.89f
         val placedWidth = contentWidth * scale
         val placedHeight = contentHeight * scale
         val left = (width - placedWidth) / 2f
         val top = desiredBottom - placedHeight
         val placedBounds = RectF(left, top, left + placedWidth, top + placedHeight)
 
-        drawGroundedShadow(canvas, placedBounds, width, height)
+        drawGroundedShadow(canvas, mask, bounds, scale, placedBounds, width, height)
 
         val matrix = Matrix().apply {
             postTranslate(-bounds.left, -bounds.top)
@@ -150,6 +156,21 @@ object FinishPassEngine {
         canvas.drawBitmap(objectBitmap, matrix, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
         if (!objectBitmap.isRecycled) objectBitmap.recycle()
         return output
+    }
+
+    private fun applyMask(source: Bitmap, mask: FloatArray): Bitmap {
+        val width = source.width
+        val height = source.height
+        val pixels = IntArray(width * height)
+        source.getPixels(pixels, 0, width, 0, 0, width, height)
+        for (i in pixels.indices) {
+            val c = pixels[i]
+            val a = (mask[i].coerceIn(0f, 1f) * 255f).roundToInt().coerceIn(0, 255)
+            pixels[i] = Color.argb(a, Color.red(c), Color.green(c), Color.blue(c))
+        }
+        return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also {
+            it.setPixels(pixels, 0, width, 0, 0, width, height)
+        }
     }
 
     private fun drawCatalogBackground(canvas: Canvas, width: Int, height: Int) {
@@ -172,60 +193,94 @@ object FinishPassEngine {
         canvas.drawRect(0f, height * 0.60f, width.toFloat(), height.toFloat(), floorGlow)
     }
 
-    private fun drawGroundedShadow(canvas: Canvas, bounds: RectF, width: Int, height: Int) {
-        val objectWidth = bounds.width().coerceAtLeast(width * 0.20f)
-        val baseY = bounds.bottom
+    private fun drawGroundedShadow(
+        canvas: Canvas,
+        mask: FloatArray,
+        sourceBounds: RectF,
+        scale: Float,
+        placedBounds: RectF,
+        width: Int,
+        height: Int,
+    ) {
+        val objectWidth = placedBounds.width().coerceAtLeast(width * 0.20f)
+        val baseY = placedBounds.bottom
 
         val broadPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(56, 40, 32, 24)
-            maskFilter = BlurMaskFilter(max(width, height) * 0.018f, BlurMaskFilter.Blur.NORMAL)
+            color = Color.argb(48, 38, 31, 25)
+            maskFilter = BlurMaskFilter(max(width, height) * 0.016f, BlurMaskFilter.Blur.NORMAL)
         }
         val mediumPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(86, 32, 26, 22)
-            maskFilter = BlurMaskFilter(max(width, height) * 0.010f, BlurMaskFilter.Blur.NORMAL)
+            color = Color.argb(64, 32, 27, 23)
+            maskFilter = BlurMaskFilter(max(width, height) * 0.009f, BlurMaskFilter.Blur.NORMAL)
         }
         val contactPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(116, 26, 22, 18)
-            maskFilter = BlurMaskFilter(max(width, height) * 0.0048f, BlurMaskFilter.Blur.NORMAL)
+            color = Color.argb(104, 24, 21, 18)
+            maskFilter = BlurMaskFilter(max(width, height) * 0.0038f, BlurMaskFilter.Blur.NORMAL)
         }
 
+        val shadowShiftX = width * 0.018f
         canvas.drawOval(
             RectF(
-                bounds.left + objectWidth * 0.04f,
-                baseY - height * 0.004f,
-                bounds.right - objectWidth * 0.04f,
-                baseY + height * 0.060f,
+                placedBounds.left + objectWidth * 0.07f + shadowShiftX,
+                baseY - height * 0.006f,
+                placedBounds.right - objectWidth * 0.02f + shadowShiftX,
+                baseY + height * 0.052f,
             ),
             broadPaint,
         )
         canvas.drawOval(
             RectF(
-                bounds.left + objectWidth * 0.14f,
-                baseY - height * 0.002f,
-                bounds.right - objectWidth * 0.14f,
-                baseY + height * 0.034f,
+                placedBounds.left + objectWidth * 0.16f + shadowShiftX * 0.5f,
+                baseY - height * 0.004f,
+                placedBounds.right - objectWidth * 0.10f + shadowShiftX * 0.5f,
+                baseY + height * 0.028f,
             ),
             mediumPaint,
         )
 
-        val supportXs = listOf(
-            bounds.left + objectWidth * 0.10f,
-            bounds.left + objectWidth * 0.36f,
-            bounds.left + objectWidth * 0.66f,
-            bounds.right - objectWidth * 0.10f,
-        )
-        val contactHeight = height * 0.014f
-        val contactWidth = objectWidth * 0.16f
-        supportXs.forEach { x ->
-            canvas.drawOval(
-                RectF(
-                    x - contactWidth / 2f,
-                    baseY - contactHeight * 0.10f,
-                    x + contactWidth / 2f,
-                    baseY + contactHeight,
-                ),
-                contactPaint,
-            )
+        val sourceWidth = width
+        val sourceHeight = height
+        val startX = max(0, sourceBounds.left.toInt())
+        val endX = min(sourceWidth - 1, sourceBounds.right.toInt())
+        val nearBottom = sourceBounds.bottom - sourceHeight * 0.055f
+        val bottomByColumn = IntArray(sourceWidth) { -1 }
+        for (x in startX..endX) {
+            var y = min(sourceHeight - 1, sourceBounds.bottom.toInt())
+            val topLimit = max(0, sourceBounds.top.toInt())
+            while (y >= topLimit) {
+                if (mask[y * sourceWidth + x] >= 0.55f) {
+                    bottomByColumn[x] = y
+                    break
+                }
+                y--
+            }
+        }
+
+        var runStart = -1
+        var x = startX
+        while (x <= endX + 1) {
+            val isSupport = x <= endX && bottomByColumn[x] >= nearBottom
+            if (isSupport && runStart < 0) runStart = x
+            if ((!isSupport || x > endX) && runStart >= 0) {
+                val runEnd = x - 1
+                val runWidth = runEnd - runStart + 1
+                if (runWidth >= max(2, (sourceBounds.width() * 0.008f).roundToInt())) {
+                    val srcCenter = (runStart + runEnd) / 2f
+                    val outCenter = placedBounds.left + (srcCenter - sourceBounds.left) * scale
+                    val half = max(runWidth * scale * 0.75f, objectWidth * 0.024f)
+                    canvas.drawOval(
+                        RectF(
+                            outCenter - half,
+                            baseY - height * 0.0025f,
+                            outCenter + half,
+                            baseY + height * 0.012f,
+                        ),
+                        contactPaint,
+                    )
+                }
+                runStart = -1
+            }
+            x++
         }
     }
 
