@@ -5,6 +5,8 @@ data class ProcessSettings(
     val contrast: Float,
     val warmth: Float,
     val shadowStrength: Float,
+    val saturation: Float,
+    val detailStrength: Float,
 )
 
 data class ProcessResult(
