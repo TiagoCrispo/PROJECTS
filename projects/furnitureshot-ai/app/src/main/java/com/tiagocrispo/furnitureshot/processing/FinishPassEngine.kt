@@ -25,6 +25,7 @@ object FinishPassEngine {
         val finished = try {
             val mask = detectObjectMask(bitmap)
             val refinedMask = refineMask(mask, bitmap.width, bitmap.height)
+            refineInteriorCutouts(bitmap, refinedMask)
             val bounds = computeBounds(refinedMask, bitmap.width, bitmap.height) ?: return resultPath
             composeCatalogShot(bitmap, refinedMask, bounds)
         } finally {
@@ -51,26 +52,8 @@ object FinishPassEngine {
         val pixels = IntArray(width * height)
         bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
 
-        val cornerSamples = ArrayList<Int>(32)
-        fun sampleBlock(startX: Int, startY: Int, endX: Int, endY: Int) {
-            val stepX = max(1, (endX - startX) / 6)
-            val stepY = max(1, (endY - startY) / 6)
-            for (y in startY until endY step stepY) {
-                for (x in startX until endX step stepX) {
-                    cornerSamples += pixels[y * width + x]
-                }
-            }
-        }
-        val sx = max(1, width / 8)
-        val sy = max(1, height / 8)
-        sampleBlock(0, 0, sx, sy)
-        sampleBlock(width - sx, 0, width, sy)
-        sampleBlock(0, height - sy, sx, height)
-        sampleBlock(width - sx, height - sy, width, height)
-
-        val bgR = cornerSamples.map { Color.red(it) }.average().toFloat()
-        val bgG = cornerSamples.map { Color.green(it) }.average().toFloat()
-        val bgB = cornerSamples.map { Color.blue(it) }.average().toFloat()
+        // Estimate the plain studio background from the corners of the already-processed image.
+        val (bgR, bgG, bgB) = estimateCornerBackground(bitmap)
 
         val candidateBackground = BooleanArray(width * height)
         val alpha = FloatArray(width * height)
@@ -98,6 +81,8 @@ object FinishPassEngine {
             }
         }
 
+        // Flood-fill only the true outer background; enclosed light holes are kept with the object,
+        // which helps shelves, slats and open furniture interiors.
         val trueBackground = floodBorderBackground(candidateBackground, width, height)
         for (i in alpha.indices) {
             if (trueBackground[i]) {
@@ -173,6 +158,7 @@ object FinishPassEngine {
         }
         reinforceObjectBridges(out, width, height)
         suppressBackgroundLeaks(out, width, height)
+        tightenBottomSupportMask(out, width, height)
         return out
     }
 
@@ -211,6 +197,39 @@ object FinishPassEngine {
         }
     }
 
+    private fun tightenBottomSupportMask(mask: FloatArray, width: Int, height: Int) {
+        val copy = mask.clone()
+        val bottomBand = max(8, height / 9)
+        for (x in 1 until width - 1) {
+            var bottom = -1
+            var top = -1
+            val startY = height - 1
+            val limitY = max(0, height - bottomBand)
+            for (y in startY downTo limitY) {
+                if (copy[y * width + x] >= 0.56f) {
+                    if (bottom < 0) bottom = y
+                    top = y
+                } else if (bottom >= 0) {
+                    break
+                }
+            }
+            if (bottom < 0 || top < 0) continue
+            for (y in top..bottom) {
+                val i = y * width + x
+                mask[i] = max(mask[i], 0.94f)
+            }
+            val under = bottom + 1
+            if (under in 0 until height) {
+                val ui = under * width + x
+                val left = under * width + (x - 1)
+                val right = under * width + (x + 1)
+                if (copy[ui] <= 0.10f && (copy[left] >= 0.65f || copy[right] >= 0.65f)) {
+                    mask[ui] = 0.16f
+                }
+            }
+        }
+    }
+
     private fun computeBounds(mask: FloatArray, width: Int, height: Int): RectF? {
         var left = width
         var top = height
@@ -243,16 +262,34 @@ object FinishPassEngine {
 
         val contentWidth = bounds.width().coerceAtLeast(1f)
         val contentHeight = bounds.height().coerceAtLeast(1f)
-        val targetWidth = width * 0.885f
-        val targetHeight = height * 0.785f
+        val aspectRatio = contentHeight / contentWidth
+        val tall = aspectRatio > 1.18f
+        val veryWide = aspectRatio < 0.78f
+         // Perspective guard: keep tall objects slightly narrower and very wide objects a bit lower
+        // so the final catalog frame feels less distorted across varied capture angles.
+        val targetWidth = width * when {
+            tall -> 0.69f
+            veryWide -> 0.88f
+            else -> 0.865f
+        }
+        val targetHeight = height * when {
+            tall -> 0.845f
+            veryWide -> 0.77f
+            else -> 0.792f
+        }
         val scale = min(targetWidth / contentWidth, targetHeight / contentHeight)
-        val desiredBottom = height * 0.912f
+        val desiredBottom = height * when {
+            tall -> 0.944f
+            veryWide -> 0.932f
+            else -> 0.936f
+        }
         val placedWidth = contentWidth * scale
         val placedHeight = contentHeight * scale
         val left = (width - placedWidth) / 2f
         val top = desiredBottom - placedHeight
         val placedBounds = RectF(left, top, left + placedWidth, top + placedHeight)
 
+        drawGroundPlane(canvas, placedBounds, width, height)
         drawGroundedShadow(canvas, mask, bounds, scale, placedBounds, width, height)
 
         val matrix = Matrix().apply {
@@ -266,216 +303,3 @@ object FinishPassEngine {
     }
 
     private fun applyMask(source: Bitmap, mask: FloatArray): Bitmap {
-        val width = source.width
-        val height = source.height
-        val pixels = IntArray(width * height)
-        source.getPixels(pixels, 0, width, 0, 0, width, height)
-        for (i in pixels.indices) {
-            val c = pixels[i]
-            val a = (mask[i].coerceIn(0f, 1f) * 255f).roundToInt().coerceIn(0, 255)
-            pixels[i] = Color.argb(a, Color.red(c), Color.green(c), Color.blue(c))
-        }
-        return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also {
-            it.setPixels(pixels, 0, width, 0, 0, width, height)
-        }
-    }
-
-    private fun drawCatalogBackground(canvas: Canvas, width: Int, height: Int) {
-        val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            shader = LinearGradient(
-                0f,
-                0f,
-                0f,
-                height.toFloat(),
-                Color.rgb(236, 232, 226),
-                Color.rgb(226, 220, 212),
-                Shader.TileMode.CLAMP,
-            )
-        }
-        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bgPaint)
-
-        val floorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            shader = LinearGradient(
-                0f,
-                height * 0.60f,
-                0f,
-                height.toFloat(),
-                Color.argb(0, 255, 255, 255),
-                Color.argb(50, 255, 255, 255),
-                Shader.TileMode.CLAMP,
-            )
-        }
-        canvas.drawRect(0f, height * 0.60f, width.toFloat(), height.toFloat(), floorPaint)
-    }
-
-    private fun drawGroundedShadow(
-        canvas: Canvas,
-        mask: FloatArray,
-        sourceBounds: RectF,
-        scale: Float,
-        placedBounds: RectF,
-        width: Int,
-        height: Int,
-    ) {
-        val objectWidth = placedBounds.width().coerceAtLeast(width * 0.20f)
-        val baseY = placedBounds.bottom
-        val shiftX = width * 0.020f
-
-        val broadPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(54, 48, 40, 34)
-            maskFilter = BlurMaskFilter(max(width, height) * 0.018f, BlurMaskFilter.Blur.NORMAL)
-        }
-        val mediumPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(76, 40, 33, 28)
-            maskFilter = BlurMaskFilter(max(width, height) * 0.010f, BlurMaskFilter.Blur.NORMAL)
-        }
-        val contactPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(120, 24, 20, 18)
-            maskFilter = BlurMaskFilter(max(width, height) * 0.0036f, BlurMaskFilter.Blur.NORMAL)
-        }
-
-        canvas.drawOval(
-            RectF(
-                placedBounds.left + objectWidth * 0.03f + shiftX,
-                baseY - height * 0.002f,
-                placedBounds.right - objectWidth * 0.01f + shiftX,
-                baseY + height * 0.050f,
-            ),
-            broadPaint,
-        )
-        canvas.drawOval(
-            RectF(
-                placedBounds.left + objectWidth * 0.12f + shiftX * 0.6f,
-                baseY - height * 0.001f,
-                placedBounds.right - objectWidth * 0.08f + shiftX * 0.6f,
-                baseY + height * 0.026f,
-            ),
-            mediumPaint,
-        )
-
-        val srcWidth = width
-        val srcHeight = height
-        val startX = max(0, sourceBounds.left.toInt())
-        val endX = min(srcWidth - 1, sourceBounds.right.toInt())
-        val nearBottom = sourceBounds.bottom - srcHeight * 0.060f
-        val bottomByColumn = IntArray(srcWidth) { -1 }
-        for (x in startX..endX) {
-            var y = min(srcHeight - 1, sourceBounds.bottom.toInt())
-            val topLimit = max(0, sourceBounds.top.toInt())
-            while (y >= topLimit) {
-                if (mask[y * srcWidth + x] >= 0.55f) {
-                    bottomByColumn[x] = y
-                    break
-                }
-                y--
-            }
-        }
-
-        var runStart = -1
-        var x = startX
-        while (x <= endX + 1) {
-            val isSupport = x <= endX && bottomByColumn[x] >= nearBottom
-            if (isSupport && runStart < 0) runStart = x
-            if ((!isSupport || x > endX) && runStart >= 0) {
-                val runEnd = x - 1
-                val runWidth = runEnd - runStart + 1
-                if (runWidth >= max(2, (sourceBounds.width() * 0.008f).roundToInt())) {
-                    val srcCenter = (runStart + runEnd) / 2f
-                    val outCenter = placedBounds.left + (srcCenter - sourceBounds.left) * scale
-                    val half = max(runWidth * scale * 0.95f, objectWidth * 0.028f)
-                    canvas.drawOval(
-                        RectF(
-                            outCenter - half,
-                            baseY - height * 0.0015f,
-                            outCenter + half,
-                            baseY + height * 0.010f,
-                        ),
-                        contactPaint,
-                    )
-                    canvas.drawOval(
-                        RectF(
-                            outCenter - half * 0.55f + shiftX * 0.35f,
-                            baseY + height * 0.001f,
-                            outCenter + half * 1.05f + shiftX * 0.35f,
-                            baseY + height * 0.017f,
-                        ),
-                        mediumPaint,
-                    )
-                }
-                runStart = -1
-            }
-            x++
-        }
-    }
-
-    private fun applyPhotographerLook(source: Bitmap): Bitmap {
-        val width = source.width
-        val height = source.height
-        val pixels = IntArray(width * height)
-        source.getPixels(pixels, 0, width, 0, 0, width, height)
-        for (i in pixels.indices) {
-            val c = pixels[i]
-            val r = Color.red(c) / 255f
-            val g = Color.green(c) / 255f
-            val b = Color.blue(c) / 255f
-            fun curve(v: Float): Float {
-                val lifted = if (v < 0.36f) v + (0.36f - v) * 0.08f else v
-                val mid = ((lifted - 0.5f) * 1.07f + 0.5f).coerceIn(0f, 1f)
-                return if (mid > 0.86f) 0.86f + (mid - 0.86f) * 0.62f else mid
-            }
-            val nr = (curve(r) * 255f).roundToInt().coerceIn(0, 255)
-            val ng = (curve(g) * 255f).roundToInt().coerceIn(0, 255)
-            val nb = (curve(b) * 255f).roundToInt().coerceIn(0, 255)
-            pixels[i] = Color.argb(255, nr, ng, nb)
-        }
-        val toned = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also {
-            it.setPixels(pixels, 0, width, 0, 0, width, height)
-        }
-        return unsharpMask(toned, amount = 0.19f)
-    }
-
-    private fun unsharpMask(source: Bitmap, amount: Float): Bitmap {
-        val width = source.width
-        val height = source.height
-        val src = IntArray(width * height)
-        source.getPixels(src, 0, width, 0, 0, width, height)
-        val blur = src.clone()
-        for (y in 1 until height - 1) {
-            for (x in 1 until width - 1) {
-                var rs = 0
-                var gs = 0
-                var bs = 0
-                var count = 0
-                for (dy in -1..1) {
-                    for (dx in -1..1) {
-                        val c = src[(y + dy) * width + (x + dx)]
-                        rs += Color.red(c)
-                        gs += Color.green(c)
-                        bs += Color.blue(c)
-                        count++
-                    }
-                }
-                blur[y * width + x] = Color.argb(255, rs / count, gs / count, bs / count)
-            }
-        }
-        val out = IntArray(src.size)
-        for (i in src.indices) {
-            val sr = Color.red(src[i])
-            val sg = Color.green(src[i])
-            val sb = Color.blue(src[i])
-            val br = Color.red(blur[i])
-            val bg = Color.green(blur[i])
-            val bb = Color.blue(blur[i])
-            out[i] = Color.argb(
-                255,
-                (sr + (sr - br) * amount).roundToInt().coerceIn(0, 255),
-                (sg + (sg - bg) * amount).roundToInt().coerceIn(0, 255),
-                (sb + (sb - bb) * amount).roundToInt().coerceIn(0, 255),
-            )
-        }
-        if (!source.isRecycled) source.recycle()
-        return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also {
-            it.setPixels(out, 0, width, 0, 0, width, height)
-        }
-    }
-}
