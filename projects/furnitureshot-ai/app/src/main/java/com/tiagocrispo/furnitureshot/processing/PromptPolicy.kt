@@ -1,11 +1,12 @@
 package com.tiagocrispo.furnitureshot.processing
 
+import com.tiagocrispo.furnitureshot.model.BackgroundMode
 import com.tiagocrispo.furnitureshot.model.CatalogPreset
 import com.tiagocrispo.furnitureshot.model.ProcessSettings
 
 object PromptPolicy {
     val defaultPrompt = """
-        Edita esta foto como una fotografía profesional de catálogo para venta. Conserva estrictamente el mismo mueble: forma, proporciones, patas, estantes, cajones, bordes, uniones, vetas, textura, color y pequeñas imperfecciones reales. Mejora de forma natural la exposición, balance de blancos, contraste y definición sin aspecto plástico, CGI ni HDR exagerado. Aísla cuidadosamente el producto sobre un fondo blanco de estudio, sin halos ni piezas recortadas. Mantén una sombra de contacto suave y realista. Centra el mueble, conserva todo el objeto dentro del encuadre y nunca inventes detalles. Si una mejora exige alterar físicamente el producto, no la realices. El resultado debe parecer una fotografía real tomada por un fotógrafo profesional.
+        Convierte esta fotografía en una foto profesional de catálogo para venta manteniendo exactamente el mismo mueble. Conserva forma, proporciones, patas, estantes, cajones, bordes, uniones, vetas, textura, color y pequeñas imperfecciones reales. No inventes, borres ni rediseñes ninguna parte. Mejora de forma natural exposición, balance de blancos, contraste local y definición sin aspecto plástico, CGI, HDR exagerado ni sobreenfoque. Aísla cuidadosamente el mueble sobre un fondo blanco de estudio uniforme, preservando huecos, patas, listones y bordes finos; evita halos, manchas blancas, recortes dentados y zonas quemadas. Mantén una sombra de contacto suave y realista debajo del mueble para que no parezca flotando. Conserva el objeto completo dentro del encuadre. Si una mejora exige alterar físicamente el producto, no la realices. El resultado debe parecer una fotografía real tomada en un estudio profesional de e-commerce.
     """.trimIndent()
 
     private val structuralRequests = listOf(
@@ -34,44 +35,55 @@ object PromptPolicy {
 
         val base = when (preset) {
             CatalogPreset.QUICK_SALE -> ProcessSettings(
-                whiteBackground = true,
-                brightness = 0.035f,
-                contrast = 1.04f,
+                backgroundMode = BackgroundMode.STUDIO_WHITE,
+                brightness = 0.022f,
+                contrast = 1.035f,
                 warmth = 0.0f,
+                shadowStrength = 0.62f,
             )
             CatalogPreset.CATALOG -> ProcessSettings(
-                whiteBackground = true,
-                brightness = 0.025f,
-                contrast = 1.06f,
-                warmth = 0.01f,
+                backgroundMode = BackgroundMode.STUDIO_WHITE,
+                brightness = 0.018f,
+                contrast = 1.045f,
+                warmth = 0.008f,
+                shadowStrength = 0.72f,
             )
             CatalogPreset.NATURAL -> ProcessSettings(
-                whiteBackground = false,
-                brightness = 0.015f,
+                backgroundMode = BackgroundMode.KEEP_ORIGINAL,
+                brightness = 0.012f,
                 contrast = 1.025f,
                 warmth = 0.0f,
+                shadowStrength = 0.0f,
             )
             CatalogPreset.MARKETPLACE -> ProcessSettings(
-                whiteBackground = true,
-                brightness = 0.03f,
-                contrast = 1.05f,
+                backgroundMode = BackgroundMode.STUDIO_WHITE,
+                brightness = 0.02f,
+                contrast = 1.04f,
                 warmth = 0.0f,
+                shadowStrength = 0.66f,
             )
         }
 
-        val asksWhite = normalized.contains("fondo blanco") || normalized.contains("blanco de estudio")
-        val asksKeepBackground = normalized.contains("mantén el fondo") || normalized.contains("manten el fondo")
+        val asksWhite = normalized.contains("fondo blanco") || normalized.contains("blanco de estudio") || normalized.contains("blanco puro")
+        val asksKeepBackground = normalized.contains("mantén el fondo") || normalized.contains("manten el fondo") || normalized.contains("fondo original")
         val asksBrighter = normalized.contains("aclara") || normalized.contains("más claro") || normalized.contains("mas claro")
         val asksNatural = normalized.contains("natural")
+        val asksSoftShadow = normalized.contains("sombra suave")
+        val asksNoShadow = normalized.contains("sin sombra")
 
         return base.copy(
-            whiteBackground = when {
-                asksKeepBackground -> false
-                asksWhite -> true
-                else -> base.whiteBackground
+            backgroundMode = when {
+                asksKeepBackground -> BackgroundMode.KEEP_ORIGINAL
+                asksWhite -> BackgroundMode.STUDIO_WHITE
+                else -> base.backgroundMode
             },
-            brightness = (base.brightness + if (asksBrighter) 0.025f else 0f).coerceAtMost(0.08f),
-            contrast = if (asksNatural) minOf(base.contrast, 1.035f) else base.contrast,
+            brightness = (base.brightness + if (asksBrighter) 0.018f else 0f).coerceAtMost(0.065f),
+            contrast = if (asksNatural) minOf(base.contrast, 1.03f) else base.contrast,
+            shadowStrength = when {
+                asksNoShadow -> 0.0f
+                asksSoftShadow -> minOf(base.shadowStrength, 0.58f)
+                else -> base.shadowStrength
+            },
             fidelityWarning = if (protectedRequest) {
                 "Fidelity Lock ignoró una instrucción que intentaba cambiar la estructura real del mueble."
             } else {
