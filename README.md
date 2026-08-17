@@ -1,46 +1,106 @@
-# Damián “Tiago” Crispo
+# Hi, I'm Tiago 👋
 
-**Software & product builder focused on practical tools, Android apps, desktop utilities, AI-assisted learning and 3D workflows.**
+I like building tools for problems I actually run into.
 
-I like turning everyday problems into usable software: from study and weather tools to performance utilities, Android apps and Roblox-oriented 3D pipelines.
+Most of the projects here started the same way: I needed something that either didn't exist, was too limited, or simply didn't work the way I wanted. So I started making my own version and kept improving it as I used it.
 
-## Featured projects
+I'm especially interested in **Android apps, Windows utilities, automation, AI-assisted learning, game tooling and 3D workflows**.
 
-### 🌦️ Meteora Weather
-Weather application focused on clear forecasts, useful local information and an easy-to-read experience.
+<!--
+Profile note:
+Keep this intro short. I want the projects to do most of the talking.
+If I learn a new technology but haven't actually used it in a real project yet, don't add it below just to make the list longer.
+-->
 
-### 🎓 UTN Scholar
-AI-assisted study workspace designed around university material, structured notes, document analysis and guided learning.
+## Projects I'm working on
 
 ### 🧊 Forge3D Studio
-Desktop 3D production toolkit for Roblox-oriented workflows: asset inspection, conversion, assembly and content preparation.
+**3D tooling for Roblox workflows.**
+
+Forge3D started because I wanted a better way to inspect, convert and prepare 3D assets before bringing them into Roblox. The project has gradually grown into a desktop toolkit for working with models, characters, equipment, animations and game-ready assets.
+
+`3D tooling` · `Roblox` · `asset pipelines` · `desktop app`
+
+<!-- Forge3D is one of the main portfolio projects. Keep it near the top. -->
 
 ### ⚡ ProAim
-Windows performance and latency toolkit focused on mouse responsiveness, display configuration, gaming performance, diagnostics and system optimization.
+**Windows performance, latency and input tuning.**
+
+A utility I'm building around the things I usually check manually when trying to improve how a PC feels in games: mouse response, display settings, latency, diagnostics and system configuration.
+
+The goal isn't to hide everything behind a magic “boost” button. I prefer showing what is being changed and why.
+
+`Windows` · `performance` · `latency` · `diagnostics`
+
+<!-- Avoid claims like "zero latency" or "maximum FPS". Keep the description realistic. -->
+
+### 🎓 UTN Scholar
+**A study workspace built around university material.**
+
+This project came from wanting something closer to a personal NotebookLM for my UTN material: documents in one place, organized notes, explanations, study assistance and tools that help turn large amounts of course material into something easier to work with.
+
+`education` · `AI-assisted learning` · `documents` · `study tools`
 
 ### 📱 A53 Performance
-Android maintenance and performance utility developed around the Samsung Galaxy A53, with storage, cleanup and device-management workflows.
+**An Android utility originally built for my Galaxy A53.**
+
+It began as a practical tool for storage cleanup and device maintenance and slowly expanded into a broader Android utility. A big part of the work has been making destructive actions clear and keeping the interface useful instead of filling it with fake optimizer features.
+
+`Android` · `storage` · `device utilities` · `performance`
 
 ### 🗃️ WA Vault
-Local Android utility for preserving and organizing message-related events and media with an emphasis on reliability and recoverability.
+**Local message and media preservation experiments on Android.**
 
-## What I’m working on
+A reliability-focused Android project that works with message-related events and media. A lot of the development has been about edge cases: delayed files, app restarts, ordering, duplicate events and making sure related content stays correctly associated.
 
-- Android application development
-- Desktop utilities and automation
-- AI-assisted education tools
-- 3D asset pipelines and Roblox tooling
-- PC performance, latency and diagnostics
-- Product UX for technical tools
+`Android` · `event handling` · `local data` · `reliability`
 
-## Technologies
+### 🌦️ Meteora Weather
+**A weather app focused on making the useful information easy to read.**
 
-`Python` · `JavaScript` · `HTML` · `CSS` · Android development · Git/GitHub · automation workflows
+I wanted the forecast, local conditions and the information I actually care about to be visible without digging through a crowded interface. Meteora is my take on that idea.
 
-## Project philosophy
+`weather` · `data` · `UI` · `local information`
 
-I prefer software that is **useful, understandable and maintainable**. My projects are developed iteratively, with attention to real-world edge cases, clear versioning and continuous refinement.
+<!--
+Project order is intentional:
+1. Forge3D Studio
+2. ProAim
+3. UTN Scholar
+4. A53 Performance
+5. WA Vault
+6. Meteora Weather
+
+The first three show the widest range of technical work, so they should stay visible without scrolling too far.
+-->
+
+## What I usually work with
+
+- Python
+- JavaScript
+- HTML / CSS
+- Android development
+- Git and GitHub
+- automation and scripting
+- desktop tooling
+- 3D / game-development workflows
+
+I'm still learning constantly, so this list is intentionally about things I've actually worked with rather than every technology I've ever touched.
+
+## How I build things
+
+I usually develop in small iterations: get one part working, test it in real use, find what is annoying or fragile, and improve it.
+
+That means some of these projects have gone through a lot of versions. I actually like that part of development — taking something that technically works and making it more reliable, easier to understand and nicer to use.
 
 ---
 
-📌 A structured project index is available in [`PROJECTS.md`](./PROJECTS.md).
+For a more organized overview, I keep a small project index in [`PROJECTS.md`](./PROJECTS.md).
+
+<!--
+TODO for future portfolio cleanup:
+- Add real repository links once each project repo is accessible/public.
+- Add screenshots only when they represent the current UI.
+- Add release/download links where they are safe and useful.
+- Keep old project names in PROJECTS.md aliases so older notes/chats remain traceable.
+-->
