@@ -9,6 +9,7 @@ import android.graphics.Color
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.LinearGradient
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
@@ -51,7 +52,7 @@ object LocalEnhancementEngine {
                 originalPath = originalPath,
                 settings = settings,
                 maxDimension = 1280,
-                memoryWarning = "La foto era muy grande; se procesó en modo seguro para evitar un cierre de la app.",
+                memoryWarning = "La foto era muy grande; se procesó en modo seguro.",
             )
         }
     }
@@ -197,7 +198,7 @@ private object MlKitStudioComposer {
             return MatteResult(
                 bitmap = source,
                 replaced = false,
-                warning = "El recorte no estuvo disponible. Intenta procesar de nuevo en unos segundos.",
+                warning = "El recorte no estuvo disponible. Intenta de nuevo en unos segundos.",
             )
         }
 
@@ -212,6 +213,7 @@ private object MlKitStudioComposer {
 
         protectThinDetails(alpha.values, alpha.width, alpha.height)
         featherEdges(alpha.values, alpha.width, alpha.height)
+        tightenFringe(alpha.values)
 
         val validation = validateAlpha(alpha.values, alpha.width, alpha.height)
         if (!validation.accepted) {
@@ -229,6 +231,21 @@ private object MlKitStudioComposer {
             Bitmap.createScaledBitmap(maskSmall, source.width, source.height, true)
         }
 
+        val sourceBounds = RectF(
+            validation.bounds.left * source.width.toFloat() / alpha.width.toFloat(),
+            validation.bounds.top * source.height.toFloat() / alpha.height.toFloat(),
+            validation.bounds.right * source.width.toFloat() / alpha.width.toFloat(),
+            validation.bounds.bottom * source.height.toFloat() / alpha.height.toFloat(),
+        )
+        val targetRect = buildCatalogTargetRect(
+            subjectBounds = sourceBounds,
+            outputWidth = source.width,
+            outputHeight = source.height,
+        )
+        val subjectMatrix = Matrix().apply {
+            setRectToRect(sourceBounds, targetRect, Matrix.ScaleToFit.FILL)
+        }
+
         val output = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(output)
         drawStudioBackground(canvas, source.width, source.height)
@@ -236,21 +253,33 @@ private object MlKitStudioComposer {
         if (shadowStrength > 0f) {
             drawContactShadow(
                 canvas = canvas,
-                bounds = validation.bounds,
+                alpha = alpha.values,
                 maskWidth = alpha.width,
                 maskHeight = alpha.height,
+                bounds = validation.bounds,
+                targetRect = targetRect,
                 outputWidth = source.width,
                 outputHeight = source.height,
                 strength = shadowStrength,
             )
         }
 
-        val layer = canvas.saveLayer(0f, 0f, source.width.toFloat(), source.height.toFloat(), null)
-        canvas.drawBitmap(source, 0f, 0f, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+        val layer = canvas.saveLayer(
+            0f,
+            0f,
+            source.width.toFloat(),
+            source.height.toFloat(),
+            null,
+        )
+        canvas.drawBitmap(
+            source,
+            subjectMatrix,
+            Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG),
+        )
         val maskPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
             xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
         }
-        canvas.drawBitmap(maskFull, 0f, 0f, maskPaint)
+        canvas.drawBitmap(maskFull, subjectMatrix, maskPaint)
         maskPaint.xfermode = null
         canvas.restoreToCount(layer)
 
@@ -356,8 +385,8 @@ private object MlKitStudioComposer {
 
         if (bestLabel == 0) return false
 
-        for (i in alpha.indices) {
-            if (labels[i] != bestLabel) alpha[i] = 0f
+        for (index in alpha.indices) {
+            if (labels[index] != bestLabel) alpha[index] = 0f
         }
         return true
     }
@@ -369,7 +398,10 @@ private object MlKitStudioComposer {
                 var strongest = original[y * width + x]
                 for (dy in -1..1) {
                     for (dx in -1..1) {
-                        strongest = max(strongest, original[(y + dy) * width + (x + dx)] * 0.92f)
+                        strongest = max(
+                            strongest,
+                            original[(y + dy) * width + (x + dx)] * 0.91f,
+                        )
                     }
                 }
                 alpha[y * width + x] = strongest.coerceIn(0f, 1f)
@@ -378,22 +410,34 @@ private object MlKitStudioComposer {
     }
 
     private fun featherEdges(alpha: FloatArray, width: Int, height: Int) {
-        repeat(2) {
-            val original = alpha.clone()
-            for (y in 1 until height - 1) {
-                for (x in 1 until width - 1) {
-                    val index = y * width + x
-                    val center = original[index]
-                    if (center <= 0.01f || center >= 0.995f) continue
-                    var sum = 0f
-                    var count = 0
-                    for (dy in -1..1) {
-                        for (dx in -1..1) {
-                            sum += original[(y + dy) * width + (x + dx)]
-                            count++
-                        }
+        val original = alpha.clone()
+        for (y in 1 until height - 1) {
+            for (x in 1 until width - 1) {
+                val index = y * width + x
+                val center = original[index]
+                if (center <= 0.01f || center >= 0.995f) continue
+                var sum = 0f
+                var count = 0
+                for (dy in -1..1) {
+                    for (dx in -1..1) {
+                        sum += original[(y + dy) * width + (x + dx)]
+                        count++
                     }
-                    alpha[index] = (sum / count.toFloat()).coerceIn(0f, 1f)
+                }
+                alpha[index] = (sum / count.toFloat()).coerceIn(0f, 1f)
+            }
+        }
+    }
+
+    private fun tightenFringe(alpha: FloatArray) {
+        for (index in alpha.indices) {
+            val value = alpha[index]
+            alpha[index] = when {
+                value <= 0.06f -> 0f
+                value >= 0.94f -> 1f
+                else -> {
+                    val t = ((value - 0.06f) / 0.88f).coerceIn(0f, 1f)
+                    t * t * (3f - 2f * t)
                 }
             }
         }
@@ -459,51 +503,152 @@ private object MlKitStudioComposer {
         }
     }
 
+    private fun buildCatalogTargetRect(
+        subjectBounds: RectF,
+        outputWidth: Int,
+        outputHeight: Int,
+    ): RectF {
+        val availableWidth = outputWidth * 0.82f
+        val availableHeight = outputHeight * 0.78f
+        val scale = min(
+            availableWidth / subjectBounds.width().coerceAtLeast(1f),
+            availableHeight / subjectBounds.height().coerceAtLeast(1f),
+        )
+        val targetWidth = subjectBounds.width() * scale
+        val targetHeight = subjectBounds.height() * scale
+        val centerX = outputWidth * 0.5f
+        val bottom = outputHeight * 0.865f
+        return RectF(
+            centerX - targetWidth / 2f,
+            bottom - targetHeight,
+            centerX + targetWidth / 2f,
+            bottom,
+        )
+    }
+
     private fun drawStudioBackground(canvas: Canvas, width: Int, height: Int) {
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        canvas.drawColor(Color.WHITE)
+        val floorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             shader = LinearGradient(
                 0f,
-                0f,
+                height * 0.72f,
                 0f,
                 height.toFloat(),
-                Color.rgb(253, 253, 252),
-                Color.rgb(246, 246, 244),
+                Color.WHITE,
+                Color.rgb(250, 250, 248),
                 Shader.TileMode.CLAMP,
             )
         }
-        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), paint)
+        canvas.drawRect(
+            0f,
+            height * 0.72f,
+            width.toFloat(),
+            height.toFloat(),
+            floorPaint,
+        )
     }
 
     private fun drawContactShadow(
         canvas: Canvas,
-        bounds: RectF,
+        alpha: FloatArray,
         maskWidth: Int,
         maskHeight: Int,
+        bounds: RectF,
+        targetRect: RectF,
         outputWidth: Int,
         outputHeight: Int,
         strength: Float,
     ) {
-        val scaleX = outputWidth.toFloat() / maskWidth.toFloat()
-        val scaleY = outputHeight.toFloat() / maskHeight.toFloat()
-        val left = bounds.left * scaleX
-        val right = bounds.right * scaleX
-        val bottom = bounds.bottom * scaleY
-        val objectWidth = (right - left).coerceAtLeast(outputWidth * 0.12f)
+        val left = bounds.left.roundToInt().coerceIn(0, maskWidth - 1)
+        val right = bounds.right.roundToInt().coerceIn(left, maskWidth - 1)
+        val top = bounds.top.roundToInt().coerceIn(0, maskHeight - 1)
+        val bottom = bounds.bottom.roundToInt().coerceIn(top, maskHeight - 1)
+        val bottomByColumn = IntArray(right - left + 1) { -1 }
+        var globalBottom = -1
 
-        val shadowRect = RectF(
-            (left + objectWidth * 0.07f).coerceAtLeast(0f),
-            (bottom - outputHeight * 0.010f).coerceAtLeast(0f),
-            (right - objectWidth * 0.07f).coerceAtMost(outputWidth.toFloat()),
-            (bottom + outputHeight * 0.032f).coerceAtMost(outputHeight.toFloat()),
-        )
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            val alpha = (38f * strength.coerceIn(0f, 1f)).roundToInt().coerceIn(0, 48)
-            color = Color.argb(alpha, 20, 20, 20)
+        for (x in left..right) {
+            var found = -1
+            for (y in bottom downTo top) {
+                if (alpha[y * maskWidth + x] >= 0.45f) {
+                    found = y
+                    break
+                }
+            }
+            bottomByColumn[x - left] = found
+            globalBottom = max(globalBottom, found)
+        }
+
+        if (globalBottom < 0) return
+
+        val tolerance = max(2, (bounds.height() * 0.035f).roundToInt())
+        val scaleX = targetRect.width() / bounds.width().coerceAtLeast(1f)
+        val scaleY = targetRect.height() / bounds.height().coerceAtLeast(1f)
+
+        val ambientPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            val alphaValue = (16f * strength.coerceIn(0f, 1f)).roundToInt().coerceIn(0, 24)
+            color = Color.argb(alphaValue, 20, 20, 20)
             maskFilter = BlurMaskFilter(
-                max(outputWidth, outputHeight) * 0.008f,
+                max(outputWidth, outputHeight) * 0.010f,
                 BlurMaskFilter.Blur.NORMAL,
             )
         }
-        canvas.drawOval(shadowRect, paint)
+        canvas.drawOval(
+            RectF(
+                targetRect.left + targetRect.width() * 0.12f,
+                targetRect.bottom - outputHeight * 0.004f,
+                targetRect.right - targetRect.width() * 0.12f,
+                targetRect.bottom + outputHeight * 0.018f,
+            ),
+            ambientPaint,
+        )
+
+        val contactPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            val alphaValue = (58f * strength.coerceIn(0f, 1f)).roundToInt().coerceIn(0, 70)
+            color = Color.argb(alphaValue, 12, 12, 12)
+            maskFilter = BlurMaskFilter(
+                max(outputWidth, outputHeight) * 0.0038f,
+                BlurMaskFilter.Blur.NORMAL,
+            )
+        }
+
+        var runStart = -1
+        var runYSum = 0
+        var runCount = 0
+
+        fun flushRun(endExclusive: Int) {
+            if (runStart < 0 || runCount <= 0) return
+            val startMaskX = left + runStart
+            val endMaskX = left + endExclusive
+            val averageMaskY = runYSum.toFloat() / runCount.toFloat()
+            val x1 = targetRect.left + (startMaskX - bounds.left) * scaleX
+            val x2 = targetRect.left + (endMaskX - bounds.left) * scaleX
+            val y = targetRect.top + (averageMaskY - bounds.top) * scaleY
+            val horizontalPadding = max(outputWidth * 0.003f, (x2 - x1) * 0.04f)
+            canvas.drawOval(
+                RectF(
+                    (x1 - horizontalPadding).coerceAtLeast(0f),
+                    y - outputHeight * 0.0025f,
+                    (x2 + horizontalPadding).coerceAtMost(outputWidth.toFloat()),
+                    y + outputHeight * 0.0065f,
+                ),
+                contactPaint,
+            )
+            runStart = -1
+            runYSum = 0
+            runCount = 0
+        }
+
+        for (index in bottomByColumn.indices) {
+            val y = bottomByColumn[index]
+            val isContact = y >= globalBottom - tolerance
+            if (isContact) {
+                if (runStart < 0) runStart = index
+                runYSum += y
+                runCount++
+            } else if (runStart >= 0) {
+                flushRun(index)
+            }
+        }
+        if (runStart >= 0) flushRun(bottomByColumn.size)
     }
 }
