@@ -32,7 +32,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -71,7 +70,6 @@ fun FurnitureShotApp() {
 
     var originalPath by rememberSaveable { mutableStateOf<String?>(null) }
     var resultPath by rememberSaveable { mutableStateOf<String?>(null) }
-    var prompt by rememberSaveable { mutableStateOf(PromptPolicy.defaultPrompt) }
     var pendingCameraPath by rememberSaveable { mutableStateOf<String?>(null) }
     var isProcessing by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
@@ -210,73 +208,55 @@ fun FurnitureShotApp() {
                 originalPath?.let { path ->
                     ImageCard("Foto original", path)
 
-                    Card {
-                        Column(
-                            modifier = Modifier.padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            OutlinedTextField(
-                                value = prompt,
-                                onValueChange = { prompt = it },
-                                modifier = Modifier.fillMaxWidth(),
-                                minLines = 2,
-                                maxLines = 4,
-                                label = { Text("Indicaciones opcionales") },
-                                placeholder = { Text("Ej.: aclara un poco la foto") },
-                            )
-
-                            Button(
-                                onClick = {
-                                    if (isProcessing) {
-                                        job?.cancel()
-                                        job = null
-                                    } else {
-                                        job = scope.launch {
-                                            isProcessing = true
-                                            message = null
-                                            resultPath = null
-                                            try {
-                                                val settings = PromptPolicy.interpret(prompt)
-                                                val result = LocalEnhancementEngine.process(
-                                                    context = context,
-                                                    originalPath = path,
-                                                    settings = settings,
-                                                )
-                                                resultPath = result.resultPath
-                                                message = result.warning
-                                                withContext(Dispatchers.IO) {
-                                                    ImageStore.appendHistory(
-                                                        context,
-                                                        path,
-                                                        result.resultPath,
-                                                    )
-                                                }
-                                            } catch (_: kotlinx.coroutines.CancellationException) {
-                                                message = null
-                                            } catch (_: OutOfMemoryError) {
-                                                message = "La foto es demasiado grande para procesarla en este dispositivo."
-                                            } catch (_: Throwable) {
-                                                message = "No se pudo procesar la foto. Intenta nuevamente."
-                                            } finally {
-                                                isProcessing = false
-                                                job = null
-                                            }
+                    Button(
+                        onClick = {
+                            if (isProcessing) {
+                                job?.cancel()
+                                job = null
+                            } else {
+                                job = scope.launch {
+                                    isProcessing = true
+                                    message = null
+                                    resultPath = null
+                                    try {
+                                        val result = LocalEnhancementEngine.process(
+                                            context = context,
+                                            originalPath = path,
+                                            settings = PromptPolicy.automaticSettings(),
+                                        )
+                                        resultPath = result.resultPath
+                                        message = result.warning
+                                        withContext(Dispatchers.IO) {
+                                            ImageStore.appendHistory(
+                                                context,
+                                                path,
+                                                result.resultPath,
+                                            )
                                         }
+                                    } catch (_: kotlinx.coroutines.CancellationException) {
+                                        message = null
+                                    } catch (_: OutOfMemoryError) {
+                                        message = "La foto es demasiado grande para procesarla."
+                                    } catch (_: Throwable) {
+                                        message = "No se pudo procesar la foto. Intenta nuevamente."
+                                    } finally {
+                                        isProcessing = false
+                                        job = null
                                     }
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                if (isProcessing) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.width(20.dp),
-                                        strokeWidth = 2.dp,
-                                    )
-                                    Spacer(Modifier.width(10.dp))
-                                    Text("Cancelar")
-                                } else {
-                                    Text("Procesar")
                                 }
                             }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        if (isProcessing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.width(20.dp),
+                                strokeWidth = 2.dp,
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Text("Cancelar")
+                        } else {
+                            Text("Procesar")
                         }
                     }
                 }
