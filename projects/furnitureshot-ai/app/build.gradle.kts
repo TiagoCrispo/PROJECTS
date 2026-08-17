@@ -14,8 +14,8 @@ android {
         applicationId = "com.tiagocrispo.furnitureshot"
         minSdk = 26
         targetSdk = 36
-        versionCode = 29
-        versionName = "0.5.9-beta10"
+        versionCode = 30
+        versionName = "0.6.0-beta11"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -64,8 +64,6 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.2")
 
-    // On-device/unmetered-per-use subject segmentation. The small client is bundled in the APK;
-    // Google Play services downloads the segmentation module once and reuses it without tokens.
     implementation("com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1")
 
     debugImplementation("androidx.compose.ui:ui-tooling:1.11.4")

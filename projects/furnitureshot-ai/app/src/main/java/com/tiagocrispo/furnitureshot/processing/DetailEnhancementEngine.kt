@@ -8,20 +8,19 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
- * Conservative, tile-based detail reconstruction for furniture catalog photos.
+ * Conservative high-frequency preservation pass.
  *
- * The goal is not to invent texture. It reduces small sensor/compression noise,
- * restores local edge contrast and gently protects wood grain without applying
- * global HDR or aggressive sharpening. Processing is tiled to keep peak memory
- * low on mid-range phones.
+ * This intentionally avoids the old "denoise then sharpen" behavior. Real wood grain,
+ * pores, joints and fine edges stay anchored to the source pixel. Only a very small
+ * edge-aware high-pass boost is added where neighboring pixels support real structure.
  */
 object DetailEnhancementEngine {
     private const val TILE_HEIGHT = 160
     private const val OVERLAP = 1
-    private const val DENOISE_LUMA_THRESHOLD = 18f
-    private const val DETAIL_LIMIT = 11f
-    private const val SHARPEN_AMOUNT = 0.20f
-    private const val SATURATION = 1.012f
+    private const val SAME_SURFACE_THRESHOLD = 24f
+    private const val HIGH_PASS_LIMIT = 24f
+    private const val DETAIL_AMOUNT = 0.085f
+    private const val FLAT_DENOISE_BLEND = 0.055f
 
     fun enhanceForCatalog(source: Bitmap): Bitmap {
         if (source.width < 3 || source.height < 3) return source
@@ -39,39 +38,23 @@ object DetailEnhancementEngine {
                 val readTop = max(0, writeTop - OVERLAP)
                 val readBottom = min(source.height, writeBottom + OVERLAP)
                 val readHeight = readBottom - readTop
-
                 val input = IntArray(source.width * readHeight)
-                source.getPixels(
-                    input,
-                    0,
-                    source.width,
-                    0,
-                    readTop,
-                    source.width,
-                    readHeight,
-                )
+                source.getPixels(input, 0, source.width, 0, readTop, source.width, readHeight)
 
-                val outputHeight = writeBottom - writeTop
-                val tileOutput = IntArray(source.width * outputHeight)
-
+                val tileOutput = IntArray(source.width * (writeBottom - writeTop))
                 for (globalY in writeTop until writeBottom) {
                     val localY = globalY - readTop
                     val outY = globalY - writeTop
                     for (x in 0 until source.width) {
                         val center = input[localY * source.width + x]
-
-                        if (x == 0 || x == source.width - 1 || globalY == 0 || globalY == source.height - 1) {
-                            tileOutput[outY * source.width + x] = center
-                            continue
+                        tileOutput[outY * source.width + x] = if (
+                            x == 0 || x == source.width - 1 ||
+                            globalY == 0 || globalY == source.height - 1
+                        ) {
+                            center
+                        } else {
+                            enhancePixel(input, source.width, x, localY, center)
                         }
-
-                        tileOutput[outY * source.width + x] = enhancePixel(
-                            input = input,
-                            width = source.width,
-                            localX = x,
-                            localY = localY,
-                            center = center,
-                        )
                     }
                 }
 
@@ -82,14 +65,11 @@ object DetailEnhancementEngine {
                     0,
                     writeTop,
                     source.width,
-                    outputHeight,
+                    writeBottom - writeTop,
                 )
                 writeTop = writeBottom
             }
             output
-        } catch (_: OutOfMemoryError) {
-            if (!output.isRecycled) output.recycle()
-            source
         } catch (_: Throwable) {
             if (!output.isRecycled) output.recycle()
             source
@@ -99,34 +79,32 @@ object DetailEnhancementEngine {
     private fun enhancePixel(
         input: IntArray,
         width: Int,
-        localX: Int,
-        localY: Int,
+        x: Int,
+        y: Int,
         center: Int,
     ): Int {
-        val centerR = Color.red(center).toFloat()
-        val centerG = Color.green(center).toFloat()
-        val centerB = Color.blue(center).toFloat()
-        val centerLuma = luma(centerR, centerG, centerB)
+        val cr = Color.red(center).toFloat()
+        val cg = Color.green(center).toFloat()
+        val cb = Color.blue(center).toFloat()
+        val centerLuma = luma(cr, cg, cb)
 
-        var sumR = centerR * 4f
-        var sumG = centerG * 4f
-        var sumB = centerB * 4f
+        var sumR = cr * 4f
+        var sumG = cg * 4f
+        var sumB = cb * 4f
         var totalWeight = 4f
+        var maxNeighborDelta = 0f
 
         for (dy in -1..1) {
             for (dx in -1..1) {
                 if (dx == 0 && dy == 0) continue
-                val neighbor = input[(localY + dy) * width + localX + dx]
+                val neighbor = input[(y + dy) * width + x + dx]
                 val nr = Color.red(neighbor).toFloat()
                 val ng = Color.green(neighbor).toFloat()
                 val nb = Color.blue(neighbor).toFloat()
-                val neighborLuma = luma(nr, ng, nb)
-                val difference = abs(neighborLuma - centerLuma)
-
-                // Smooth only pixels that are likely the same local surface.
-                // Strong edges and wood joints are deliberately excluded.
-                if (difference <= DENOISE_LUMA_THRESHOLD) {
-                    val weight = 1f - difference / (DENOISE_LUMA_THRESHOLD + 1f)
+                val difference = abs(luma(nr, ng, nb) - centerLuma)
+                maxNeighborDelta = max(maxNeighborDelta, difference)
+                if (difference <= SAME_SURFACE_THRESHOLD) {
+                    val weight = 1f - difference / (SAME_SURFACE_THRESHOLD + 1f)
                     sumR += nr * weight
                     sumG += ng * weight
                     sumB += nb * weight
@@ -138,31 +116,23 @@ object DetailEnhancementEngine {
         val baseR = sumR / totalWeight
         val baseG = sumG / totalWeight
         val baseB = sumB / totalWeight
+        val hpR = (cr - baseR).coerceIn(-HIGH_PASS_LIMIT, HIGH_PASS_LIMIT)
+        val hpG = (cg - baseG).coerceIn(-HIGH_PASS_LIMIT, HIGH_PASS_LIMIT)
+        val hpB = (cb - baseB).coerceIn(-HIGH_PASS_LIMIT, HIGH_PASS_LIMIT)
 
-        val detailR = (centerR - baseR).coerceIn(-DETAIL_LIMIT, DETAIL_LIMIT)
-        val detailG = (centerG - baseG).coerceIn(-DETAIL_LIMIT, DETAIL_LIMIT)
-        val detailB = (centerB - baseB).coerceIn(-DETAIL_LIMIT, DETAIL_LIMIT)
+        val chroma = max(cr, max(cg, cb)) - min(cr, min(cg, cb))
+        val flatArea = maxNeighborDelta < 4.5f && chroma < 18f
+        val denoiseBlend = if (flatArea) FLAT_DENOISE_BLEND else 0f
 
-        var r = baseR + detailR * (1f + SHARPEN_AMOUNT)
-        var g = baseG + detailG * (1f + SHARPEN_AMOUNT)
-        var b = baseB + detailB * (1f + SHARPEN_AMOUNT)
+        val preservedR = cr * (1f - denoiseBlend) + baseR * denoiseBlend
+        val preservedG = cg * (1f - denoiseBlend) + baseG * denoiseBlend
+        val preservedB = cb * (1f - denoiseBlend) + baseB * denoiseBlend
 
-        // Gentle tonal protection: open very dark wood without flattening it,
-        // and roll off bright reflections before clipping.
-        val currentLuma = luma(r, g, b)
-        val toneScale = when {
-            currentLuma < 55f -> 1.025f
-            currentLuma > 225f -> 0.992f
-            else -> 1f
-        }
-        r *= toneScale
-        g *= toneScale
-        b *= toneScale
-
-        val neutral = luma(r, g, b)
-        r = neutral + (r - neutral) * SATURATION
-        g = neutral + (g - neutral) * SATURATION
-        b = neutral + (b - neutral) * SATURATION
+        val structural = maxNeighborDelta in 4.5f..80f
+        val detailAmount = if (structural) DETAIL_AMOUNT else DETAIL_AMOUNT * 0.45f
+        val r = preservedR + hpR * detailAmount
+        val g = preservedG + hpG * detailAmount
+        val b = preservedB + hpB * detailAmount
 
         return Color.argb(
             Color.alpha(center),
