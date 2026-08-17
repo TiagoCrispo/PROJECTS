@@ -1,0 +1,52 @@
+name: FurnitureShot AI Android
+
+on:
+  push:
+    paths:
+      - "projects/furnitureshot-ai/**"
+      - ".github/workflows/furnitureshot-ai-android.yml"
+  pull_request:
+    paths:
+      - "projects/furnitureshot-ai/**"
+      - ".github/workflows/furnitureshot-ai-android.yml"
+  workflow_dispatch:
+
+jobs:
+  build-debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: projects/furnitureshot-ai
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android 16 SDK
+        run: yes | sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+
+      - name: Build debug APK
+        run: gradle :app:assembleDebug --stacktrace --no-daemon
+
+      - name: Upload debug APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FurnitureShotAI-v0.1.0-alpha01-debug
+          path: projects/furnitureshot-ai/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
