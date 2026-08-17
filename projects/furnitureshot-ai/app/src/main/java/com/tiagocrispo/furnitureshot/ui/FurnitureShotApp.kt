@@ -10,6 +10,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,6 +35,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -51,6 +53,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import com.tiagocrispo.furnitureshot.data.ImageStore
 import com.tiagocrispo.furnitureshot.processing.LocalEnhancementEngine
@@ -71,6 +75,7 @@ fun FurnitureShotApp() {
     var originalPath by rememberSaveable { mutableStateOf<String?>(null) }
     var resultPath by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingCameraPath by rememberSaveable { mutableStateOf<String?>(null) }
+    var viewerPath by rememberSaveable { mutableStateOf<String?>(null) }
     var isProcessing by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var job by remember { mutableStateOf<Job?>(null) }
@@ -88,9 +93,7 @@ fun FurnitureShotApp() {
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
-    ) {
-        permissionRevision++
-    }
+    ) { permissionRevision++ }
 
     LaunchedEffect(Unit) {
         val missing = missingPermissions()
@@ -101,9 +104,7 @@ fun FurnitureShotApp() {
     }
 
     LaunchedEffect(resultPath) {
-        if (resultPath != null) {
-            scrollState.animateScrollTo(scrollState.maxValue)
-        }
+        if (resultPath != null) scrollState.animateScrollTo(scrollState.maxValue)
     }
 
     val galleryLauncher = rememberLauncherForActivityResult(
@@ -116,9 +117,7 @@ fun FurnitureShotApp() {
                     originalPath = file.absolutePath
                     resultPath = null
                     message = null
-                }.onFailure {
-                    message = "No se pudo abrir la foto."
-                }
+                }.onFailure { message = "No se pudo abrir la foto." }
             }
         }
     }
@@ -137,26 +136,42 @@ fun FurnitureShotApp() {
                     originalPath = file.absolutePath
                     resultPath = null
                     message = null
-                }.onFailure {
-                    message = "No se pudo abrir la foto."
-                }
+                }.onFailure { message = "No se pudo abrir la foto." }
             }
         }
     }
 
-    val cameraGranted = remember(permissionRevision) {
-        hasPermission(Manifest.permission.CAMERA)
-    }
+    val cameraGranted = remember(permissionRevision) { hasPermission(Manifest.permission.CAMERA) }
     val legacyStorageGranted = remember(permissionRevision) {
         Build.VERSION.SDK_INT > Build.VERSION_CODES.P ||
             hasPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)
     }
 
+    fun savePhoto(path: String) {
+        if (!legacyStorageGranted && Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+            permissionLauncher.launch(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE))
+            return
+        }
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { ImageStore.exportToGallery(context, path) } }
+                .onFailure { message = "No se pudo guardar la foto." }
+        }
+    }
+
+    fun sharePhoto(path: String) {
+        runCatching {
+            val uri = ImageStore.shareUriForResult(context, path)
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "image/jpeg"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(Intent.createChooser(intent, "Compartir foto"))
+        }.onFailure { message = "No se pudo compartir la foto." }
+    }
+
     MaterialTheme {
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = Color(0xFFFAF8F5),
-        ) {
+        Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFFFAF8F5)) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -185,9 +200,8 @@ fun FurnitureShotApp() {
                                 )
                             },
                             modifier = Modifier.weight(1f),
-                        ) {
-                            Text("Galería")
-                        }
+                        ) { Text("Galería") }
+
                         OutlinedButton(
                             onClick = {
                                 if (!cameraGranted) {
@@ -199,14 +213,12 @@ fun FurnitureShotApp() {
                                 }
                             },
                             modifier = Modifier.weight(1f),
-                        ) {
-                            Text("Cámara")
-                        }
+                        ) { Text("Cámara") }
                     }
                 }
 
                 originalPath?.let { path ->
-                    ImageCard("Foto original", path)
+                    ImageCard("Foto original", path) { viewerPath = it }
 
                     Button(
                         onClick = {
@@ -227,11 +239,7 @@ fun FurnitureShotApp() {
                                         resultPath = result.resultPath
                                         message = result.warning
                                         withContext(Dispatchers.IO) {
-                                            ImageStore.appendHistory(
-                                                context,
-                                                path,
-                                                result.resultPath,
-                                            )
+                                            ImageStore.appendHistory(context, path, result.resultPath)
                                         }
                                     } catch (_: kotlinx.coroutines.CancellationException) {
                                         message = null
@@ -249,10 +257,7 @@ fun FurnitureShotApp() {
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         if (isProcessing) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.width(20.dp),
-                                strokeWidth = 2.dp,
-                            )
+                            CircularProgressIndicator(modifier = Modifier.width(20.dp), strokeWidth = 2.dp)
                             Spacer(Modifier.width(10.dp))
                             Text("Cancelar")
                         } else {
@@ -262,96 +267,67 @@ fun FurnitureShotApp() {
                 }
 
                 resultPath?.let { path ->
-                    ImageCard("Resultado", path)
-
+                    ImageCard("Resultado", path) { viewerPath = it }
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Button(
-                            onClick = {
-                                if (!legacyStorageGranted && Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
-                                    permissionLauncher.launch(
-                                        arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE),
-                                    )
-                                } else {
-                                    scope.launch {
-                                        runCatching {
-                                            withContext(Dispatchers.IO) {
-                                                ImageStore.exportToGallery(context, path)
-                                            }
-                                        }.onFailure {
-                                            message = "No se pudo guardar la foto."
-                                        }
-                                    }
-                                }
-                            },
-                            modifier = Modifier.weight(1f),
-                        ) {
+                        Button(onClick = { savePhoto(path) }, modifier = Modifier.weight(1f)) {
                             Text("Guardar")
                         }
-
-                        OutlinedButton(
-                            onClick = {
-                                runCatching {
-                                    val uri = ImageStore.shareUriForResult(context, path)
-                                    val intent = Intent(Intent.ACTION_SEND).apply {
-                                        type = "image/jpeg"
-                                        putExtra(Intent.EXTRA_STREAM, uri)
-                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    }
-                                    context.startActivity(
-                                        Intent.createChooser(intent, "Compartir foto"),
-                                    )
-                                }.onFailure {
-                                    message = "No se pudo compartir la foto."
-                                }
-                            },
-                            modifier = Modifier.weight(1f),
-                        ) {
+                        OutlinedButton(onClick = { sharePhoto(path) }, modifier = Modifier.weight(1f)) {
                             Text("Compartir")
                         }
                     }
                 }
 
-                message?.let { text ->
+                message?.let {
                     Text(
-                        text = text,
+                        text = it,
                         style = MaterialTheme.typography.bodySmall,
                         color = Color(0xFF6C625C),
                         modifier = Modifier.padding(horizontal = 4.dp),
                     )
                 }
             }
+
+            viewerPath?.let { path ->
+                FullscreenImageDialog(
+                    path = path,
+                    onClose = { viewerPath = null },
+                    onSave = { savePhoto(path) },
+                    onShare = { sharePhoto(path) },
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun ImageCard(title: String, path: String) {
+private fun ImageCard(title: String, path: String, onOpen: (String) -> Unit) {
     Card {
         Column(
             modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(title, fontWeight = FontWeight.SemiBold)
-            FileImage(path)
+            FileImage(path = path, maxDimension = 1280, onOpen = onOpen)
         }
     }
 }
 
 @Composable
-private fun FileImage(path: String) {
-    var bitmap by remember(path) { mutableStateOf<Bitmap?>(null) }
-    var loading by remember(path) { mutableStateOf(true) }
+private fun FileImage(path: String, maxDimension: Int, onOpen: (String) -> Unit) {
+    var bitmap by remember(path, maxDimension) { mutableStateOf<Bitmap?>(null) }
+    var loading by remember(path, maxDimension) { mutableStateOf(true) }
 
-    LaunchedEffect(path) {
+    LaunchedEffect(path, maxDimension) {
         bitmap = null
         loading = true
         bitmap = runCatching {
-            withContext(Dispatchers.IO) { ImageStore.loadPreview(path, maxDimension = 1280) }
+            withContext(Dispatchers.IO) { ImageStore.loadPreview(path, maxDimension = maxDimension) }
         }.getOrNull()
         loading = false
     }
 
-    DisposableEffect(path) {
+    DisposableEffect(path, maxDimension) {
         onDispose {
             bitmap?.recycle()
             bitmap = null
@@ -362,14 +338,15 @@ private fun FileImage(path: String) {
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 220.dp, max = 480.dp)
-            .background(Color(0xFFF1EFEC), RoundedCornerShape(16.dp)),
+            .background(Color(0xFFF1EFEC), RoundedCornerShape(16.dp))
+            .clickable { onOpen(path) },
         contentAlignment = Alignment.Center,
     ) {
         when {
             loading -> CircularProgressIndicator()
             bitmap != null -> Image(
                 bitmap = bitmap!!.asImageBitmap(),
-                contentDescription = titleFor(path),
+                contentDescription = if (path.endsWith("result.jpg")) "Resultado" else "Foto original",
                 modifier = Modifier.fillMaxWidth(),
                 contentScale = ContentScale.Fit,
             )
@@ -378,5 +355,32 @@ private fun FileImage(path: String) {
     }
 }
 
-private fun titleFor(path: String): String =
-    if (path.endsWith("result.jpg")) "Resultado" else "Foto original"
+@Composable
+private fun FullscreenImageDialog(
+    path: String,
+    onClose: () -> Unit,
+    onSave: () -> Unit,
+    onShare: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onClose,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(modifier = Modifier.fillMaxSize(), color = Color(0xF0000000)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = onSave, modifier = Modifier.weight(1f)) { Text("Descargar") }
+                    OutlinedButton(onClick = onShare, modifier = Modifier.weight(1f)) { Text("Compartir") }
+                    TextButton(onClick = onClose, modifier = Modifier.weight(1f)) { Text("Cerrar") }
+                }
+                FileImage(path = path, maxDimension = 2200, onOpen = {})
+            }
+        }
+    }
+}
