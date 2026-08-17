@@ -12,11 +12,17 @@ enum class PreviewMode {
     RESULT,
 }
 
+enum class BackgroundMode {
+    KEEP_ORIGINAL,
+    STUDIO_WHITE,
+}
+
 data class ProcessSettings(
-    val whiteBackground: Boolean,
+    val backgroundMode: BackgroundMode,
     val brightness: Float,
     val contrast: Float,
     val warmth: Float,
+    val shadowStrength: Float,
     val fidelityWarning: String? = null,
 )
 
