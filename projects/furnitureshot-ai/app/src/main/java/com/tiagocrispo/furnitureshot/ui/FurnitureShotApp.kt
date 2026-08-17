@@ -150,13 +150,27 @@ fun FurnitureShotApp() {
                 for ((index, item) in items.withIndex()) {
                     val number = index + 1
                     stage = "Foto $number/$total · Recortando y mejorando"
-                    val result = LocalEnhancementEngine.process(
-                        context = context,
-                        originalPath = item.originalPath,
-                        settings = PromptPolicy.automaticSettings(),
-                    ) { local, localStage ->
-                        progress = (((index + local / 100f) / total) * 94f).toInt().coerceIn(0, 94)
-                        stage = "Foto $number/$total · $localStage"
+                    val ticker = launch {
+                        var local = 0
+                        while (isActive && local < 82) {
+                            delay(420)
+                            local = (local + 2).coerceAtMost(82)
+                            progress = (((index + local / 100f) / total) * 90f).toInt().coerceIn(0, 90)
+                            stage = when {
+                                local < 24 -> "Foto $number/$total · Preparando"
+                                local < 56 -> "Foto $number/$total · Recortando"
+                                else -> "Foto $number/$total · Mejorando luz y detalle"
+                            }
+                        }
+                    }
+                    val result = try {
+                        LocalEnhancementEngine.process(
+                            context = context,
+                            originalPath = item.originalPath,
+                            settings = PromptPolicy.automaticSettings(),
+                        )
+                    } finally {
+                        ticker.cancel()
                     }
                     stage = "Foto $number/$total · Acabado final"
                     val finished = withContext(Dispatchers.IO) { FinishPassEngine.apply(result.resultPath) }
