@@ -13,6 +13,7 @@ import android.provider.MediaStore
 import androidx.core.content.FileProvider
 import androidx.exifinterface.media.ExifInterface
 import com.tiagocrispo.furnitureshot.model.HistoryItem
+import com.tiagocrispo.furnitureshot.processing.DetailEnhancementEngine
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -59,17 +60,34 @@ object ImageStore {
     fun saveResult(originalPath: String, bitmap: Bitmap): File {
         val original = File(originalPath)
         val result = File(original.parentFile, "result.jpg")
-        val highQuality = prepareHighQualityResult(bitmap)
+        val temp = File(original.parentFile, "result.tmp.jpg")
+
+        val detailed = DetailEnhancementEngine.enhanceForCatalog(bitmap)
+        val highQuality = prepareHighQualityResult(detailed)
+
         try {
-            FileOutputStream(result).use { output ->
+            FileOutputStream(temp).use { output ->
                 check(highQuality.compress(Bitmap.CompressFormat.JPEG, 99, output)) {
                     "No se pudo guardar el resultado interno."
                 }
             }
+
+            if (result.exists() && !result.delete()) {
+                temp.delete()
+                error("No se pudo reemplazar el resultado anterior.")
+            }
+            if (!temp.renameTo(result)) {
+                temp.copyTo(result, overwrite = true)
+                temp.delete()
+            }
         } finally {
-            if (highQuality !== bitmap && !highQuality.isRecycled) {
+            if (highQuality !== detailed && highQuality !== bitmap && !highQuality.isRecycled) {
                 highQuality.recycle()
             }
+            if (detailed !== bitmap && !detailed.isRecycled) {
+                detailed.recycle()
+            }
+            if (temp.exists()) temp.delete()
         }
         return result
     }
