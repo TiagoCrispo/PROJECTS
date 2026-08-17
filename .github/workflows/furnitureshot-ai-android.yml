@@ -47,6 +47,6 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: FurnitureShotAI-v0.4.4-alpha14-debug
+          name: FurnitureShotAI-v0.4.6-alpha16-debug
           path: projects/furnitureshot-ai/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error

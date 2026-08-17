@@ -160,6 +160,7 @@ fun FurnitureShotApp() {
         } else {
             scope.launch {
                 runCatching { withContext(Dispatchers.IO) { ImageStore.exportToGallery(context, path) } }
+                    .onSuccess { message = "Listo. Guardado en la galería: Imágenes/Pictures > FurnitureShot AI" }
                     .onFailure { message = "No se pudo guardar la foto." }
             }
         }
