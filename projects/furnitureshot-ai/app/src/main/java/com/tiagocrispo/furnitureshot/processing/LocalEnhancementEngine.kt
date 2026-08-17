@@ -2,6 +2,7 @@ package com.tiagocrispo.furnitureshot.processing
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ColorMatrix
@@ -9,15 +10,23 @@ import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
+import android.graphics.RectF
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.segmentation.subject.SubjectSegmentation
+import com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions
 import com.tiagocrispo.furnitureshot.data.ImageStore
+import com.tiagocrispo.furnitureshot.model.BackgroundMode
 import com.tiagocrispo.furnitureshot.model.ProcessResult
 import com.tiagocrispo.furnitureshot.model.ProcessSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
-import kotlin.math.pow
-import kotlin.math.sqrt
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
 
 object LocalEnhancementEngine {
     suspend fun process(
@@ -32,10 +41,16 @@ object LocalEnhancementEngine {
         if (enhanced !== source) source.recycle()
         coroutineContext.ensureActive()
 
-        val matte = if (settings.whiteBackground) {
-            ConservativeBackgroundIsolator.applyWhiteStudioBackground(enhanced)
-        } else {
-            MatteResult(enhanced, replaced = false, warning = null)
+        val matte = when (settings.backgroundMode) {
+            BackgroundMode.KEEP_ORIGINAL -> MatteResult(
+                bitmap = enhanced,
+                replaced = false,
+                warning = null,
+            )
+            BackgroundMode.STUDIO_WHITE -> MlKitStudioComposer.compose(
+                source = enhanced,
+                shadowStrength = settings.shadowStrength,
+            )
         }
         coroutineContext.ensureActive()
 
@@ -49,7 +64,9 @@ object LocalEnhancementEngine {
         ProcessResult(
             resultPath = resultFile.absolutePath,
             backgroundReplaced = matte.replaced,
-            warning = listOfNotNull(settings.fidelityWarning, matte.warning).joinToString(" ").ifBlank { null },
+            warning = listOfNotNull(settings.fidelityWarning, matte.warning)
+                .joinToString(" ")
+                .ifBlank { null },
         )
     }
 
@@ -57,10 +74,10 @@ object LocalEnhancementEngine {
         val output = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(output)
 
-        val contrast = settings.contrast.coerceIn(0.9f, 1.12f)
-        val brightnessOffset = settings.brightness.coerceIn(-0.08f, 0.08f) * 255f
+        val contrast = settings.contrast.coerceIn(0.97f, 1.08f)
+        val brightnessOffset = settings.brightness.coerceIn(-0.04f, 0.065f) * 255f
         val translate = (1f - contrast) * 128f + brightnessOffset
-        val warmthOffset = settings.warmth.coerceIn(-0.04f, 0.04f) * 255f
+        val warmthOffset = settings.warmth.coerceIn(-0.025f, 0.035f) * 255f
 
         val matrix = ColorMatrix(
             floatArrayOf(
@@ -84,78 +101,57 @@ private data class MatteResult(
     val warning: String?,
 )
 
-private object ConservativeBackgroundIsolator {
-    private const val MASK_MAX_DIMENSION = 900
-    private const val MIN_BACKGROUND_COVERAGE = 0.08
-    private const val MAX_BACKGROUND_COVERAGE = 0.92
+private object MlKitStudioComposer {
+    private const val ML_MAX_DIMENSION = 1536
+    private const val MIN_COVERAGE = 0.07f
+    private const val MAX_COVERAGE = 0.82f
+    private const val LOW_CONFIDENCE = 0.18f
+    private const val HIGH_CONFIDENCE = 0.78f
 
-    suspend fun applyWhiteStudioBackground(source: Bitmap): MatteResult {
-        val scale = (MASK_MAX_DIMENSION.toFloat() / maxOf(source.width, source.height)).coerceAtMost(1f)
-        val maskWidth = (source.width * scale).toInt().coerceAtLeast(1)
-        val maskHeight = (source.height * scale).toInt().coerceAtLeast(1)
-        val small = if (maskWidth == source.width && maskHeight == source.height) {
-            source
-        } else {
-            Bitmap.createScaledBitmap(source, maskWidth, maskHeight, true)
+    suspend fun compose(source: Bitmap, shadowStrength: Float): MatteResult {
+        val working = scaledForMl(source)
+        val options = SubjectSegmenterOptions.Builder()
+            .enableForegroundConfidenceMask()
+            .enableMultipleSubjects(
+                SubjectSegmenterOptions.SubjectResultOptions.Builder()
+                    .enableConfidenceMask()
+                    .build(),
+            )
+            .build()
+        val segmenter = SubjectSegmentation.getClient(options)
+
+        val alpha = try {
+            val input = InputImage.fromBitmap(working, 0)
+            val result = segmenter.process(input).await()
+            coroutineContext.ensureActive()
+            buildBestSubjectAlpha(result, working.width, working.height)
+        } catch (t: Throwable) {
+            null
+        } finally {
+            segmenter.close()
         }
 
-        val pixels = IntArray(maskWidth * maskHeight)
-        small.getPixels(pixels, 0, maskWidth, 0, 0, maskWidth, maskHeight)
-        val backgroundColor = estimateBackgroundColor(pixels, maskWidth, maskHeight)
-        val distanceThreshold = chooseThreshold(pixels, maskWidth, maskHeight, backgroundColor)
+        if (working !== source) working.recycle()
 
-        val background = ByteArray(pixels.size)
-        val queue = IntArray(pixels.size)
-        var head = 0
-        var tail = 0
-        var count = 0
-
-        fun tryAdd(index: Int) {
-            if (background[index].toInt() != 0) return
-            if (colorDistance(pixels[index], backgroundColor) > distanceThreshold) return
-            background[index] = 1
-            queue[tail++] = index
-            count++
-        }
-
-        for (x in 0 until maskWidth) {
-            tryAdd(x)
-            tryAdd((maskHeight - 1) * maskWidth + x)
-        }
-        for (y in 0 until maskHeight) {
-            tryAdd(y * maskWidth)
-            tryAdd(y * maskWidth + maskWidth - 1)
-        }
-
-        while (head < tail) {
-            if ((head and 0x1FFF) == 0) coroutineContext.ensureActive()
-            val index = queue[head++]
-            val x = index % maskWidth
-            val y = index / maskWidth
-            if (x > 0) tryAdd(index - 1)
-            if (x + 1 < maskWidth) tryAdd(index + 1)
-            if (y > 0) tryAdd(index - maskWidth)
-            if (y + 1 < maskHeight) tryAdd(index + maskWidth)
-        }
-
-        if (small !== source) small.recycle()
-
-        val coverage = count.toDouble() / pixels.size.toDouble()
-        if (coverage < MIN_BACKGROUND_COVERAGE || coverage > MAX_BACKGROUND_COVERAGE) {
+        if (alpha == null) {
             return MatteResult(
                 bitmap = source,
                 replaced = false,
-                warning = "El aislamiento de fondo no fue suficientemente confiable; Fidelity Lock conservó el fondo original.",
+                warning = "El módulo IA de recorte todavía no estuvo disponible o no pudo aislar el mueble con seguridad. Se conservó la foto sin destruir el fondo; con conexión a internet, vuelve a procesarla cuando Google Play Services termine de preparar el modelo.",
             )
         }
 
-        val maskPixels = IntArray(background.size) { index ->
-            if (background[index].toInt() == 1) Color.TRANSPARENT else Color.WHITE
+        val validation = validateAlpha(alpha.values, alpha.width, alpha.height)
+        if (!validation.accepted) {
+            return MatteResult(
+                bitmap = source,
+                replaced = false,
+                warning = "Fidelity Lock rechazó un recorte poco confiable y conservó el fondo original.",
+            )
         }
-        val maskSmall = Bitmap.createBitmap(maskWidth, maskHeight, Bitmap.Config.ARGB_8888).also {
-            it.setPixels(maskPixels, 0, maskWidth, 0, 0, maskWidth, maskHeight)
-        }
-        val maskFull = if (maskWidth == source.width && maskHeight == source.height) {
+
+        val maskSmall = alphaToBitmap(alpha.values, alpha.width, alpha.height)
+        val maskFull = if (alpha.width == source.width && alpha.height == source.height) {
             maskSmall
         } else {
             Bitmap.createScaledBitmap(maskSmall, source.width, source.height, true)
@@ -163,7 +159,20 @@ private object ConservativeBackgroundIsolator {
 
         val output = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(output)
-        canvas.drawColor(Color.WHITE)
+        canvas.drawColor(Color.rgb(250, 250, 248))
+
+        if (shadowStrength > 0f) {
+            drawContactShadow(
+                canvas = canvas,
+                bounds = validation.bounds,
+                maskWidth = alpha.width,
+                maskHeight = alpha.height,
+                outputWidth = source.width,
+                outputHeight = source.height,
+                strength = shadowStrength,
+            )
+        }
+
         val layer = canvas.saveLayer(0f, 0f, source.width.toFloat(), source.height.toFloat(), null)
         canvas.drawBitmap(source, 0f, 0f, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
         val maskPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
@@ -176,67 +185,187 @@ private object ConservativeBackgroundIsolator {
         if (maskFull !== maskSmall) maskFull.recycle()
         maskSmall.recycle()
 
-        return MatteResult(
-            bitmap = output,
-            replaced = true,
-            warning = null,
+        return MatteResult(bitmap = output, replaced = true, warning = null)
+    }
+
+    private data class AlphaMask(
+        val values: FloatArray,
+        val width: Int,
+        val height: Int,
+    )
+
+    private data class MaskValidation(
+        val accepted: Boolean,
+        val bounds: RectF,
+    )
+
+    private fun scaledForMl(source: Bitmap): Bitmap {
+        val maxDimension = max(source.width, source.height)
+        if (maxDimension <= ML_MAX_DIMENSION) return source
+        val scale = ML_MAX_DIMENSION.toFloat() / maxDimension.toFloat()
+        return Bitmap.createScaledBitmap(
+            source,
+            (source.width * scale).roundToInt().coerceAtLeast(1),
+            (source.height * scale).roundToInt().coerceAtLeast(1),
+            true,
         )
     }
 
-    private fun estimateBackgroundColor(pixels: IntArray, width: Int, height: Int): Int {
-        val patchW = (width * 0.07f).toInt().coerceIn(4, 48)
-        val patchH = (height * 0.07f).toInt().coerceIn(4, 48)
-        var red = 0L
-        var green = 0L
-        var blue = 0L
-        var count = 0L
+    private fun buildBestSubjectAlpha(
+        result: com.google.mlkit.vision.segmentation.subject.SubjectSegmentationResult,
+        width: Int,
+        height: Int,
+    ): AlphaMask? {
+        val subjects = result.subjects
+        if (subjects.isNotEmpty()) {
+            val centerX = width / 2f
+            val centerY = height / 2f
+            val imageArea = width.toFloat() * height.toFloat()
 
-        fun sample(xStart: Int, yStart: Int) {
-            for (y in yStart until (yStart + patchH).coerceAtMost(height)) {
-                for (x in xStart until (xStart + patchW).coerceAtMost(width)) {
-                    val color = pixels[y * width + x]
-                    red += Color.red(color)
-                    green += Color.green(color)
-                    blue += Color.blue(color)
-                    count++
+            val best = subjects.maxByOrNull { subject ->
+                val area = subject.width.toFloat() * subject.height.toFloat()
+                val cx = subject.startX + subject.width / 2f
+                val cy = subject.startY + subject.height / 2f
+                val dx = abs(cx - centerX) / width.toFloat()
+                val dy = abs(cy - centerY) / height.toFloat()
+                val centerScore = 1f - (dx + dy).coerceIn(0f, 1f)
+                val areaScore = (area / imageArea).coerceIn(0f, 1f)
+                areaScore * 0.78f + centerScore * 0.22f
+            }
+
+            if (best != null && best.width > 0 && best.height > 0) {
+                val subjectBuffer = best.confidenceMask
+                if (subjectBuffer != null) {
+                    val full = FloatArray(width * height)
+                    val copy = subjectBuffer.duplicate().apply { rewind() }
+                    for (sy in 0 until best.height) {
+                        for (sx in 0 until best.width) {
+                            if (!copy.hasRemaining()) break
+                            val confidence = copy.get().coerceIn(0f, 1f)
+                            val x = best.startX + sx
+                            val y = best.startY + sy
+                            if (x in 0 until width && y in 0 until height) {
+                                full[y * width + x] = softenConfidence(confidence)
+                            }
+                        }
+                    }
+                    feather(full, width, height)
+                    return AlphaMask(full, width, height)
                 }
             }
         }
 
-        sample(0, 0)
-        sample((width - patchW).coerceAtLeast(0), 0)
-        sample(0, (height - patchH).coerceAtLeast(0))
-        sample((width - patchW).coerceAtLeast(0), (height - patchH).coerceAtLeast(0))
+        val foreground = result.foregroundConfidenceMask ?: return null
+        val duplicate = foreground.duplicate().apply { rewind() }
+        val full = FloatArray(width * height)
+        var i = 0
+        while (duplicate.hasRemaining() && i < full.size) {
+            full[i++] = softenConfidence(duplicate.get().coerceIn(0f, 1f))
+        }
+        feather(full, width, height)
+        return AlphaMask(full, width, height)
+    }
 
-        if (count == 0L) return Color.WHITE
-        return Color.rgb(
-            (red / count).toInt(),
-            (green / count).toInt(),
-            (blue / count).toInt(),
+    private fun softenConfidence(confidence: Float): Float {
+        if (confidence <= LOW_CONFIDENCE) return 0f
+        if (confidence >= HIGH_CONFIDENCE) return 1f
+        val t = ((confidence - LOW_CONFIDENCE) / (HIGH_CONFIDENCE - LOW_CONFIDENCE)).coerceIn(0f, 1f)
+        return t * t * (3f - 2f * t)
+    }
+
+    private fun feather(alpha: FloatArray, width: Int, height: Int) {
+        val original = alpha.clone()
+        for (y in 1 until height - 1) {
+            for (x in 1 until width - 1) {
+                val index = y * width + x
+                val center = original[index]
+                if (center <= 0.02f || center >= 0.98f) continue
+                var sum = 0f
+                var count = 0
+                for (dy in -1..1) {
+                    for (dx in -1..1) {
+                        sum += original[(y + dy) * width + (x + dx)]
+                        count++
+                    }
+                }
+                alpha[index] = (sum / count.toFloat()).coerceIn(0f, 1f)
+            }
+        }
+    }
+
+    private fun validateAlpha(alpha: FloatArray, width: Int, height: Int): MaskValidation {
+        var count = 0
+        var left = width
+        var right = -1
+        var top = height
+        var bottom = -1
+
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                if (alpha[y * width + x] >= 0.48f) {
+                    count++
+                    left = min(left, x)
+                    right = max(right, x)
+                    top = min(top, y)
+                    bottom = max(bottom, y)
+                }
+            }
+        }
+
+        if (count == 0 || right < left || bottom < top) {
+            return MaskValidation(false, RectF())
+        }
+
+        val coverage = count.toFloat() / alpha.size.toFloat()
+        val bounds = RectF(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat())
+        val touchesTooMuch = (left <= 1 && right >= width - 2) || (top <= 1 && bottom >= height - 2)
+        val usefulSize = bounds.width() >= width * 0.12f && bounds.height() >= height * 0.18f
+        return MaskValidation(
+            accepted = coverage in MIN_COVERAGE..MAX_COVERAGE && !touchesTooMuch && usefulSize,
+            bounds = bounds,
         )
     }
 
-    private fun chooseThreshold(pixels: IntArray, width: Int, height: Int, backgroundColor: Int): Double {
-        val samples = ArrayList<Double>(128)
-        val stepX = (width / 24).coerceAtLeast(1)
-        val stepY = (height / 24).coerceAtLeast(1)
-        for (x in 0 until width step stepX) {
-            samples += colorDistance(pixels[x], backgroundColor)
-            samples += colorDistance(pixels[(height - 1) * width + x], backgroundColor)
+    private fun alphaToBitmap(alpha: FloatArray, width: Int, height: Int): Bitmap {
+        val pixels = IntArray(alpha.size) { i ->
+            val a = (alpha[i].coerceIn(0f, 1f) * 255f).roundToInt()
+            Color.argb(a, 255, 255, 255)
         }
-        for (y in 0 until height step stepY) {
-            samples += colorDistance(pixels[y * width], backgroundColor)
-            samples += colorDistance(pixels[y * width + width - 1], backgroundColor)
+        return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also {
+            it.setPixels(pixels, 0, width, 0, 0, width, height)
         }
-        samples.sort()
-        val median = if (samples.isEmpty()) 0.0 else samples[samples.size / 2]
-        return (median * 2.2 + 22.0).coerceIn(32.0, 72.0)
     }
 
-    private fun colorDistance(color: Int, reference: Int): Double {
-        val dr = (Color.red(color) - Color.red(reference)).toDouble()
-        val dg = (Color.green(color) - Color.green(reference)).toDouble()
-        val db = (Color.blue(color) - Color.blue(reference)).toDouble()
-        return sqrt(dr.pow(2) + dg.pow(2) + db.pow(2))
+    private fun drawContactShadow(
+        canvas: Canvas,
+        bounds: RectF,
+        maskWidth: Int,
+        maskHeight: Int,
+        outputWidth: Int,
+        outputHeight: Int,
+        strength: Float,
+    ) {
+        val scaleX = outputWidth.toFloat() / maskWidth.toFloat()
+        val scaleY = outputHeight.toFloat() / maskHeight.toFloat()
+        val left = bounds.left * scaleX
+        val right = bounds.right * scaleX
+        val bottom = bounds.bottom * scaleY
+        val objectWidth = (right - left).coerceAtLeast(outputWidth * 0.12f)
+
+        val shadowRect = RectF(
+            (left + objectWidth * 0.05f).coerceAtLeast(0f),
+            (bottom - outputHeight * 0.012f).coerceAtLeast(0f),
+            (right - objectWidth * 0.05f).coerceAtMost(outputWidth.toFloat()),
+            (bottom + outputHeight * 0.035f).coerceAtMost(outputHeight.toFloat()),
+        )
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            val alpha = (42f * strength.coerceIn(0f, 1f)).roundToInt().coerceIn(0, 55)
+            color = Color.argb(alpha, 20, 20, 20)
+            maskFilter = BlurMaskFilter(
+                max(outputWidth, outputHeight) * 0.009f,
+                BlurMaskFilter.Blur.NORMAL,
+            )
+        }
+        canvas.drawOval(shadowRect, paint)
     }
 }
