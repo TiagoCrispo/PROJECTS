@@ -1,0 +1,115 @@
+name: WA Vault v0.5.29 six-message delete recovery
+
+on:
+  push:
+    branches: [wa-vault-build-v0529]
+    paths:
+      - 'wa-vault-build-v0529/TRIGGER'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Restore exact verified v0.5.28 source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir wa-vault-v0529-base wa-vault-v0529-project
+          gh run download 32011895251 -n WA-Vault-v0.5.28-source -D wa-vault-v0529-base
+          test -s wa-vault-v0529-base/WA-Vault-v0.5.28-source.zip
+          unzip -q wa-vault-v0529-base/WA-Vault-v0.5.28-source.zip -d wa-vault-v0529-project
+          grep -q 'versionCode = 78' wa-vault-v0529-project/app/build.gradle.kts
+          grep -q 'versionName = "0.5.28"' wa-vault-v0529-project/app/build.gradle.kts
+
+      - name: Apply verified v0.5.29 hotfix
+        run: |
+          set -euo pipefail
+          tr -d '\r\n\t ' < wa-vault-build-v0529/v0529.patch.gz.b64 | base64 -d > /tmp/v0529.patch.gz
+          echo '0addcd55e2aa7c4d2fc912186d4014aaee4b326d8f574e68748388a704dd58ab  /tmp/v0529.patch.gz' | sha256sum -c -
+          gzip -dc /tmp/v0529.patch.gz > /tmp/v0529.patch
+          echo '7068f417ef2d984aefc276c40cf00a5ce18a8ffbc47c60ddd13522902f2cbad4  /tmp/v0529.patch' | sha256sum -c -
+          cd wa-vault-v0529-project
+          patch -p1 --batch < /tmp/v0529.patch
+          find . -name '*.orig' -delete
+          if find . -name '*.rej' -print -quit | grep -q .; then
+            find . -name '*.rej' -print
+            exit 1
+          fi
+          grep -q 'versionCode = 79' app/build.gradle.kts
+          grep -q 'versionName = "0.5.29"' app/build.gradle.kts
+          python3 tools/v0529_regression_test.py
+          zip -qr /tmp/WA-Vault-v0.5.29-source.zip . -x './build/*' './app/build/*' './.gradle/*'
+          sha256sum /tmp/WA-Vault-v0.5.29-source.zip > /tmp/SOURCE_SHA256.txt
+
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK 35
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Compile release
+        working-directory: wa-vault-v0529-project
+        run: gradle :app:assembleRelease --stacktrace --console=plain
+
+      - name: Restore stable WA Vault signing key
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p signing
+          gh run download 31869556369 -n WA-Vault-v0.4.0-signing-backup-fixed -D signing
+          test -s signing/WA-Vault-v0.4.0-signing-backup.jks
+
+      - name: Sign and verify v0.5.29
+        run: |
+          set -euo pipefail
+          UNSIGNED=wa-vault-v0529-project/app/build/outputs/apk/release/app-release-unsigned.apk
+          test -s "$UNSIGNED"
+          mkdir -p wa-vault-v0529-output
+          PASS='WAVault-v040-2026'
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign \
+            --ks signing/WA-Vault-v0.4.0-signing-backup.jks \
+            --ks-key-alias wavault \
+            --ks-pass pass:"$PASS" \
+            --key-pass pass:"$PASS" \
+            --out wa-vault-v0529-output/WA-Vault-v0.5.29-COMPLETED_VERIFIED.apk "$UNSIGNED"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs \
+            wa-vault-v0529-output/WA-Vault-v0.5.29-COMPLETED_VERIFIED.apk \
+            > wa-vault-v0529-output/APK_SIGNATURE.txt
+          sha256sum wa-vault-v0529-output/WA-Vault-v0.5.29-COMPLETED_VERIFIED.apk \
+            > wa-vault-v0529-output/APK_SHA256.txt
+          cp wa-vault-v0529-project/V0529_NOTES.md wa-vault-v0529-output/
+          cp wa-vault-v0529-project/TEST_MATRIX.md wa-vault-v0529-output/
+          cp wa-vault-v0529-project/tools/v0529_regression_test.py wa-vault-v0529-output/
+          cp /tmp/WA-Vault-v0.5.29-source.zip wa-vault-v0529-output/
+          cp /tmp/SOURCE_SHA256.txt wa-vault-v0529-output/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WA-Vault-v0.5.29-release
+          path: wa-vault-v0529-output/
+          retention-days: 90
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WA-Vault-v0.5.29-source
+          path: |
+            /tmp/WA-Vault-v0.5.29-source.zip
+            /tmp/SOURCE_SHA256.txt
+          retention-days: 30
