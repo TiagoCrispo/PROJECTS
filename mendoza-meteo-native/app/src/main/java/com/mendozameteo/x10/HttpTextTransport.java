@@ -75,6 +75,10 @@ final class HttpTextTransport {
                 if (!"https".equalsIgnoreCase(target.getProtocol())) {
                     throw new WeatherException(WeatherException.Kind.HTTP_PERMANENT, "Refusing insecure official-feed redirect", status);
                 }
+                if (hasAuthorization(headers) && !sameHost(url, target)) {
+                    throw new WeatherException(WeatherException.Kind.HTTP_PERMANENT,
+                            "Refusing cross-host redirect for authenticated official request", status);
+                }
                 return execute(target.toString(), redirects + 1, headers);
             }
             if (status < 200 || status >= 300) {
@@ -119,6 +123,27 @@ final class HttpTextTransport {
         } finally {
             if (connection != null) connection.disconnect();
         }
+    }
+
+    static boolean authenticatedRedirectAllowed(String from, String to) {
+        try {
+            URL source = new URL(from);
+            URL target = new URL(source, to);
+            return "https".equalsIgnoreCase(target.getProtocol()) && sameHost(source, target);
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private static boolean hasAuthorization(Map<String,String> headers) {
+        for (String key : headers.keySet()) {
+            if (key != null && "authorization".equalsIgnoreCase(key)) return true;
+        }
+        return false;
+    }
+
+    private static boolean sameHost(URL first, URL second) {
+        return first.getHost() != null && first.getHost().equalsIgnoreCase(second.getHost());
     }
 
     private static void sleepBackoff(int retryNumber) throws WeatherException {
