@@ -2,6 +2,23 @@
 
 BandLab is a local-first Android training and health companion built around phone sensors and a Xiaomi Smart Band.
 
+## Current verified release
+
+**BandLab9Active 2.6.0** (`com.fer.bandlab`, versionCode 260, minSdk 28, targetSdk 36).
+
+The final 2.6 release passed the recorded unit, debug/release build, package/manifest, emulator upgrade and startup/crash gates. Its final APK was also checked for signature continuity with v2.5, ZIP integrity and zipalign.
+
+### Key 2.6 changes
+
+- live Xiaomi heart-rate integration during workouts, without fabricating HR when the Band does not provide it;
+- SQLite-backed workout-history migration;
+- configurable intervals and ghost pacing;
+- return-to-start guidance and local/offline route view;
+- GPS battery protection and personal-record tracking;
+- TCX/CSV workout export;
+- workout-finalization and heart-rate accumulation stability fixes;
+- updated local-first privacy wording.
+
 ## What it does
 
 - connects directly to a compatible Xiaomi Smart Band over Bluetooth LE;
@@ -18,10 +35,8 @@ BandLab is a local-first Android training and health companion built around phon
 
 ## Engineering focus
 
-The project is designed around honest sensor behavior. Missing heart-rate, GPS or Band data should stay missing rather than being replaced with believable-looking values.
-
-Wearable integration is treated as hardware-dependent: build and emulator checks are useful, but they are not substitutes for testing Bluetooth, reconnection, authentication and live data against a physical Band and phone.
+Missing heart-rate, GPS or Band data stays missing rather than being replaced with believable-looking values. Emulator/build validation is useful, but Bluetooth authentication, reconnection and live sensor behavior still require real-device testing.
 
 ## Privacy
 
-Authentication material, signing keys, Android Keystore data and other secrets are never intended for public source, logs or documentation.
+Authentication material, signing keys, Android Keystore data and other secrets are not intended for public source, logs or documentation. Private signing material is excluded from the verified source/release bundles.
