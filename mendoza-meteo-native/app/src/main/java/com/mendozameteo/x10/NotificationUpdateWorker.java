@@ -73,8 +73,7 @@ public final class NotificationUpdateWorker extends Worker {
             }
         }
 
-        boolean officialUnavailable = !official.anyOfficialSourceAvailable() && !official.usedCache;
-        if (officialUnavailable && getRunAttemptCount() < 1) return Result.retry();
+        if (official.shouldRetryBackground() && getRunAttemptCount() < 1) return Result.retry();
         return Result.success();
     }
 }
