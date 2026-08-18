@@ -56,7 +56,7 @@ final class HttpTextTransport {
             connection.setUseCaches(false);
             connection.setRequestProperty("Accept", "application/json,application/xml,text/xml,application/rss+xml,text/html;q=0.8,*/*;q=0.2");
             connection.setRequestProperty("Accept-Encoding", "gzip");
-            connection.setRequestProperty("User-Agent", "MendozaMeteoX10/6-native-dev");
+            connection.setRequestProperty("User-Agent", "MendozaMeteoX10/6.2-native-dev");
             for (Map.Entry<String,String> header : headers.entrySet()) {
                 if (header.getKey() != null && header.getValue() != null) {
                     connection.setRequestProperty(header.getKey(), header.getValue());
