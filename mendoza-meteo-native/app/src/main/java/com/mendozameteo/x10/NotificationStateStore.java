@@ -16,7 +16,19 @@ final class NotificationStateStore {
     private static final String LEGACY_PREFS = "notification_state_v1";
     private static final String OFFICIAL_PREFIX = "official.";
     private static final String X10_PREFIX = "x10.";
+    private static final String KEY_CONTEXT_LAT = "context.lat";
+    private static final String KEY_CONTEXT_LON = "context.lon";
     private static final long OFFICIAL_NO_EXPIRY_STALE_GUARD_MILLIS = 36L * 60L * 60L * 1000L;
+
+    static final class LocationReset {
+        final boolean changed;
+        final List<Integer> officialNotificationIds;
+
+        LocationReset(boolean changed, List<Integer> officialNotificationIds) {
+            this.changed = changed;
+            this.officialNotificationIds = Collections.unmodifiableList(new ArrayList<>(officialNotificationIds));
+        }
+    }
 
     private final SharedPreferences prefs;
 
@@ -27,6 +39,37 @@ final class NotificationStateStore {
         // bookkeeping clean.
         app.getSharedPreferences(LEGACY_PREFS, Context.MODE_PRIVATE).edit().clear().apply();
         prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    LocationReset syncLocationContext(double latitude, double longitude) {
+        if (!LocationPolicy.validCoordinate(latitude, longitude)) {
+            return new LocationReset(false, Collections.emptyList());
+        }
+        boolean hasAnchor = prefs.contains(KEY_CONTEXT_LAT) && prefs.contains(KEY_CONTEXT_LON);
+        if (!hasAnchor) {
+            saveLocationAnchor(latitude, longitude);
+            return new LocationReset(false, Collections.emptyList());
+        }
+        double previousLat = Double.longBitsToDouble(prefs.getLong(
+                KEY_CONTEXT_LAT, Double.doubleToRawLongBits(Double.NaN)));
+        double previousLon = Double.longBitsToDouble(prefs.getLong(
+                KEY_CONTEXT_LON, Double.doubleToRawLongBits(Double.NaN)));
+        if (OfficialAlertRepository.cacheLocationCompatible(previousLat, previousLon, latitude, longitude)) {
+            return new LocationReset(false, Collections.emptyList());
+        }
+
+        ArrayList<Integer> ids = new ArrayList<>();
+        for (NotificationPolicy.PreviousOfficial previous : loadOfficial()) {
+            if (previous.notificationId != 0) ids.add(previous.notificationId);
+        }
+        SharedPreferences.Editor editor = prefs.edit();
+        for (String key : prefs.getAll().keySet()) {
+            if (key.startsWith(OFFICIAL_PREFIX) || key.startsWith(X10_PREFIX)) editor.remove(key);
+        }
+        editor.putLong(KEY_CONTEXT_LAT, Double.doubleToRawLongBits(latitude));
+        editor.putLong(KEY_CONTEXT_LON, Double.doubleToRawLongBits(longitude));
+        editor.apply();
+        return new LocationReset(true, ids);
     }
 
     NotificationPolicy.PreviousOfficial findMatchingOfficial(OfficialAlert current) {
@@ -142,6 +185,13 @@ final class NotificationStateStore {
             }
         }
         return result;
+    }
+
+    private void saveLocationAnchor(double latitude, double longitude) {
+        prefs.edit()
+                .putLong(KEY_CONTEXT_LAT, Double.doubleToRawLongBits(latitude))
+                .putLong(KEY_CONTEXT_LON, Double.doubleToRawLongBits(longitude))
+                .apply();
     }
 
     private boolean matchesAny(NotificationPolicy.PreviousOfficial previous, List<OfficialAlert> alerts) {
