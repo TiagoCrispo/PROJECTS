@@ -1,6 +1,13 @@
 name: AniFlow Android v1
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - "projects/aniflow/**"
+      - ".ci/aniflow-src-rc1.b64.part-*"
+      - ".github/workflows/aniflow-android.yml"
   pull_request:
     branches:
       - main
