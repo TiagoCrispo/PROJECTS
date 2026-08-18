@@ -104,10 +104,10 @@ final class OfficialAlertRepository {
         all.sort(Comparator.comparingLong(a -> a == null || a.sentMillis <= 0 ? Long.MIN_VALUE : a.sentMillis));
         for (OfficialAlert alert : all) {
             if (alert == null) continue;
-            if (alert.cancellation) {
-                removeReferences(map, alert.references);
-                continue;
-            }
+            // CAP Update and Cancel both reference the message(s) they supersede. Remove
+            // references before handling the new message so feeds cannot leave duplicates.
+            if (!alert.references.isEmpty()) removeReferences(map, alert.references);
+            if (alert.cancellation) continue;
             if (!alert.activeAt(now)) continue;
             String key = alert.fingerprint();
             OfficialAlert previous = map.get(key);
