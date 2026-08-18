@@ -43,9 +43,10 @@ final class NotificationStateStore {
     void markOfficial(OfficialAlert alert, int notificationId, long nowMillis) {
         if (alert == null) return;
         String key = officialKey(alert.source, alert.id, alert.event, alert.startIso);
+        long staleBase = alert.sentMillis > 0L ? alert.sentMillis : nowMillis;
         long staleAt = alert.expiresMillis > 0L
                 ? alert.expiresMillis
-                : nowMillis + OFFICIAL_NO_EXPIRY_STALE_GUARD_MILLIS;
+                : staleBase + OFFICIAL_NO_EXPIRY_STALE_GUARD_MILLIS;
         try {
             JSONObject value = new JSONObject();
             value.put("stateKey", key);
