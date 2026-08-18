@@ -68,6 +68,14 @@ final class CapAlertParser {
         String sent = directText(root, "sent");
         String references = directText(root, "references");
 
+        // CAP cancellations can legitimately be reference-only. Preserve them so the
+        // repository can remove a previously cached/received alert even without info/area.
+        if (cancellation) {
+            return new OfficialAlert(id, OfficialAlert.Source.SMN_CAP, OfficialAlert.Level.UNKNOWN,
+                    "", "Cancelación oficial SMN", "", "", "", sent, sent, sent,
+                    true, references);
+        }
+
         Element info = preferredInfo(root);
         if (info == null) return null;
         String event = directText(info, "event");
@@ -85,9 +93,8 @@ final class CapAlertParser {
 
         OfficialAlert alert = new OfficialAlert(id, OfficialAlert.Source.SMN_CAP, level, event,
                 headline, description, instruction, match.areaDescription, sent, start, expires,
-                cancellation, references);
-        if (!cancellation && !alert.activeAt(nowMillis)) return null;
-        return alert;
+                false, references);
+        return alert.activeAt(nowMillis) ? alert : null;
     }
 
     private static Element preferredInfo(Element alert) {
@@ -122,23 +129,23 @@ final class CapAlertParser {
 
     private static AreaMatch matchesArea(Element info, double lat, double lon) {
         NodeList areas = info.getElementsByTagNameNS("*", "area");
-        boolean sawGeometry = false;
         for (int i = 0; i < areas.getLength(); i++) {
             Node node = areas.item(i);
             if (!(node instanceof Element)) continue;
             Element area = (Element) node;
             String desc = directText(area, "areaDesc");
+            boolean areaHasGeometry = false;
             NodeList polygons = area.getElementsByTagNameNS("*", "polygon");
             for (int p = 0; p < polygons.getLength(); p++) {
-                sawGeometry = true;
+                areaHasGeometry = true;
                 if (pointInPolygon(lat, lon, polygons.item(p).getTextContent())) return new AreaMatch(true, desc);
             }
             NodeList circles = area.getElementsByTagNameNS("*", "circle");
             for (int c = 0; c < circles.getLength(); c++) {
-                sawGeometry = true;
+                areaHasGeometry = true;
                 if (pointInCircle(lat, lon, circles.item(c).getTextContent())) return new AreaMatch(true, desc);
             }
-            if (!sawGeometry && fallbackAreaMatch(desc, lat, lon)) return new AreaMatch(true, desc);
+            if (!areaHasGeometry && fallbackAreaMatch(desc, lat, lon)) return new AreaMatch(true, desc);
         }
         return new AreaMatch(false, "");
     }
