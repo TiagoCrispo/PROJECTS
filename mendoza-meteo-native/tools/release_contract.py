@@ -22,11 +22,13 @@ def require(condition: bool, message: str) -> None:
 
 def verify_version() -> None:
     gradle = read("app/build.gradle")
-    require(re.search(r"\bversionCode\s+65\b", gradle) is not None, "versionCode must be 65")
-    require("versionName '6.5-native-dev'" in gradle, "versionName must be 6.5-native-dev")
+    require(re.search(r"\bversionCode\s+66\b", gradle) is not None, "versionCode must be 66")
+    require("versionName '6.6-native-dev'" in gradle, "versionName must be 6.6-native-dev")
     require("-Xlint:deprecation" in gradle, "Java deprecation audit must stay enabled")
+    require("-Werror" in gradle, "Java warnings must fail compilation")
 
     forbidden = (
+        "6.5-native-dev", "versionCode 65", "v6.5",
         "6.4-native-dev", "versionCode 64", "v6.4",
         "6.3-native-dev", "versionCode 63", "v6.3",
         "6.2-native-dev", "versionCode 62", "v6.2",
@@ -125,6 +127,18 @@ def verify_freshness_contract() -> None:
             "forecast future-timestamp rejection missing")
 
 
+def verify_user_agent_contract() -> None:
+    json_transport = read("app/src/main/java/com/mendozameteo/x10/HttpJsonTransport.java")
+    text_transport = read("app/src/main/java/com/mendozameteo/x10/HttpTextTransport.java")
+    provider_smoke = read("tools/provider_smoke.py")
+    require("BuildConfig.VERSION_NAME" in json_transport,
+            "weather User-Agent must derive its version from BuildConfig")
+    require("BuildConfig.VERSION_NAME" in text_transport,
+            "official User-Agent must derive its version from BuildConfig")
+    require("app/build.gradle" in provider_smoke and "versionName" in provider_smoke,
+            "provider smoke must derive its version from app/build.gradle")
+
+
 def verify_wrapper_contract() -> None:
     gradlew = ROOT / "gradlew"
     bat = ROOT / "gradlew.bat"
@@ -147,12 +161,12 @@ def verify_ci_contract() -> None:
     require("android-actions/setup-android@v4" in workflow, "Android setup action must remain on Node 24")
     require("gradle/actions/setup-gradle@v6" in workflow, "Gradle setup action must remain on Node 24")
     require("cache-provider: basic" in workflow, "Gradle cache must remain on the open-source basic provider")
-    require("--warning-mode all" in workflow, "Gradle deprecation audit must remain visible")
+    require("--warning-mode fail" in workflow, "Gradle warnings/deprecations must fail CI")
     require("./gradlew" in workflow, "CI must build through the committed Gradle Wrapper")
     require("gradle-version:" not in workflow, "CI must not provision a separate global Gradle version")
     require("wrapper-bootstrap:" not in workflow, "one-shot wrapper bootstrap job must be removed")
-    require("versionCode='65'" in workflow, "APK CI contract must inspect versionCode 65")
-    require("versionName='6.5-native-dev'" in workflow, "APK CI contract must inspect v6.5")
+    require("versionCode='66'" in workflow, "APK CI contract must inspect versionCode 66")
+    require("versionName='6.6-native-dev'" in workflow, "APK CI contract must inspect v6.6")
     require(not (REPO / ".github/workflows/bootstrap-gradle-wrapper.yml").exists(),
             "temporary wrapper bootstrap workflow must be deleted")
 
@@ -169,10 +183,11 @@ def main() -> None:
     verify_widget_contract()
     verify_background_contract()
     verify_freshness_contract()
+    verify_user_agent_contract()
     verify_wrapper_contract()
     verify_ci_contract()
     verify_no_signing_material()
-    print("RELEASE_CONTRACT_OK version=6.5-native-dev code=65 wrapper=gradle-9.5.0 checksum_locked=true widget=2x2 location_bound=true clock_skew_guard=true node24_ci=true background_location=false")
+    print("RELEASE_CONTRACT_OK version=6.6-native-dev code=66 warnings_are_errors=true wrapper=gradle-9.5.0 checksum_locked=true user_agent_synced=true widget=2x2 location_bound=true clock_skew_guard=true node24_ci=true background_location=false")
 
 
 if __name__ == "__main__":
