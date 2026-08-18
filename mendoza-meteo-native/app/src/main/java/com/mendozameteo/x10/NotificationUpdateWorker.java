@@ -50,7 +50,8 @@ public final class NotificationUpdateWorker extends Worker {
             state.markOfficial(alert, notificationId, now);
         }
 
-        WeatherRepository.Result weather = new WeatherRepository(app).load("local", point.lat, point.lon);
+        String forecastCacheKey = point.personalized ? "local" : "utn";
+        WeatherRepository.Result weather = new WeatherRepository(app).load(forecastCacheKey, point.lat, point.lon);
         if (weather.isSuccess() && weather.safeForAlerts()) {
             AlertEngine.Report report = AlertEngine.analyze(weather.forecast);
             boolean hasThunderstorm = false;
