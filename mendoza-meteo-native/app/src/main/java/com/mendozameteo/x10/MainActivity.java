@@ -138,12 +138,34 @@ public final class MainActivity extends Activity {
 
     private void renderPrecaution(WeatherRepository.Result result){
         LinearLayout alert=card(); alert.setPadding(dp(14),dp(11),dp(14),dp(11)); LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2); lp.topMargin=dp(8);
-        if(!result.safeForAlerts()){ alert.setBackground(cardBg(Color.rgb(47,45,28),16)); alert.addView(text("Precauciones pausadas · datos guardados hace "+ForecastFreshness.ageLabel(result.ageMillis),12,Color.rgb(241,211,139),true)); content.addView(alert,lp); return; }
-        int rainMax=0,zondaMax=0,persistent=0,maxPersistent=0; String rainStart=null,zondaStart=null; boolean storm=false;
-        for(WeatherClient.Hour h:result.forecast.hours){ boolean rain=h.rainProbability>=50&&(h.precipitation>=0.2||WeatherClient.isRainCode(h.code)); if(rain){rainMax=Math.max(rainMax,h.rainProbability);if(rainStart==null)rainStart=WeatherClient.hourLabel(h.iso);storm|=WeatherClient.isStormCode(h.code);} int zs=WeatherClient.zondaScore(h); if(zs>0){persistent++;maxPersistent=Math.max(maxPersistent,persistent);if(zondaStart==null)zondaStart=WeatherClient.hourLabel(h.iso);zondaMax=Math.max(zondaMax,zs);}else persistent=0; }
-        boolean zonda=zondaMax>=70||maxPersistent>=2;
-        if(rainMax==0&&!zonda){alert.setBackground(cardBg(Color.rgb(20,47,39),16));alert.addView(text("✓ Sin precauciones relevantes en 24 h",13,Color.rgb(156,232,194),true));}
-        else{alert.setBackground(cardBg(Color.rgb(72,48,18),16));StringBuilder s=new StringBuilder("Precaución · ");if(rainMax>0)s.append(storm?"tormenta ":"lluvia ").append(rainMax).append("% desde ").append(rainStart);if(zonda){if(rainMax>0)s.append(" · ");s.append("posible Zonda ").append(zondaMax).append("% desde ").append(zondaStart);}alert.addView(text(s.toString(),13,Color.rgb(255,211,123),true));}
+        if(!result.safeForAlerts()){
+            alert.setBackground(cardBg(Color.rgb(47,45,28),16));
+            alert.addView(text("Precauciones pausadas · datos guardados hace "+ForecastFreshness.ageLabel(result.ageMillis),12,Color.rgb(241,211,139),true));
+            alert.addView(text("No se generan señales X10 con datos meteorológicos antiguos.",10,Color.rgb(188,180,145),false));
+            content.addView(alert,lp); return;
+        }
+
+        AlertEngine.Report report=AlertEngine.analyze(result.forecast);
+        if(!report.hasHazards()){
+            alert.setBackground(cardBg(Color.rgb(20,47,39),16));
+            alert.addView(text("✓ Sin precauciones relevantes en las próximas 24 h",13,Color.rgb(156,232,194),true));
+            alert.addView(text("Detección X10 · solo horas futuras",10,Color.rgb(125,184,157),false));
+            content.addView(alert,lp); return;
+        }
+
+        int bg=Color.rgb(72,48,18), titleColor=Color.rgb(255,211,123);
+        if(report.highestSeverity==AlertEngine.Severity.IMPORTANT){ bg=Color.rgb(78,43,18); titleColor=Color.rgb(255,190,112); }
+        else if(report.highestSeverity==AlertEngine.Severity.DANGER){ bg=Color.rgb(74,27,31); titleColor=Color.rgb(255,151,157); }
+        alert.setBackground(cardBg(bg,16));
+        alert.addView(text("Precaución inteligente X10 · "+report.highestSeverity.label,13,titleColor,true));
+        int shown=0;
+        for(AlertEngine.Event event:report.events){
+            if(shown>=3)break;
+            alert.addView(text(event.detailText(),11,Color.rgb(235,224,205),shown==0));
+            shown++;
+        }
+        if(report.events.size()>shown)alert.addView(text("+"+(report.events.size()-shown)+" evento(s) adicional(es) en 24 h",10,Color.rgb(202,190,169),false));
+        alert.addView(text("Heurística X10 · no es una alerta oficial SMN · las oficiales tendrán prioridad",10,Color.rgb(202,190,169),false));
         content.addView(alert,lp);
     }
 
