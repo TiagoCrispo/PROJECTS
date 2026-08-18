@@ -104,7 +104,7 @@ public final class WeatherWidgetProvider extends AppWidgetProvider {
         for (int i = 0; i < 7; i++) {
             WeatherClient.Day d = f.days.get(i);
             views.setTextViewText(dayIds[i], d.label);
-            views.setTextViewText(tempIds[i], d.max + "° / " + d.min + "°");
+            views.setTextViewText(tempIds[i], d.max + "°/" + d.min + "°");
             views.setTextViewText(rainIds[i], d.rainProbability + "%");
         }
     }
@@ -132,7 +132,7 @@ public final class WeatherWidgetProvider extends AppWidgetProvider {
         int[] rainIds = {R.id.rain1,R.id.rain2,R.id.rain3,R.id.rain4,R.id.rain5,R.id.rain6,R.id.rain7};
         for (int i = 0; i < 7; i++) {
             views.setTextViewText(dayIds[i], p.getString("day"+i, i == 0 ? "Hoy" : "---"));
-            views.setTextViewText(tempIds[i], p.getInt("max"+i, 0) + "° / " + p.getInt("min"+i, 0) + "°");
+            views.setTextViewText(tempIds[i], p.getInt("max"+i, 0) + "°/" + p.getInt("min"+i, 0) + "°");
             views.setTextViewText(rainIds[i], p.getInt("rain"+i, 0) + "%");
         }
         return true;
