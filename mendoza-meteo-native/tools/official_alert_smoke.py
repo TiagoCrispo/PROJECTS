@@ -24,7 +24,7 @@ SMN_COORD = "https://ws1.smn.gob.ar/v1/georef/location/coord?lat=-32.896748&lon=
 SMN_ALERT_BASE = "https://ws1.smn.gob.ar/v1/warning/alert/location"
 WMO_REGISTRY = "https://alertingauthority.wmo.int/authorities.php?recId=4"
 WMO_SWIC_ALL = "https://severeweather.wmo.int/v2/json/all.json"
-MENDOZA_DCC = "https://www.contingencias.mendoza.gov.ar/alerta/"
+MENDOZA_DCC = "https://contingencias.mendoza.gov.ar/alerta/"
 JWT = re.compile(r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")
 TOKEN_PATTERNS = [
     re.compile(r"localStorage\.setItem\(['\"]token['\"]\s*,\s*['\"]([^'\"]+)['\"]"),
@@ -130,7 +130,6 @@ def probe_wmo_swic() -> None:
             f"bytes={len(body)} type={content_type!r} shape={shape!r} argentina_active={argentina_present}"
         )
     except Exception as error:
-        # SWIC aggregate is supplemental: the authoritative registry is the contract gate.
         print(f"OFFICIAL_SMOKE_INFO wmo_swic_unavailable {type(error).__name__}: {error}")
 
 
@@ -160,8 +159,6 @@ def verify_smn() -> None:
         api_error = error
         print(f"OFFICIAL_SMOKE_DEGRADED smn_api {type(error).__name__}: {error}")
 
-    # Only classify this as an environmental restriction when both direct official
-    # entry points explicitly returned HTTP 403. Other failures still fail the gate.
     cap_403 = isinstance(cap_error, FetchFailure) and cap_error.status == 403
     api_403 = isinstance(api_error, FetchFailure) and api_error.status == 403
     if not (cap_403 and api_403):
