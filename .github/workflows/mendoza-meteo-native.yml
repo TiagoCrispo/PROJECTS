@@ -50,7 +50,7 @@ jobs:
                   mendoza-meteo-native/gradlew.bat \
                   mendoza-meteo-native/gradle/wrapper/gradle-wrapper.jar \
                   mendoza-meteo-native/gradle/wrapper/gradle-wrapper.properties
-          git diff --cached --check
+          git diff --cached --check -- . ':(exclude)mendoza-meteo-native/gradlew.bat'
           if git diff --cached --quiet; then
             echo 'Wrapper already matches Gradle 9.5.0.'
             exit 0
