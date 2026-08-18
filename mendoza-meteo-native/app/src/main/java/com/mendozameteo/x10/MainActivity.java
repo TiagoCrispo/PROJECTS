@@ -155,6 +155,7 @@ public final class MainActivity extends Activity {
     private void renderOfficialAlerts(OfficialAlertRepository.Result result){
         if(result==null||!result.hasAlerts())return;
         int shown=0;
+        long now=System.currentTimeMillis();
         for(OfficialAlert official:result.alerts){
             if(shown++>=3)break;
             LinearLayout alert=card(); alert.setPadding(dp(14),dp(11),dp(14),dp(11));
@@ -167,6 +168,8 @@ public final class MainActivity extends Activity {
             alert.addView(text("OFICIAL · "+official.sourceLabel()+level,11,titleColor,true));
             alert.addView(text(clip(official.title(),180),13,Color.WHITE,true));
             if(!official.area.isEmpty())alert.addView(text(clip(official.area,220),10,Color.rgb(218,220,224),false));
+            String timing=official.timingText(now);
+            if(!timing.isEmpty())alert.addView(text(timing,10,titleColor,true));
             if(!official.description.isEmpty())alert.addView(text(clip(official.description,360),10,Color.rgb(232,224,208),false));
             if(!official.instruction.isEmpty())alert.addView(text(clip(official.instruction,260),10,titleColor,true));
             LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.topMargin=dp(8);content.addView(alert,lp);
