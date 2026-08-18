@@ -24,20 +24,28 @@ final class OfficialAlertRepository {
         final List<OfficialAlert> alerts;
         final boolean smnAvailable;
         final boolean mendozaAvailable;
+        final boolean smnRetryableFailure;
+        final boolean mendozaRetryableFailure;
         final boolean usedCache;
         final long fetchedAtMillis;
 
         Result(List<OfficialAlert> alerts, boolean smnAvailable, boolean mendozaAvailable,
+               boolean smnRetryableFailure, boolean mendozaRetryableFailure,
                boolean usedCache, long fetchedAtMillis) {
             this.alerts = Collections.unmodifiableList(new ArrayList<>(alerts));
             this.smnAvailable = smnAvailable;
             this.mendozaAvailable = mendozaAvailable;
+            this.smnRetryableFailure = smnRetryableFailure;
+            this.mendozaRetryableFailure = mendozaRetryableFailure;
             this.usedCache = usedCache;
             this.fetchedAtMillis = fetchedAtMillis;
         }
 
         boolean hasAlerts() { return !alerts.isEmpty(); }
         boolean anyOfficialSourceAvailable() { return smnAvailable || mendozaAvailable; }
+        boolean shouldRetryBackground() {
+            return smnRetryableFailure || (!smnAvailable && mendozaRetryableFailure);
+        }
         String statusText() {
             if (smnAvailable && mendozaAvailable) return "SMN + Mendoza oficiales";
             if (smnAvailable) return "SMN oficial" + (usedCache ? " · Mendoza en caché" : "");
@@ -68,12 +76,15 @@ final class OfficialAlertRepository {
         List<OfficialAlert> mendozaAlerts = new ArrayList<>();
         boolean smnAvailable = false;
         boolean mendozaAvailable = false;
+        boolean smnRetryableFailure = false;
+        boolean mendozaRetryableFailure = false;
         boolean usedCache = false;
 
         try {
             smnAlerts = smn.load(latitude, longitude, now);
             smnAvailable = true;
-        } catch (Exception ignored) {
+        } catch (Exception error) {
+            smnRetryableFailure = retryableFailure(error);
             smnAlerts = smnFromCache(cached, now);
             usedCache |= !smnAlerts.isEmpty();
         }
@@ -81,7 +92,8 @@ final class OfficialAlertRepository {
         try {
             mendozaAlerts = mendoza.load(now);
             mendozaAvailable = true;
-        } catch (Exception ignored) {
+        } catch (Exception error) {
+            mendozaRetryableFailure = retryableFailure(error);
             mendozaAlerts = sourceFromCache(cached, OfficialAlert.Source.MENDOZA_DCC, now);
             usedCache |= !mendozaAlerts.isEmpty();
         }
@@ -92,7 +104,18 @@ final class OfficialAlertRepository {
             merged = mergeActive(cached.alerts, Collections.emptyList(), now);
             usedCache = !merged.isEmpty();
         }
-        return new Result(merged, smnAvailable, mendozaAvailable, usedCache, now);
+        return new Result(merged, smnAvailable, mendozaAvailable, smnRetryableFailure,
+                mendozaRetryableFailure, usedCache, now);
+    }
+
+    static boolean retryableFailure(Throwable error) {
+        if (error == null) return false;
+        if (error instanceof WeatherException && ((WeatherException) error).retryable()) return true;
+        if (retryableFailure(error.getCause())) return true;
+        for (Throwable suppressed : error.getSuppressed()) {
+            if (retryableFailure(suppressed)) return true;
+        }
+        return false;
     }
 
     static List<OfficialAlert> mergeActive(List<OfficialAlert> first, List<OfficialAlert> second, long now) {
