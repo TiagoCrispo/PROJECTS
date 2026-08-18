@@ -1,4 +1,4 @@
-# Mendoza Meteo X10 v6.3 — Release hardening
+# Mendoza Meteo X10 v6.4 — Release hardening
 
 Este documento define el gate físico previo a generar el APK final. CI no sustituye estas pruebas porque Android/One UI, Doze, permisos, launcher y la red real del teléfono pueden comportarse distinto a un runner Linux.
 
@@ -8,11 +8,12 @@ Debe quedar verde en el mismo SHA que se pretenda liberar:
 
 - `provider-contract`: contratos Open-Meteo Best Match, GFS y ECMWF.
 - `official-contract`: SMN cuando el origen permite acceso; si GitHub recibe 403, debe quedar explícitamente `RESTRICTED`, nunca falsamente `OK`. Mendoza DCC debe seguir validándose.
-- `release-contract`: versión, permisos, no background location, no exact alarms, widget 2x2, aislamiento de caché local/UTN, ausencia de material de firma y ausencia de referencias de versión obsoletas.
+- `release-contract`: versión, permisos, no background location, no exact alarms, widget 2x2, aislamiento de caché local/UTN, clock-skew guards, ausencia de material de firma, toolchain Node 24 y ausencia de referencias de versión obsoletas.
 - `testDebugUnitTest`.
 - `lintRelease`.
 - `assembleDebug` y `assembleRelease` limpios.
-- `zipalign`, integridad ZIP y contrato del APK `versionCode 63` / `6.3-native-dev`.
+- Auditoría Java `-Xlint:deprecation` y Gradle `--warning-mode all` visible en CI.
+- `zipalign`, integridad ZIP y contrato del APK `versionCode 64` / `6.4-native-dev`.
 
 ## Gate físico Samsung / One UI
 
@@ -75,4 +76,4 @@ Usar una instalación limpia para el test de release; no actualizar encima de un
 
 ## Criterio de aceptación
 
-No generar ni distribuir APK final mientras exista alguno de estos fallos: crash, widget que mezcle ubicaciones, dato expirado mostrado como fresco, alerta oficial duplicada por X10, notificación obsoleta que no se limpia, background location no solicitada explícitamente, tráfico HTTP claro, versión desincronizada o CI rojo.
+No generar ni distribuir APK final mientras exista alguno de estos fallos: crash, widget que mezcle ubicaciones, dato expirado mostrado como fresco, alerta oficial duplicada por X10, notificación obsoleta que no se limpia, background location no solicitada explícitamente, tráfico HTTP claro, versión desincronizada, deprecación propia no justificada o CI rojo.
