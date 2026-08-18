@@ -5,8 +5,6 @@ import android.content.Context;
 import androidx.work.Worker;
 import androidx.work.WorkerParameters;
 
-import java.util.List;
-
 public final class NotificationUpdateWorker extends Worker {
     public NotificationUpdateWorker(Context appContext, WorkerParameters params) {
         super(appContext, params);
@@ -14,10 +12,7 @@ public final class NotificationUpdateWorker extends Worker {
 
     @Override public Result doWork() {
         Context app = getApplicationContext();
-        if (!WeatherNotifier.canPost(app)) {
-            NotificationScheduler.cancel(app);
-            return Result.success();
-        }
+        if (!WeatherNotifier.canPost(app)) return Result.success();
 
         long now = System.currentTimeMillis();
         NotificationLocation.Point point = NotificationLocation.load(app, now);
