@@ -19,6 +19,7 @@ final class OfficialAlertRepository {
     private static final String PREFS = "official_alerts_v1";
     private static final String KEY_CACHE = "cache";
     private static final long MAX_CACHE_AGE_MS = 6L * 60L * 60L * 1000L;
+    private static final double MAX_CACHE_DISTANCE_KM = 10.0;
 
     static final class Result {
         final List<OfficialAlert> alerts;
@@ -71,7 +72,7 @@ final class OfficialAlertRepository {
 
     Result load(double latitude, double longitude) {
         long now = System.currentTimeMillis();
-        Cache cached = readCache(now);
+        Cache cached = readCache(now, latitude, longitude);
         List<OfficialAlert> smnAlerts = new ArrayList<>();
         List<OfficialAlert> mendozaAlerts = new ArrayList<>();
         boolean smnAvailable = false;
@@ -99,7 +100,7 @@ final class OfficialAlertRepository {
         }
 
         List<OfficialAlert> merged = mergeActive(smnAlerts, mendozaAlerts, now);
-        if (smnAvailable || mendozaAvailable) writeCache(merged, now);
+        if (smnAvailable || mendozaAvailable) writeCache(merged, now, latitude, longitude);
         else if (merged.isEmpty() && cached != null) {
             merged = mergeActive(cached.alerts, Collections.emptyList(), now);
             usedCache = !merged.isEmpty();
@@ -116,6 +117,19 @@ final class OfficialAlertRepository {
             if (retryableFailure(suppressed)) return true;
         }
         return false;
+    }
+
+    static boolean cacheLocationCompatible(double savedLat, double savedLon,
+                                           double currentLat, double currentLon) {
+        if (!LocationPolicy.validCoordinate(savedLat, savedLon)
+                || !LocationPolicy.validCoordinate(currentLat, currentLon)) return false;
+        double dLat = Math.toRadians(currentLat - savedLat);
+        double dLon = Math.toRadians(currentLon - savedLon);
+        double a = Math.sin(dLat / 2.0) * Math.sin(dLat / 2.0)
+                + Math.cos(Math.toRadians(savedLat)) * Math.cos(Math.toRadians(currentLat))
+                * Math.sin(dLon / 2.0) * Math.sin(dLon / 2.0);
+        double distanceKm = 6371.0 * 2.0 * Math.atan2(Math.sqrt(a), Math.sqrt(1.0 - a));
+        return distanceKm <= MAX_CACHE_DISTANCE_KM;
     }
 
     static List<OfficialAlert> mergeActive(List<OfficialAlert> first, List<OfficialAlert> second, long now) {
@@ -175,13 +189,16 @@ final class OfficialAlertRepository {
         return result;
     }
 
-    private Cache readCache(long now) {
+    private Cache readCache(long now, double latitude, double longitude) {
         String raw = prefs.getString(KEY_CACHE, null);
         if (raw == null || raw.isEmpty()) return null;
         try {
             JSONObject root = new JSONObject(raw);
             long savedAt = root.optLong("savedAt", -1L);
-            if (savedAt <= 0 || now - savedAt > MAX_CACHE_AGE_MS) return null;
+            double savedLat = root.optDouble("lat", Double.NaN);
+            double savedLon = root.optDouble("lon", Double.NaN);
+            if (savedAt <= 0 || now - savedAt > MAX_CACHE_AGE_MS
+                    || !cacheLocationCompatible(savedLat, savedLon, latitude, longitude)) return null;
             JSONArray items = root.optJSONArray("alerts");
             ArrayList<OfficialAlert> alerts = new ArrayList<>();
             if (items != null) {
@@ -192,17 +209,19 @@ final class OfficialAlertRepository {
                     if (alert.activeAt(now)) alerts.add(alert);
                 }
             }
-            return new Cache(savedAt, alerts);
+            return new Cache(savedAt, savedLat, savedLon, alerts);
         } catch (JSONException ignored) {
             prefs.edit().remove(KEY_CACHE).apply();
             return null;
         }
     }
 
-    private void writeCache(List<OfficialAlert> alerts, long now) {
+    private void writeCache(List<OfficialAlert> alerts, long now, double latitude, double longitude) {
         try {
             JSONObject root = new JSONObject();
             root.put("savedAt", now);
+            root.put("lat", latitude);
+            root.put("lon", longitude);
             JSONArray items = new JSONArray();
             for (OfficialAlert alert : alerts) items.put(alert.toJson());
             root.put("alerts", items);
@@ -212,7 +231,14 @@ final class OfficialAlertRepository {
 
     private static final class Cache {
         final long savedAt;
+        final double lat;
+        final double lon;
         final List<OfficialAlert> alerts;
-        Cache(long savedAt, List<OfficialAlert> alerts) { this.savedAt = savedAt; this.alerts = alerts; }
+        Cache(long savedAt, double lat, double lon, List<OfficialAlert> alerts) {
+            this.savedAt = savedAt;
+            this.lat = lat;
+            this.lon = lon;
+            this.alerts = alerts;
+        }
     }
 }
