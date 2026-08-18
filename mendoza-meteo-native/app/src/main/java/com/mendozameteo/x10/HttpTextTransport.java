@@ -8,6 +8,8 @@ import java.net.HttpURLConnection;
 import java.net.SocketTimeoutException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
+import java.util.Map;
 import java.util.zip.GZIPInputStream;
 
 final class HttpTextTransport {
@@ -17,14 +19,19 @@ final class HttpTextTransport {
     private static final int MAX_REDIRECTS = 3;
 
     String get(String endpoint, int maxAttempts) throws WeatherException {
+        return get(endpoint, maxAttempts, Collections.emptyMap());
+    }
+
+    String get(String endpoint, int maxAttempts, Map<String,String> headers) throws WeatherException {
         int attempts = Math.max(1, maxAttempts);
         WeatherException last = null;
+        Map<String,String> safeHeaders = headers == null ? Collections.emptyMap() : headers;
         for (int attempt = 1; attempt <= attempts; attempt++) {
             if (Thread.currentThread().isInterrupted()) {
                 throw new WeatherException(WeatherException.Kind.INTERRUPTED, "Official alert request interrupted");
             }
             try {
-                return execute(endpoint, 0);
+                return execute(endpoint, 0, safeHeaders);
             } catch (WeatherException error) {
                 last = error;
                 if (!error.retryable() || attempt >= attempts) throw error;
@@ -34,7 +41,7 @@ final class HttpTextTransport {
         throw last != null ? last : new WeatherException(WeatherException.Kind.NETWORK, "Unknown official alert failure");
     }
 
-    private String execute(String endpoint, int redirects) throws WeatherException {
+    private String execute(String endpoint, int redirects, Map<String,String> headers) throws WeatherException {
         HttpURLConnection connection = null;
         try {
             URL url = new URL(endpoint);
@@ -47,9 +54,14 @@ final class HttpTextTransport {
             connection.setRequestMethod("GET");
             connection.setInstanceFollowRedirects(false);
             connection.setUseCaches(false);
-            connection.setRequestProperty("Accept", "application/xml,text/xml,application/rss+xml,text/html;q=0.8,*/*;q=0.2");
+            connection.setRequestProperty("Accept", "application/json,application/xml,text/xml,application/rss+xml,text/html;q=0.8,*/*;q=0.2");
             connection.setRequestProperty("Accept-Encoding", "gzip");
             connection.setRequestProperty("User-Agent", "MendozaMeteoX10/6-native-dev");
+            for (Map.Entry<String,String> header : headers.entrySet()) {
+                if (header.getKey() != null && header.getValue() != null) {
+                    connection.setRequestProperty(header.getKey(), header.getValue());
+                }
+            }
             int status = connection.getResponseCode();
             if (status >= 300 && status < 400) {
                 if (redirects >= MAX_REDIRECTS) {
@@ -63,7 +75,7 @@ final class HttpTextTransport {
                 if (!"https".equalsIgnoreCase(target.getProtocol())) {
                     throw new WeatherException(WeatherException.Kind.HTTP_PERMANENT, "Refusing insecure official-feed redirect", status);
                 }
-                return execute(target.toString(), redirects + 1);
+                return execute(target.toString(), redirects + 1, headers);
             }
             if (status < 200 || status >= 300) {
                 WeatherException.Kind kind = RetryPolicy.isRetryableHttpStatus(status)
