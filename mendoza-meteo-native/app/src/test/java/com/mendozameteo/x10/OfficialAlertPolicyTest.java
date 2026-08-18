@@ -21,14 +21,14 @@ public final class OfficialAlertPolicyTest {
         assertEquals(OfficialAlert.Level.ORANGE, merged.get(0).level);
     }
 
-    @Test public void cancellationRemovesReferencedAlert() {
+    @Test public void cancellationRemovesReferencedAlertEvenWhenInputOrderIsReversed() {
         OfficialAlert original = alert("target-id", OfficialAlert.Level.ORANGE, "2026-08-18T13:00:00-03:00", false, "");
         OfficialAlert cancel = new OfficialAlert("cancel-id", OfficialAlert.Source.SMN_CAP, OfficialAlert.Level.UNKNOWN,
                 "Tormenta", "Cancelación", "", "", "Mendoza", "2026-08-18T14:30:00-03:00",
                 "2026-08-18T14:30:00-03:00", "2026-08-18T20:00:00-03:00", true,
                 "target-id,smn@smn.gov.ar,2026-08-18T13:00:00-03:00");
-        List<OfficialAlert> merged = OfficialAlertRepository.mergeActive(Arrays.asList(original, cancel), Collections.emptyList(), NOW);
-        assertTrue(merged.isEmpty());
+        assertTrue(OfficialAlertRepository.mergeActive(Arrays.asList(original, cancel), Collections.emptyList(), NOW).isEmpty());
+        assertTrue(OfficialAlertRepository.mergeActive(Arrays.asList(cancel, original), Collections.emptyList(), NOW).isEmpty());
     }
 
     @Test public void provincialBulletinMustBeRecentAndContainRealHazard() {
@@ -47,15 +47,14 @@ public final class OfficialAlertPolicyTest {
         assertTrue(MendozaOfficialBulletinSource.parseHtml(old, NOW).isEmpty());
     }
 
-    @Test public void futureAlertWithinSixHoursCanBeShownButFarFutureCannot() {
-        OfficialAlert soon = new OfficialAlert("soon", OfficialAlert.Source.SMN_CAP, OfficialAlert.Level.YELLOW,
-                "Viento", "Alerta amarilla", "", "", "Mendoza", "2026-08-18T14:00:00-03:00",
-                "2026-08-18T19:00:00-03:00", "2026-08-18T22:00:00-03:00", false, "");
-        OfficialAlert far = new OfficialAlert("far", OfficialAlert.Source.SMN_CAP, OfficialAlert.Level.YELLOW,
+    @Test public void futureOfficialAlertRemainsAvailableUntilItsOfficialExpiry() {
+        OfficialAlert tomorrow = new OfficialAlert("tomorrow", OfficialAlert.Source.SMN_CAP, OfficialAlert.Level.YELLOW,
                 "Viento", "Alerta amarilla", "", "", "Mendoza", "2026-08-18T14:00:00-03:00",
                 "2026-08-19T08:00:00-03:00", "2026-08-19T12:00:00-03:00", false, "");
-        assertTrue(soon.activeAt(NOW));
-        assertFalse(far.activeAt(NOW));
+        assertTrue(tomorrow.activeAt(NOW));
+        assertFalse(tomorrow.startedAt(NOW));
+        assertTrue(tomorrow.startedAt(OfficialAlert.parseIsoMillis("2026-08-19T08:00:00-03:00")));
+        assertFalse(tomorrow.activeAt(OfficialAlert.parseIsoMillis("2026-08-19T12:00:00-03:00")));
     }
 
     private static OfficialAlert alert(String id, OfficialAlert.Level level, String sent, boolean cancel, String references) {
