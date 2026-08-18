@@ -1,0 +1,70 @@
+name: Mendoza Meteo Native v6
+
+on:
+  push:
+    branches: [mendoza-meteo-native-v6]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK 36
+        run: yes | sdkmanager --licenses >/dev/null && sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - name: Lint and build
+        run: gradle -p mendoza-meteo-native clean lintRelease assembleRelease assembleDebug --stacktrace
+      - name: Align and inspect APKs
+        run: |
+          mkdir -p mendoza-meteo-native/dist
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -p -f 4 \
+            mendoza-meteo-native/app/build/outputs/apk/release/app-release-unsigned.apk \
+            mendoza-meteo-native/dist/MendozaMeteo_X10_v6.0_aligned_unsigned.apk
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -p -v 4 \
+            mendoza-meteo-native/dist/MendozaMeteo_X10_v6.0_aligned_unsigned.apk
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging \
+            mendoza-meteo-native/dist/MendozaMeteo_X10_v6.0_aligned_unsigned.apk \
+            > mendoza-meteo-native/dist/badging.txt
+          unzip -t mendoza-meteo-native/dist/MendozaMeteo_X10_v6.0_aligned_unsigned.apk
+          cp mendoza-meteo-native/app/build/outputs/apk/debug/app-debug.apk mendoza-meteo-native/dist/MendozaMeteo_X10_v6.0_debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mendoza-meteo-v6-build
+          path: mendoza-meteo-native/dist/
+          if-no-files-found: error
+
+  emulator-smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: mendoza-meteo-v6-build
+          path: artifact
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            adb install -r artifact/MendozaMeteo_X10_v6.0_debug.apk
+            adb logcat -c
+            adb shell am start -W -n com.mendozameteo.x10.debug/com.mendozameteo.x10.MainActivity
+            sleep 8
+            adb shell dumpsys activity activities | grep -q 'com.mendozameteo.x10.debug'
+            adb shell dumpsys package com.mendozameteo.x10.debug | grep -q 'WeatherWidgetProvider'
+            if adb logcat -d | grep -E 'FATAL EXCEPTION|Process: com.mendozameteo.x10.debug' ; then
+              echo 'Fatal Android crash detected'
+              exit 1
+            fi
