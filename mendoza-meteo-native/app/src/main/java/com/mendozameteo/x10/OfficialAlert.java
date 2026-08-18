@@ -71,9 +71,11 @@ final class OfficialAlert {
 
     boolean activeAt(long nowMillis) {
         if (cancellation) return false;
-        if (expiresMillis > 0 && nowMillis >= expiresMillis) return false;
-        if (startMillis > 0 && nowMillis + 6L * 60L * 60L * 1000L < startMillis) return false;
-        return true;
+        return expiresMillis <= 0 || nowMillis < expiresMillis;
+    }
+
+    boolean startedAt(long nowMillis) {
+        return startMillis <= 0 || nowMillis >= startMillis;
     }
 
     String title() {
