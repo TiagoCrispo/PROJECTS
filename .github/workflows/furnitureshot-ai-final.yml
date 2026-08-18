@@ -40,16 +40,25 @@ jobs:
           BUILD_DIR="$RUNNER_TEMP/furnitureshot-ai-final"
           cp -a projects/furnitureshot-ai "$BUILD_DIR"
           PROCESSING="$BUILD_DIR/app/src/main/java/com/tiagocrispo/furnitureshot/processing"
+          BETA22="projects/furnitureshot-ai-overlays/v0.7.1-beta22"
           BETA23="projects/furnitureshot-ai-overlays/v0.7.2-beta23"
+
+          # Reconstruct the exact real beta22 source first.
           rm -f "$PROCESSING/HighFidelityEnhancementEngine.kt"
-          cp "$BETA23/LocalEnhancementEngine.kt" "$PROCESSING/LocalEnhancementEngine.kt"
+          cp "$BETA22/LocalEnhancementEngine.kt" "$PROCESSING/LocalEnhancementEngine.kt"
+          cp "$BETA22/FinishPassEngine.kt" "$PROCESSING/FinishPassEngine.kt"
+          cp "$BETA22/PromptPolicy.kt" "$PROCESSING/PromptPolicy.kt"
+
+          # Reproduce the real beta23 engine that previously compiled successfully.
+          python3 "$BETA23/transform_beta22_to_beta23.py" "$PROCESSING/LocalEnhancementEngine.kt"
           cp "$BETA23/PromptPolicy.kt" "$PROCESSING/PromptPolicy.kt"
 
+          # Apply the final MAX-only patch tested against the beta23 source tree.
           PATCH_B64="$RUNNER_TEMP/final.patch.b64"
           PATCH_FILE="$RUNNER_TEMP/final.patch"
           cat projects/furnitureshot-ai-overlays/v0.8.0-final/patch-b64/chunk*.txt > "$PATCH_B64"
           base64 -d "$PATCH_B64" > "$PATCH_FILE"
-          patch -p1 -d "$BUILD_DIR" < "$PATCH_FILE"
+          patch --batch --forward -p1 -d "$BUILD_DIR" < "$PATCH_FILE"
 
           python3 - "$BUILD_DIR/app/build.gradle.kts" <<'PY'
           from pathlib import Path
