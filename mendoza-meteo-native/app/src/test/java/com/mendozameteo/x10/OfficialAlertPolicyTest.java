@@ -43,7 +43,7 @@ public final class OfficialAlertPolicyTest {
         assertTrue(OfficialAlertRepository.mergeActive(Arrays.asList(cancel, original), Collections.emptyList(), NOW).isEmpty());
     }
 
-    @Test public void provincialBulletinMustBeRecentAndContainRealHazard() {
+    @Test public void provincialBulletinMustBeRecentContainHazardAndNotInventValidity() {
         String valid = "<html><body><h1>Alerta Meteorológica</h1><p>martes 18 de agosto de 2026</p>"
                 + "<p>Viento Zonda moderado a fuerte en precordillera y sectores del llano.</p></body></html>";
         List<OfficialAlert> alerts = MendozaOfficialBulletinSource.parseHtml(valid, NOW);
@@ -51,6 +51,8 @@ public final class OfficialAlertPolicyTest {
         assertEquals(OfficialAlert.Source.MENDOZA_DCC, alerts.get(0).source);
         assertEquals(OfficialAlert.Level.INFO, alerts.get(0).level);
         assertTrue(alerts.get(0).description.toLowerCase().contains("zonda"));
+        assertTrue(alerts.get(0).startIso.isEmpty());
+        assertTrue(alerts.get(0).expiresIso.isEmpty());
 
         String headerOnly = "<html><body><h1>Alerta Meteorológica</h1><p>martes 18 de agosto de 2026</p></body></html>";
         assertTrue(MendozaOfficialBulletinSource.parseHtml(headerOnly, NOW).isEmpty());
