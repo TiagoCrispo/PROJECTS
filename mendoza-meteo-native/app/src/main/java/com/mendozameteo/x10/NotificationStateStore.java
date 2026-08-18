@@ -15,6 +15,7 @@ final class NotificationStateStore {
     private static final String PREFS = "notification_state_v1";
     private static final String OFFICIAL_PREFIX = "official.";
     private static final String X10_PREFIX = "x10.";
+    private static final long OFFICIAL_NO_EXPIRY_STALE_GUARD_MILLIS = 36L * 60L * 60L * 1000L;
 
     private final SharedPreferences prefs;
 
@@ -42,6 +43,9 @@ final class NotificationStateStore {
     void markOfficial(OfficialAlert alert, int notificationId, long nowMillis) {
         if (alert == null) return;
         String key = officialKey(alert.source, alert.id, alert.event, alert.startIso);
+        long staleAt = alert.expiresMillis > 0L
+                ? alert.expiresMillis
+                : nowMillis + OFFICIAL_NO_EXPIRY_STALE_GUARD_MILLIS;
         try {
             JSONObject value = new JSONObject();
             value.put("stateKey", key);
@@ -50,7 +54,7 @@ final class NotificationStateStore {
             value.put("levelRank", alert.level.rank);
             value.put("contentHash", NotificationPolicy.officialContentHash(alert));
             value.put("notifiedAt", nowMillis);
-            value.put("expires", alert.expiresMillis);
+            value.put("expires", staleAt);
             value.put("notificationId", notificationId);
             value.put("event", alert.event);
             value.put("start", alert.startMillis);
