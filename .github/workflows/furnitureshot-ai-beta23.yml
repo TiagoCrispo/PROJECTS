@@ -1,0 +1,112 @@
+name: FurnitureShot AI beta23 reference-match
+
+on:
+  pull_request:
+    paths:
+      - "projects/furnitureshot-ai-overlays/v0.7.2-beta23/**"
+      - ".github/workflows/furnitureshot-ai-beta23.yml"
+  workflow_dispatch:
+
+jobs:
+  build-debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android 16 SDK
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+
+      - name: Assemble beta23 from the real beta22 pipeline
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILD_DIR="$RUNNER_TEMP/furnitureshot-ai-beta23"
+          cp -a projects/furnitureshot-ai "$BUILD_DIR"
+
+          BETA22="projects/furnitureshot-ai-overlays/v0.7.1-beta22"
+          BETA23="projects/furnitureshot-ai-overlays/v0.7.2-beta23"
+          TARGET="$BUILD_DIR/app/src/main/java/com/tiagocrispo/furnitureshot/processing"
+
+          # The real beta22 APK was built from this overlay. Start from it rather than
+          # the older canonical processing engine so the comparison is meaningful.
+          rm -f "$TARGET/HighFidelityEnhancementEngine.kt"
+          cp "$BETA22/LocalEnhancementEngine.kt" "$TARGET/LocalEnhancementEngine.kt"
+          cp "$BETA22/FinishPassEngine.kt" "$TARGET/FinishPassEngine.kt"
+          cp "$BETA23/PromptPolicy.kt" "$TARGET/PromptPolicy.kt"
+
+          python3 "$BETA23/transform_beta22_to_beta23.py" "$TARGET/LocalEnhancementEngine.kt"
+
+          python3 - "$BUILD_DIR/app/build.gradle.kts" <<'PY'
+          from pathlib import Path
+          import re, sys
+          path = Path(sys.argv[1])
+          text = path.read_text()
+          text = re.sub(r'versionCode\s*=\s*\d+', 'versionCode = 32', text)
+          text = re.sub(r'versionName\s*=\s*"[^"]+"', 'versionName = "0.7.2-beta23"', text)
+          path.write_text(text)
+          PY
+
+          grep -n "versionCode\|versionName" "$BUILD_DIR/app/build.gradle.kts"
+
+      - name: Static image-pipeline guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          ENGINE="$RUNNER_TEMP/furnitureshot-ai-beta23/app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalEnhancementEngine.kt"
+          grep -q 'SEGMENTATION_LONG_EDGE = 1536' "$ENGINE"
+          grep -q 'buildSupportContactOcclusion' "$ENGINE"
+          grep -q 'STRUCTURE LOCK' "$ENGINE"
+          grep -q 'novelEdgeRatio' "$ENGINE"
+          grep -q 'coerceIn(0.95f, 1.015f)' "$ENGINE"
+          ! grep -q 'drawOval' "$ENGINE"
+
+      - name: Build debug APK
+        run: gradle -p "$RUNNER_TEMP/furnitureshot-ai-beta23" :app:assembleDebug --stacktrace --no-daemon
+
+      - name: Verify APK and source
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILD_DIR="$RUNNER_TEMP/furnitureshot-ai-beta23"
+          APK="$BUILD_DIR/app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          unzip -t "$APK" >/dev/null
+          unzip -l "$APK" | grep -q "AndroidManifest.xml"
+          unzip -l "$APK" | grep -q "classes.dex"
+          unzip -l "$APK" | grep -q "resources.arsc"
+          sha256sum "$APK" | tee "$RUNNER_TEMP/FurnitureShotAI-v0.7.2-beta23-sha256.txt"
+          (cd "$BUILD_DIR" && zip -qr "$RUNNER_TEMP/FurnitureShotAI-v0.7.2-beta23-source.zip" . -x 'app/build/*' '.gradle/*')
+          unzip -t "$RUNNER_TEMP/FurnitureShotAI-v0.7.2-beta23-source.zip" >/dev/null
+
+      - name: Stage deliverables
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/beta23-deliverables"
+          cp "$RUNNER_TEMP/furnitureshot-ai-beta23/app/build/outputs/apk/debug/app-debug.apk" \
+             "$RUNNER_TEMP/beta23-deliverables/FurnitureShotAI-v0.7.2-beta23-debug.apk"
+          cp "$RUNNER_TEMP/FurnitureShotAI-v0.7.2-beta23-source.zip" "$RUNNER_TEMP/beta23-deliverables/"
+          cp "$RUNNER_TEMP/FurnitureShotAI-v0.7.2-beta23-sha256.txt" "$RUNNER_TEMP/beta23-deliverables/"
+
+      - name: Upload beta23 deliverables
+        uses: actions/upload-artifact@v4
+        with:
+          name: FurnitureShotAI-v0.7.2-beta23-reference-match
+          path: ${{ runner.temp }}/beta23-deliverables/*
+          if-no-files-found: error
