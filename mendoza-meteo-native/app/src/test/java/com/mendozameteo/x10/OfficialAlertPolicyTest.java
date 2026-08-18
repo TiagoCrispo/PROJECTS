@@ -21,6 +21,18 @@ public final class OfficialAlertPolicyTest {
         assertEquals(OfficialAlert.Level.ORANGE, merged.get(0).level);
     }
 
+    @Test public void capUpdateReplacesReferencedIdentifierInsteadOfDuplicatingIt() {
+        OfficialAlert original = alert("old-id", OfficialAlert.Level.YELLOW, "2026-08-18T12:00:00-03:00", false, "");
+        OfficialAlert update = new OfficialAlert("new-id", OfficialAlert.Source.SMN_CAP, OfficialAlert.Level.ORANGE,
+                "Tormenta", "Actualización oficial", "", "", "Mendoza", "2026-08-18T14:00:00-03:00",
+                "2026-08-18T14:00:00-03:00", "2026-08-18T22:00:00-03:00", false,
+                "old-id,smn@smn.gov.ar,2026-08-18T12:00:00-03:00");
+        List<OfficialAlert> merged = OfficialAlertRepository.mergeActive(Arrays.asList(update, original), Collections.emptyList(), NOW);
+        assertEquals(1, merged.size());
+        assertEquals("new-id", merged.get(0).id);
+        assertEquals(OfficialAlert.Level.ORANGE, merged.get(0).level);
+    }
+
     @Test public void cancellationRemovesReferencedAlertEvenWhenInputOrderIsReversed() {
         OfficialAlert original = alert("target-id", OfficialAlert.Level.ORANGE, "2026-08-18T13:00:00-03:00", false, "");
         OfficialAlert cancel = new OfficialAlert("cancel-id", OfficialAlert.Source.SMN_CAP, OfficialAlert.Level.UNKNOWN,
