@@ -47,7 +47,7 @@ final class OfficialAlertRepository {
     }
 
     private final SharedPreferences prefs;
-    private final SmnCapAlertSource smn;
+    private final SmnOfficialAlertSource smn;
     private final MendozaOfficialBulletinSource mendoza;
 
     OfficialAlertRepository(Context context) {
@@ -57,7 +57,7 @@ final class OfficialAlertRepository {
     OfficialAlertRepository(Context context, HttpTextTransport transport) {
         Context app = context.getApplicationContext();
         prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        smn = new SmnCapAlertSource(transport);
+        smn = new SmnOfficialAlertSource(transport);
         mendoza = new MendozaOfficialBulletinSource(transport);
     }
 
@@ -74,7 +74,7 @@ final class OfficialAlertRepository {
             smnAlerts = smn.load(latitude, longitude, now);
             smnAvailable = true;
         } catch (Exception ignored) {
-            smnAlerts = sourceFromCache(cached, OfficialAlert.Source.SMN_CAP, now);
+            smnAlerts = smnFromCache(cached, now);
             usedCache |= !smnAlerts.isEmpty();
         }
 
@@ -101,8 +101,6 @@ final class OfficialAlertRepository {
         if (first != null) all.addAll(first);
         if (second != null) all.addAll(second);
 
-        // CAP feeds are not guaranteed to be returned in chronological order. Process by
-        // sent timestamp so a later update/cancellation deterministically wins.
         all.sort(Comparator.comparingLong(a -> a == null || a.sentMillis <= 0 ? Long.MIN_VALUE : a.sentMillis));
         for (OfficialAlert alert : all) {
             if (alert == null) continue;
@@ -133,6 +131,16 @@ final class OfficialAlertRepository {
             final String expected = id;
             map.entrySet().removeIf(entry -> entry.getValue().id.equals(expected));
         }
+    }
+
+    private static List<OfficialAlert> smnFromCache(Cache cache, long now) {
+        ArrayList<OfficialAlert> result = new ArrayList<>();
+        if (cache == null) return result;
+        for (OfficialAlert alert : cache.alerts) {
+            if ((alert.source == OfficialAlert.Source.SMN_CAP || alert.source == OfficialAlert.Source.SMN_API)
+                    && alert.activeAt(now)) result.add(alert);
+        }
+        return result;
     }
 
     private static List<OfficialAlert> sourceFromCache(Cache cache, OfficialAlert.Source source, long now) {
