@@ -10,12 +10,15 @@ Deliver useful weather notifications while keeping official alerts and X10 heuri
 - `POST_NOTIFICATIONS` requested on Android 13+ through `LauncherActivity`.
 - Three user-configurable channels: `official_urgent_v1` (orange/red, high), `official_alerts_v1` (other official alerts, default), and `x10_signals_v1` (important/danger heuristics, default).
 - Per-channel opt-outs are respected; a blocked channel is never recorded as delivered.
+- Official and X10 notification IDs use separate numeric ranges.
 - No full-screen intents, exact alarms or foreground service.
-- WorkManager 2.11.2 runs unique periodic work every 30 minutes with a 10-minute flex window, connectivity constraint and `ExistingPeriodicWorkPolicy.UPDATE`.
+- WorkManager 2.11.2 runs unique periodic work every 30 minutes with a 10-minute flex window, connectivity constraint and `ExistingPeriodicWorkPolicy.UPDATE`. The first background check is delayed so opening the foreground UI does not trigger a duplicate network fetch.
 
 ## Privacy and location
 
-The worker does not request `ACCESS_BACKGROUND_LOCATION` or obtain a new GPS fix in the background. It uses the last foreground location persisted by `LocationResolver` for up to 48 hours, then explicitly falls back to UTN Mendoza. Official-alert cache reuse is location-bound so a cached alert from a distant Mendoza zone cannot follow the user to another region.
+The worker does not request `ACCESS_BACKGROUND_LOCATION` or obtain a new GPS fix in the background. It uses the last foreground location persisted by `LocationResolver` for up to 48 hours, then explicitly falls back to UTN Mendoza.
+
+Official-alert cache reuse is location-bound to a 10 km context. SMN and Mendoza caches are stored separately with independent six-hour freshness timestamps, so a successful provincial request cannot accidentally rejuvenate stale SMN data. A material location-context change clears persisted official/X10 notification state and removes cards belonging to the previous zone. The UTN fallback uses the `utn` forecast cache key rather than overwriting the user's `local` forecast cache.
 
 ## Official-alert policy
 
@@ -43,7 +46,7 @@ The worker does not request `ACCESS_BACKGROUND_LOCATION` or obtain a new GPS fix
 
 ## Execution order and retry
 
-Official alerts are loaded, pruned and posted before the general forecast is fetched, so a slow model request cannot delay an already retrieved official warning. Retry is source-aware; transient official-source failures can request one WorkManager retry, while the normal periodic schedule remains the long-term fallback.
+Official alerts are loaded, pruned and posted before the general forecast is fetched, so a slow model request cannot delay an already retrieved official warning. Retry is source-aware: timeouts, network failures and retryable HTTP responses may request one retry; permanent HTTP failures such as 403 and invalid/non-retryable payloads do not enter a repeated retry loop. SMN, as the primary authority, gets a transient retry even if the provincial source answered; a transient Mendoza failure is retried when SMN is also unavailable.
 
 ## Platform limits
 
