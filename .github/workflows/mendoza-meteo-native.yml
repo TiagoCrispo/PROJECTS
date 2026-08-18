@@ -3,6 +3,8 @@ name: Mendoza Meteo Native v6
 on:
   push:
     branches: [mendoza-meteo-native-v6]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
