@@ -72,7 +72,8 @@ public final class AlertEngineTest {
         assertEquals(AlertEngine.Source.HEURISTIC_X10, event.source);
         assertTrue(event.detailText().startsWith("Posible Zonda"));
         assertTrue(event.detailText().contains("Gran Mendoza"));
-        assertFalse(event.detailText().contains("%"));
+        assertEquals(-1, event.peakProbability);
+        assertFalse(event.detailText().toLowerCase().contains("probabilidad"));
     }
 
     @Test public void rainAndWetWeatherSuppressZondaClassification() {
