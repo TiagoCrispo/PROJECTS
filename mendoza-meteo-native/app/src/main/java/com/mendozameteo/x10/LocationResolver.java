@@ -1,6 +1,7 @@
 package com.mendozameteo.x10;
 
 import android.Manifest;
+import android.annotation.TargetApi;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -195,6 +196,7 @@ final class LocationResolver {
         return requestCurrentLegacy(provider, timeoutMillis);
     }
 
+    @TargetApi(30)
     private Location requestCurrent30(String provider, long timeoutMillis) {
         CountDownLatch latch = new CountDownLatch(1);
         Location[] box = new Location[1];
