@@ -88,6 +88,20 @@ final class OfficialAlert {
 
     String sourceLabel() { return source.label; }
 
+    String timingText(long nowMillis) {
+        boolean hasStart = !startIso.isEmpty() && parseIsoMillis(startIso) > 0;
+        boolean hasEnd = !expiresIso.isEmpty() && expiresMillis > 0;
+        if (!hasStart && !hasEnd) return "";
+        StringBuilder value = new StringBuilder();
+        if (hasStart && !startedAt(nowMillis)) value.append("Inicia ").append(formatLocal(startMillis));
+        else if (hasStart) value.append("Vigente desde ").append(formatLocal(startMillis));
+        if (hasEnd) {
+            if (value.length() > 0) value.append(" · ");
+            value.append("hasta ").append(formatLocal(expiresMillis));
+        }
+        return value.toString();
+    }
+
     String fingerprint() {
         return source.name() + '|' + (!id.isEmpty() ? id : event + '|' + startIso + '|' + area);
     }
@@ -145,6 +159,12 @@ final class OfficialAlert {
             } catch (ParseException ignored) { }
         }
         return -1L;
+    }
+
+    private static String formatLocal(long millis) {
+        SimpleDateFormat format = new SimpleDateFormat("dd/MM HH:mm", new Locale("es", "AR"));
+        format.setTimeZone(WeatherClient.MENDOZA_TZ);
+        return format.format(new Date(millis));
     }
 
     private static String safe(String value) { return value == null ? "" : value.trim(); }
