@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/wa-vault-v0.5.31-block7
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -20,6 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: agent/wa-vault-v0.5.31-block7
           fetch-depth: 0
 
       - name: Reconstruct verified v0.5.31 source archive
@@ -67,7 +71,7 @@ jobs:
           git add projects/wa-vault
           if ! git diff --cached --quiet; then
             git commit -m 'WA Vault v0.5.31 materialize source'
-            git push origin HEAD:${GITHUB_REF_NAME}
+            git push origin HEAD:agent/wa-vault-v0.5.31-block7
           fi
 
       - uses: actions/setup-java@v4
