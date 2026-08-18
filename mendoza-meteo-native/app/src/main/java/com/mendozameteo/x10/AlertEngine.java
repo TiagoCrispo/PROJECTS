@@ -34,10 +34,24 @@ final class AlertEngine {
         final double totalPrecipitation;
         final int peakGust;
         final int evidenceScore;
+        final String zoneLabel;
+        final int peakWind;
+        final int minHumidity;
+        final int temperatureRise;
+        final int humidityDrop;
 
         Event(Kind kind, Severity severity, Source source, String startIso, String endExclusiveIso,
               int durationHours, int peakProbability, double peakHourlyPrecipitation,
               double totalPrecipitation, int peakGust, int evidenceScore) {
+            this(kind, severity, source, startIso, endExclusiveIso, durationHours, peakProbability,
+                    peakHourlyPrecipitation, totalPrecipitation, peakGust, evidenceScore,
+                    null, -1, -1, 0, 0);
+        }
+
+        Event(Kind kind, Severity severity, Source source, String startIso, String endExclusiveIso,
+              int durationHours, int peakProbability, double peakHourlyPrecipitation,
+              double totalPrecipitation, int peakGust, int evidenceScore, String zoneLabel,
+              int peakWind, int minHumidity, int temperatureRise, int humidityDrop) {
             this.kind = kind;
             this.severity = severity;
             this.source = source;
@@ -49,6 +63,11 @@ final class AlertEngine {
             this.totalPrecipitation = totalPrecipitation;
             this.peakGust = peakGust;
             this.evidenceScore = evidenceScore;
+            this.zoneLabel = zoneLabel;
+            this.peakWind = peakWind;
+            this.minHumidity = minHumidity;
+            this.temperatureRise = temperatureRise;
+            this.humidityDrop = humidityDrop;
         }
 
         String title() {
@@ -63,8 +82,14 @@ final class AlertEngine {
 
         String detailText() {
             if (kind == Kind.ZONDA) {
-                return title() + " · " + windowText() + " · ráfagas " + peakGust
-                        + " km/h · señal " + evidenceLabel();
+                StringBuilder text = new StringBuilder(title()).append(" · ").append(windowText());
+                if (zoneLabel != null) text.append(" · ").append(zoneLabel);
+                text.append(" · ráfagas ").append(peakGust).append(" km/h");
+                if (peakWind >= 0) text.append(" · sostenido ").append(peakWind).append(" km/h");
+                if (minHumidity >= 0) text.append(" · HR mín ").append(minHumidity).append('%');
+                if (temperatureRise >= 3) text.append(" · +T ").append(temperatureRise).append("°");
+                if (humidityDrop >= 10) text.append(" · HR -").append(humidityDrop).append(" pp");
+                return text.append(" · señal ").append(evidenceLabel()).toString();
             }
             StringBuilder text = new StringBuilder(title()).append(" · ").append(windowText());
             if (peakProbability >= 0) text.append(" · pico ").append(peakProbability).append('%');
@@ -78,8 +103,8 @@ final class AlertEngine {
         }
 
         String evidenceLabel() {
-            if (evidenceScore >= 8) return "alta";
-            if (evidenceScore >= 6) return "media";
+            if (evidenceScore >= 9) return "alta";
+            if (evidenceScore >= 7) return "media";
             return "moderada";
         }
 
@@ -110,7 +135,7 @@ final class AlertEngine {
         }
         ArrayList<Event> events = new ArrayList<>();
         detectPrecipitation(forecast.hours, events);
-        detectZonda(forecast.hours, events);
+        detectZonda(forecast, events);
         events.sort(Comparator.comparing((Event e) -> e.startIso)
                 .thenComparing((Event e) -> -e.severity.rank)
                 .thenComparing(e -> e.kind.name()));
@@ -168,58 +193,113 @@ final class AlertEngine {
         return Severity.PRECAUTION;
     }
 
-    private static void detectZonda(List<WeatherClient.Hour> hours, List<Event> out) {
+    private static void detectZonda(WeatherClient.Forecast forecast, List<Event> out) {
+        List<WeatherClient.Hour> hours = forecast.hours;
+        MendozaZone.Kind zone = MendozaZone.classify(forecast.latitude, forecast.longitude);
         int index = 0;
         while (index < hours.size()) {
             int score = zondaEvidence(hours.get(index));
             if (score < 5) { index++; continue; }
+
             int start = index;
             int peakGust = 0;
+            int peakWind = 0;
+            int minHumidity = 101;
+            int maxTemperature = Integer.MIN_VALUE;
+            double minPressure = Double.POSITIVE_INFINITY;
             int maxEvidence = 0;
             while (index < hours.size()) {
-                int currentScore = zondaEvidence(hours.get(index));
+                WeatherClient.Hour hour = hours.get(index);
+                int currentScore = zondaEvidence(hour);
                 if (currentScore < 5) break;
                 maxEvidence = Math.max(maxEvidence, currentScore);
-                peakGust = Math.max(peakGust, hours.get(index).gust);
+                peakGust = Math.max(peakGust, hour.gust);
+                peakWind = Math.max(peakWind, hour.wind);
+                minHumidity = Math.min(minHumidity, hour.humidity);
+                maxTemperature = Math.max(maxTemperature, hour.temp);
+                if (finite(hour.pressureMsl)) minPressure = Math.min(minPressure, hour.pressureMsl);
                 index++;
             }
+
             int end = index - 1;
             int duration = end - start + 1;
-            boolean persistentEnough = duration >= 2;
-            boolean strongSingleHour = duration == 1 && maxEvidence >= 8 && peakGust >= 65;
-            if (!persistentEnough && !strongSingleHour) continue;
-            Severity severity;
-            if (peakGust >= 90 && duration >= 2) severity = Severity.DANGER;
-            else if (peakGust >= 70 || duration >= 4 || maxEvidence >= 8) severity = Severity.IMPORTANT;
-            else severity = Severity.PRECAUTION;
+            int baselineTemp = baselineTemperature(forecast, start);
+            int baselineHumidity = baselineHumidity(forecast, start);
+            double baselinePressure = baselinePressure(forecast, start);
+            int temperatureRise = maxTemperature == Integer.MIN_VALUE ? 0 : Math.max(0, maxTemperature - baselineTemp);
+            int humidityDrop = minHumidity > 100 ? 0 : Math.max(0, baselineHumidity - minHumidity);
+            double pressureDrop = finite(baselinePressure) && finite(minPressure)
+                    ? Math.max(0.0, baselinePressure - minPressure) : 0.0;
+
+            int eventEvidence = maxEvidence;
+            if (temperatureRise >= 3) eventEvidence++;
+            if (temperatureRise >= 6) eventEvidence++;
+            if (humidityDrop >= 10) eventEvidence++;
+            if (humidityDrop >= 20) eventEvidence++;
+            if (pressureDrop >= 3.0) eventEvidence++;
+            eventEvidence = Math.min(10, eventEvidence);
+
+            boolean persistentEnough = duration >= zone.minimumPersistenceHours;
+            boolean strongSingleHour = duration == 1
+                    && ((peakGust > 90 && eventEvidence >= 8) || (peakGust >= 80 && eventEvidence >= 9));
+            boolean strongShortEvent = duration >= 2 && peakGust >= 65 && eventEvidence >= 7;
+            if (!persistentEnough && !strongSingleHour && !strongShortEvent) continue;
+
+            Severity severity = zondaSeverity(peakGust, duration, eventEvidence);
             out.add(new Event(Kind.ZONDA, severity, Source.HEURISTIC_X10,
                     hours.get(start).iso, endExclusive(hours, end), duration,
-                    -1, 0.0, 0.0, peakGust, maxEvidence));
+                    -1, 0.0, 0.0, peakGust, eventEvidence, zone.label,
+                    peakWind, minHumidity > 100 ? -1 : minHumidity, temperatureRise, humidityDrop));
         }
+    }
+
+    private static Severity zondaSeverity(int peakGust, int duration, int evidence) {
+        // Gust breakpoints are used as internal calibration only. They intentionally do not
+        // reuse SMN color names or claim an official alert classification.
+        if (peakGust > 90) return Severity.DANGER;
+        if (peakGust >= 65) return Severity.IMPORTANT;
+        if (duration >= 4 && peakGust >= 55) return Severity.IMPORTANT;
+        if (evidence >= 9 && peakGust >= 60) return Severity.IMPORTANT;
+        return Severity.PRECAUTION;
     }
 
     static int zondaEvidence(WeatherClient.Hour hour) {
         if (hour == null) return 0;
         int direction = ((hour.direction % 360) + 360) % 360;
         if (direction < 230 || direction > 330 || hour.gust < 45) return 0;
+
         double dewSpread = finite(hour.dewPoint) ? hour.temp - hour.dewPoint : Double.NaN;
         boolean dry = hour.humidity <= 35 || (finite(dewSpread) && dewSpread >= 10.0);
         if (!dry) return 0;
+
         double liquid = Math.max(hour.precipitation, hour.rain + hour.showers);
         if (liquid >= 0.5 || hour.snowfall >= 0.2 || WeatherClient.isRainCode(hour.code)
                 || (hour.rainProbability >= 0 && hour.rainProbability >= 70)) return 0;
 
-        int score = 2;
-        score += 1; // gust >= 45, already required
-        if (hour.gust >= 60) score++;
-        if (hour.gust >= 80) score++;
+        int score = 3; // west + dry + gust >=45 are all required before scoring starts
+        if (hour.gust >= 55) score++;
+        if (hour.gust >= 65) score++;
+        if (hour.gust > 90) score++;
         if (hour.wind >= 25) score++;
         if (hour.wind >= 40) score++;
-        if (hour.humidity <= 35) score++;
         if (hour.humidity <= 25) score++;
-        if (finite(dewSpread) && dewSpread >= 10.0) score++;
         if (finite(dewSpread) && dewSpread >= 15.0) score++;
         return Math.min(score, 10);
+    }
+
+    private static int baselineTemperature(WeatherClient.Forecast forecast, int start) {
+        if (start > 0) return forecast.hours.get(start - 1).temp;
+        return forecast.current != null ? forecast.current.temp : forecast.hours.get(start).temp;
+    }
+
+    private static int baselineHumidity(WeatherClient.Forecast forecast, int start) {
+        if (start > 0) return forecast.hours.get(start - 1).humidity;
+        return forecast.current != null ? forecast.current.humidity : forecast.hours.get(start).humidity;
+    }
+
+    private static double baselinePressure(WeatherClient.Forecast forecast, int start) {
+        if (start > 0) return forecast.hours.get(start - 1).pressureMsl;
+        return forecast.current != null ? forecast.current.pressureMsl : forecast.hours.get(start).pressureMsl;
     }
 
     private static String endExclusive(List<WeatherClient.Hour> hours, int endIndex) {
