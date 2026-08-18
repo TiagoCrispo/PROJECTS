@@ -5,6 +5,9 @@ import android.content.Context;
 import androidx.work.Worker;
 import androidx.work.WorkerParameters;
 
+import java.util.ArrayList;
+import java.util.EnumSet;
+
 public final class NotificationUpdateWorker extends Worker {
     public NotificationUpdateWorker(Context appContext, WorkerParameters params) {
         super(appContext, params);
@@ -28,7 +31,8 @@ public final class NotificationUpdateWorker extends Worker {
             NotificationPolicy.PreviousOfficial previous = state.findMatchingOfficial(alert);
             NotificationPolicy.OfficialChange change = NotificationPolicy.officialChange(previous, alert, now);
             if (change == NotificationPolicy.OfficialChange.NONE) continue;
-            int notificationId = WeatherNotifier.notifyOfficial(app, alert, change, point.label(), now);
+            int existingId = previous == null ? 0 : previous.notificationId;
+            int notificationId = WeatherNotifier.notifyOfficial(app, alert, change, point.label(), now, existingId);
             if (notificationId == 0) continue;
             if (previous != null) {
                 if (previous.notificationId != notificationId) WeatherNotifier.cancel(app, previous.notificationId);
@@ -46,25 +50,31 @@ public final class NotificationUpdateWorker extends Worker {
                     break;
                 }
             }
-            int shown = 0;
+
+            ArrayList<AlertEngine.Event> retained = new ArrayList<>();
+            EnumSet<AlertEngine.Kind> retainedKinds = EnumSet.noneOf(AlertEngine.Kind.class);
             for (AlertEngine.Event event : report.events) {
-                if (shown >= 2) break;
+                if (retained.size() >= 2) break;
                 if (event.kind == AlertEngine.Kind.RAIN && hasThunderstorm) continue;
+                if (event.severity.rank < AlertEngine.Severity.IMPORTANT.rank) continue;
                 if (NotificationPolicy.officialCoversX10(official.alerts, event)) continue;
+                if (retainedKinds.add(event.kind)) retained.add(event);
+            }
+
+            for (AlertEngine.Kind kind : AlertEngine.Kind.values()) {
+                if (!retainedKinds.contains(kind)) WeatherNotifier.cancelX10(app, kind);
+            }
+
+            for (AlertEngine.Event event : retained) {
                 AlertCooldownPolicy.Previous previous = state.loadX10(event.kind);
                 if (!NotificationPolicy.shouldNotifyX10(previous, event, now)) continue;
                 int notificationId = WeatherNotifier.notifyX10(app, event, point.label(), now);
-                if (notificationId != 0) {
-                    state.markX10(event, now);
-                    shown++;
-                }
+                if (notificationId != 0) state.markX10(event, now);
             }
         }
 
         boolean officialUnavailable = !official.anyOfficialSourceAvailable() && !official.usedCache;
-        if (officialUnavailable && !weather.isSuccess() && weather.shouldRetryBackground() && getRunAttemptCount() < 1) {
-            return Result.retry();
-        }
+        if (officialUnavailable && getRunAttemptCount() < 1) return Result.retry();
         return Result.success();
     }
 }
