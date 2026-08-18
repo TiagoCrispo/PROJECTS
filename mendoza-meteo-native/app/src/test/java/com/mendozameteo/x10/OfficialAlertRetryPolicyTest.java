@@ -45,6 +45,14 @@ public final class OfficialAlertRetryPolicyTest {
         assertFalse(result(true, false, false, true).shouldRetryBackground());
     }
 
+    @Test public void officialCacheCanOnlyFollowNearbyLocationJitter() {
+        double utnLat = -32.896748, utnLon = -68.853418;
+        assertTrue(OfficialAlertRepository.cacheLocationCompatible(utnLat, utnLon, utnLat, utnLon));
+        assertTrue(OfficialAlertRepository.cacheLocationCompatible(utnLat, utnLon, -32.91, -68.88));
+        assertFalse(OfficialAlertRepository.cacheLocationCompatible(utnLat, utnLon, -34.6177, -68.3301));
+        assertFalse(OfficialAlertRepository.cacheLocationCompatible(Double.NaN, utnLon, utnLat, utnLon));
+    }
+
     private static OfficialAlertRepository.Result result(boolean smnAvailable, boolean mendozaAvailable,
                                                           boolean smnRetryable, boolean mendozaRetryable) {
         return new OfficialAlertRepository.Result(Collections.emptyList(), smnAvailable, mendozaAvailable,
