@@ -16,8 +16,10 @@ import java.util.Locale;
 import java.util.Map;
 
 final class OfficialAlertRepository {
-    private static final String PREFS = "official_alerts_v1";
-    private static final String KEY_CACHE = "cache";
+    private static final String PREFS = "official_alerts_v2";
+    private static final String LEGACY_PREFS = "official_alerts_v1";
+    private static final String KEY_SMN_CACHE = "smn.cache";
+    private static final String KEY_MENDOZA_CACHE = "mendoza.cache";
     private static final long MAX_CACHE_AGE_MS = 6L * 60L * 60L * 1000L;
     private static final double MAX_CACHE_DISTANCE_KM = 10.0;
 
@@ -49,8 +51,8 @@ final class OfficialAlertRepository {
         }
         String statusText() {
             if (smnAvailable && mendozaAvailable) return "SMN + Mendoza oficiales";
-            if (smnAvailable) return "SMN oficial" + (usedCache ? " · Mendoza en caché" : "");
-            if (mendozaAvailable) return "Mendoza oficial" + (usedCache ? " · SMN en caché" : "");
+            if (smnAvailable) return "SMN oficial" + (usedCache ? " · respaldo en caché" : "");
+            if (mendozaAvailable) return "Mendoza oficial" + (usedCache ? " · respaldo en caché" : "");
             return usedCache ? "alertas oficiales en caché" : "alertas oficiales no disponibles";
         }
     }
@@ -65,6 +67,8 @@ final class OfficialAlertRepository {
 
     OfficialAlertRepository(Context context, HttpTextTransport transport) {
         Context app = context.getApplicationContext();
+        // The v1 cache mixed source freshness. Clear it instead of carrying ambiguous TTL state.
+        app.getSharedPreferences(LEGACY_PREFS, Context.MODE_PRIVATE).edit().clear().apply();
         prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         smn = new SmnOfficialAlertSource(transport);
         mendoza = new MendozaOfficialBulletinSource(transport);
@@ -72,7 +76,8 @@ final class OfficialAlertRepository {
 
     Result load(double latitude, double longitude) {
         long now = System.currentTimeMillis();
-        Cache cached = readCache(now, latitude, longitude);
+        Cache smnCached = readCache(KEY_SMN_CACHE, now, latitude, longitude);
+        Cache mendozaCached = readCache(KEY_MENDOZA_CACHE, now, latitude, longitude);
         List<OfficialAlert> smnAlerts = new ArrayList<>();
         List<OfficialAlert> mendozaAlerts = new ArrayList<>();
         boolean smnAvailable = false;
@@ -84,27 +89,25 @@ final class OfficialAlertRepository {
         try {
             smnAlerts = smn.load(latitude, longitude, now);
             smnAvailable = true;
+            writeCache(KEY_SMN_CACHE, smnAlerts, now, latitude, longitude);
         } catch (Exception error) {
             smnRetryableFailure = retryableFailure(error);
-            smnAlerts = smnFromCache(cached, now);
+            smnAlerts = sourceFromCache(smnCached, OfficialAlert.Source.SMN_CAP,
+                    OfficialAlert.Source.SMN_API, now);
             usedCache |= !smnAlerts.isEmpty();
         }
 
         try {
             mendozaAlerts = mendoza.load(now);
             mendozaAvailable = true;
+            writeCache(KEY_MENDOZA_CACHE, mendozaAlerts, now, latitude, longitude);
         } catch (Exception error) {
             mendozaRetryableFailure = retryableFailure(error);
-            mendozaAlerts = sourceFromCache(cached, OfficialAlert.Source.MENDOZA_DCC, now);
+            mendozaAlerts = sourceFromCache(mendozaCached, OfficialAlert.Source.MENDOZA_DCC, null, now);
             usedCache |= !mendozaAlerts.isEmpty();
         }
 
         List<OfficialAlert> merged = mergeActive(smnAlerts, mendozaAlerts, now);
-        if (smnAvailable || mendozaAvailable) writeCache(merged, now, latitude, longitude);
-        else if (merged.isEmpty() && cached != null) {
-            merged = mergeActive(cached.alerts, Collections.emptyList(), now);
-            usedCache = !merged.isEmpty();
-        }
         return new Result(merged, smnAvailable, mendozaAvailable, smnRetryableFailure,
                 mendozaRetryableFailure, usedCache, now);
     }
@@ -170,27 +173,19 @@ final class OfficialAlertRepository {
         }
     }
 
-    private static List<OfficialAlert> smnFromCache(Cache cache, long now) {
+    private static List<OfficialAlert> sourceFromCache(Cache cache, OfficialAlert.Source primary,
+                                                       OfficialAlert.Source secondary, long now) {
         ArrayList<OfficialAlert> result = new ArrayList<>();
         if (cache == null) return result;
         for (OfficialAlert alert : cache.alerts) {
-            if ((alert.source == OfficialAlert.Source.SMN_CAP || alert.source == OfficialAlert.Source.SMN_API)
+            if ((alert.source == primary || (secondary != null && alert.source == secondary))
                     && alert.activeAt(now)) result.add(alert);
         }
         return result;
     }
 
-    private static List<OfficialAlert> sourceFromCache(Cache cache, OfficialAlert.Source source, long now) {
-        ArrayList<OfficialAlert> result = new ArrayList<>();
-        if (cache == null) return result;
-        for (OfficialAlert alert : cache.alerts) {
-            if (alert.source == source && alert.activeAt(now)) result.add(alert);
-        }
-        return result;
-    }
-
-    private Cache readCache(long now, double latitude, double longitude) {
-        String raw = prefs.getString(KEY_CACHE, null);
+    private Cache readCache(String key, long now, double latitude, double longitude) {
+        String raw = prefs.getString(key, null);
         if (raw == null || raw.isEmpty()) return null;
         try {
             JSONObject root = new JSONObject(raw);
@@ -211,12 +206,13 @@ final class OfficialAlertRepository {
             }
             return new Cache(savedAt, savedLat, savedLon, alerts);
         } catch (JSONException ignored) {
-            prefs.edit().remove(KEY_CACHE).apply();
+            prefs.edit().remove(key).apply();
             return null;
         }
     }
 
-    private void writeCache(List<OfficialAlert> alerts, long now, double latitude, double longitude) {
+    private void writeCache(String key, List<OfficialAlert> alerts, long now,
+                            double latitude, double longitude) {
         try {
             JSONObject root = new JSONObject();
             root.put("savedAt", now);
@@ -225,7 +221,7 @@ final class OfficialAlertRepository {
             JSONArray items = new JSONArray();
             for (OfficialAlert alert : alerts) items.put(alert.toJson());
             root.put("alerts", items);
-            prefs.edit().putString(KEY_CACHE, root.toString()).apply();
+            prefs.edit().putString(key, root.toString()).apply();
         } catch (JSONException ignored) { }
     }
 
