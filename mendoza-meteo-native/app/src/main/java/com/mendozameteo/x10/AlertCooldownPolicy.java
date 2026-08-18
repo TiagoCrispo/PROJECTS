@@ -6,7 +6,6 @@ import java.util.Date;
 import java.util.Locale;
 
 final class AlertCooldownPolicy {
-    static final long DEFAULT_COOLDOWN_MILLIS = 3L * 60L * 60L * 1000L;
     private static final long DISTINCT_WINDOW_MILLIS = 3L * 60L * 60L * 1000L;
 
     static final class Previous {
@@ -30,23 +29,23 @@ final class AlertCooldownPolicy {
     private AlertCooldownPolicy() { }
 
     static boolean shouldNotify(Previous previous, AlertEngine.Event current, long nowMillis) {
-        return shouldNotify(previous, current, nowMillis, DEFAULT_COOLDOWN_MILLIS);
-    }
-
-    static boolean shouldNotify(Previous previous, AlertEngine.Event current, long nowMillis, long cooldownMillis) {
         if (current == null) return false;
         if (previous == null) return true;
         if (current.kind != previous.kind) return true;
         if (current.severity.rank > previous.severity.rank) return true;
+
+        // Do not turn a persistent forecast event into a three-hour reminder loop. The same
+        // event remains silent until it escalates or its forecast start moves far enough to be
+        // treated as a genuinely different episode.
         long startShift = absoluteStartShiftMillis(previous.startIso, current.startIso);
-        if (startShift >= DISTINCT_WINDOW_MILLIS) return true;
-        long elapsed = Math.max(0L, nowMillis - previous.notifiedAtMillis);
-        return elapsed >= Math.max(0L, cooldownMillis);
+        return startShift >= DISTINCT_WINDOW_MILLIS;
     }
 
     private static long absoluteStartShiftMillis(String firstIso, String secondIso) {
         Long first = parseMillis(firstIso), second = parseMillis(secondIso);
-        if (first == null || second == null) return firstIso != null && firstIso.equals(secondIso) ? 0L : Long.MAX_VALUE;
+        if (first == null || second == null) {
+            return firstIso != null && firstIso.equals(secondIso) ? 0L : Long.MAX_VALUE;
+        }
         long delta = second - first;
         if (delta == Long.MIN_VALUE) return Long.MAX_VALUE;
         return Math.abs(delta);
