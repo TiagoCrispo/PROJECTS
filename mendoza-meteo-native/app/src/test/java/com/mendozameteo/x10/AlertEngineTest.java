@@ -150,20 +150,18 @@ public final class AlertEngineTest {
         assertFalse(stronger.severity.label.toLowerCase().contains("naranja"));
     }
 
-    @Test public void cooldownSuppressesRepeatButAllowsEscalationAndDistinctWindow() {
+    @Test public void repeatEpisodeStaysSilentButEscalationAndDistinctWindowNotify() {
         AlertEngine.Event first = event(AlertEngine.Kind.RAIN, AlertEngine.Severity.PRECAUTION, "2026-08-18T14:00");
         AlertCooldownPolicy.Previous previous = AlertCooldownPolicy.Previous.from(first, 1_000L);
-        AlertEngine.Event same = event(AlertEngine.Kind.RAIN, AlertEngine.Severity.PRECAUTION, "2026-08-18T15:00");
-        assertFalse(AlertCooldownPolicy.shouldNotify(previous, same, 2_000L));
+        AlertEngine.Event sameEpisode = event(AlertEngine.Kind.RAIN, AlertEngine.Severity.PRECAUTION, "2026-08-18T15:00");
+        assertFalse(AlertCooldownPolicy.shouldNotify(previous, sameEpisode, 2_000L));
+        assertFalse(AlertCooldownPolicy.shouldNotify(previous, sameEpisode, 1_000L + 24L * 60L * 60L * 1000L));
 
         AlertEngine.Event escalated = event(AlertEngine.Kind.RAIN, AlertEngine.Severity.IMPORTANT, "2026-08-18T15:00");
         assertTrue(AlertCooldownPolicy.shouldNotify(previous, escalated, 2_000L));
 
         AlertEngine.Event laterWindow = event(AlertEngine.Kind.RAIN, AlertEngine.Severity.PRECAUTION, "2026-08-18T18:00");
         assertTrue(AlertCooldownPolicy.shouldNotify(previous, laterWindow, 2_000L));
-
-        assertTrue(AlertCooldownPolicy.shouldNotify(previous, same,
-                1_000L + AlertCooldownPolicy.DEFAULT_COOLDOWN_MILLIS));
     }
 
     private static AlertEngine.Event event(AlertEngine.Kind kind, AlertEngine.Severity severity, String start) {
