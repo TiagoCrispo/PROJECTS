@@ -8,7 +8,7 @@ import java.util.Objects;
 final class NotificationPolicy {
     static final long OFFICIAL_UPDATE_COOLDOWN_MILLIS = 30L * 60L * 1000L;
 
-    enum OfficialChange { NONE, NEW, ESCALATION, IMPORTANT_UPDATE }
+    enum OfficialChange { NONE, NEW, ESCALATION, DEESCALATION, IMPORTANT_UPDATE }
 
     static final class PreviousOfficial {
         final String stateKey;
@@ -44,6 +44,7 @@ final class NotificationPolicy {
         if (current == null || !current.activeAt(nowMillis)) return OfficialChange.NONE;
         if (previous == null) return OfficialChange.NEW;
         if (current.level.rank > previous.levelRank) return OfficialChange.ESCALATION;
+        if (current.level.rank < previous.levelRank) return OfficialChange.DEESCALATION;
         int currentHash = officialContentHash(current);
         if (currentHash != previous.contentHash
                 && Math.max(0L, nowMillis - previous.notifiedAtMillis) >= OFFICIAL_UPDATE_COOLDOWN_MILLIS) {
