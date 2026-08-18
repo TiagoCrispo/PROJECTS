@@ -8,56 +8,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  wrapper-bootstrap:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: mendoza-meteo-native-v6
-      - uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '17'
-      - uses: gradle/actions/setup-gradle@v6
-        with:
-          gradle-version: '9.5.0'
-          cache-provider: basic
-      - name: Generate and verify Gradle 9.5.0 wrapper
-        shell: bash
-        run: |
-          set -euo pipefail
-          SHA="$(curl --fail --silent --show-error --location https://services.gradle.org/distributions/gradle-9.5.0-bin.zip.sha256 | tr -d '[:space:]')"
-          [[ "$SHA" =~ ^[0-9a-fA-F]{64}$ ]]
-          gradle -p mendoza-meteo-native wrapper \
-            --gradle-version 9.5.0 \
-            --distribution-type bin \
-            --gradle-distribution-sha256-sum "$SHA"
-          chmod +x mendoza-meteo-native/gradlew
-          grep -F 'gradle-9.5.0-bin.zip' mendoza-meteo-native/gradle/wrapper/gradle-wrapper.properties
-          grep -F "distributionSha256Sum=$SHA" mendoza-meteo-native/gradle/wrapper/gradle-wrapper.properties
-          (cd mendoza-meteo-native && ./gradlew --version)
-      - name: Commit wrapper when missing or stale
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add mendoza-meteo-native/gradlew \
-                  mendoza-meteo-native/gradlew.bat \
-                  mendoza-meteo-native/gradle/wrapper/gradle-wrapper.jar \
-                  mendoza-meteo-native/gradle/wrapper/gradle-wrapper.properties
-          git diff --cached --check -- . ':(exclude)mendoza-meteo-native/gradlew.bat'
-          if git diff --cached --quiet; then
-            echo 'Wrapper already matches Gradle 9.5.0.'
-            exit 0
-          fi
-          git commit -m 'Tooling: add verified Gradle 9.5.0 wrapper'
-          git push origin HEAD:mendoza-meteo-native-v6
-
   provider-contract:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -98,10 +48,15 @@ jobs:
         run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
       - uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: '9.5.0'
           cache-provider: basic
+      - name: Verify committed Gradle Wrapper
+        run: |
+          test -x mendoza-meteo-native/gradlew
+          grep -F 'gradle-9.5.0-bin.zip' mendoza-meteo-native/gradle/wrapper/gradle-wrapper.properties
+          grep -F 'distributionSha256Sum=553c78f50dafcd54d65b9a444649057857469edf836431389695608536d6b746' mendoza-meteo-native/gradle/wrapper/gradle-wrapper.properties
+          (cd mendoza-meteo-native && ./gradlew --version)
       - name: Unit tests, lint and clean builds
-        run: gradle -p mendoza-meteo-native clean testDebugUnitTest lintRelease assembleDebug assembleRelease --stacktrace --warning-mode all
+        run: (cd mendoza-meteo-native && ./gradlew clean testDebugUnitTest lintRelease assembleDebug assembleRelease --stacktrace --warning-mode all)
       - name: Inspect release output
         run: |
           APK=mendoza-meteo-native/app/build/outputs/apk/release/app-release-unsigned.apk
@@ -109,8 +64,8 @@ jobs:
           "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -p -v 4 "$APK"
           BADGING="$($AAPT dump badging "$APK")"
           echo "$BADGING" | grep -E "package:|sdkVersion:|targetSdkVersion:"
-          echo "$BADGING" | grep "versionCode='64'"
-          echo "$BADGING" | grep "versionName='6.4-native-dev'"
+          echo "$BADGING" | grep "versionCode='65'"
+          echo "$BADGING" | grep "versionName='6.5-native-dev'"
           "$AAPT" dump permissions "$APK" | grep "android.permission.POST_NOTIFICATIONS"
           ! "$AAPT" dump permissions "$APK" | grep -q "android.permission.ACCESS_BACKGROUND_LOCATION"
           ! "$AAPT" dump permissions "$APK" | grep -q "android.permission.SCHEDULE_EXACT_ALARM"

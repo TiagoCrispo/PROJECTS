@@ -9,7 +9,7 @@ def once(name,base,probability):
     current=COMMON_CURRENT.copy();hourly=COMMON_HOURLY.copy();daily=COMMON_DAILY.copy()
     if probability: current.insert(4,"precipitation_probability");hourly.insert(4,"precipitation_probability");daily.insert(2,"precipitation_probability_max")
     params={"latitude":f"{LAT:.5f}","longitude":f"{LON:.5f}","timezone":TZ,"forecast_days":"7","temperature_unit":"celsius","wind_speed_unit":"kmh","precipitation_unit":"mm","timeformat":"iso8601","current":",".join(current),"hourly":",".join(hourly),"daily":",".join(daily)}
-    req=urllib.request.Request(base+"?"+urllib.parse.urlencode(params),headers={"User-Agent":"MendozaMeteoX10-CI/6.4-native-dev","Accept":"application/json"})
+    req=urllib.request.Request(base+"?"+urllib.parse.urlencode(params),headers={"User-Agent":"MendozaMeteoX10-CI/6.5-native-dev","Accept":"application/json"})
     with urllib.request.urlopen(req,timeout=20) as response: payload=json.load(response)
     print(f"PROVIDER_KEYS {name} keys={sorted(payload.keys())}")
     assert payload.get("timezone")==TZ,(name,payload.get("timezone"));assert "hourly" in payload,name;assert len(payload["hourly"]["time"])>=48,name
