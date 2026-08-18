@@ -46,7 +46,7 @@ Official alerts always take precedence over heuristics.
 
 ## Retry and reliability
 
-If both official-source paths are unavailable and no official cache is usable, one WorkManager retry is requested even when the general weather forecast succeeded. The normal 30-minute periodic schedule then remains the long-term fallback.
+Retry is source-aware rather than blind. Timeouts, network failures and retryable HTTP responses can request one WorkManager retry. Permanent HTTP responses such as 403 and malformed/non-retryable payloads do not enter a repeated retry loop. A transient SMN failure gets one retry because SMN is the primary authority; a transient Mendoza-source failure is retried when SMN is also unavailable. The normal 30-minute periodic schedule remains the long-term fallback.
 
 WorkManager is reliable deferred work, not a real-time push transport. Android/Doze/OEM battery policy can delay a periodic run. The app therefore must not claim second-by-second official alert delivery.
 
