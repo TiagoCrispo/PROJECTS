@@ -59,7 +59,13 @@ jobs:
           grep -q 'versionCode = 81' projects/wa-vault/app/build.gradle.kts
           grep -q 'versionName = "0.5.31"' projects/wa-vault/app/build.gradle.kts
           cp "$B/v0530_block3_db_migration_test.py" projects/wa-vault/tools/v0530_block3_db_migration_test.py
+          cp "$B/check_nested_catch_redeclaration.py" projects/wa-vault/tools/check_nested_catch_redeclaration.py
+          cp "$B/run_static_validation.sh" projects/wa-vault/tools/run_static_validation.sh
+          chmod +x projects/wa-vault/tools/run_static_validation.sh projects/wa-vault/tools/check_nested_catch_redeclaration.py
+          python3 "$B/apply_block7_compile_fix.py" projects/wa-vault
           ! grep -RIn '/mnt/data' projects/wa-vault/tools projects/wa-vault/app/src/test projects/wa-vault/app/src/androidTest
+          grep -q 'catch(Throwable stagingFailure)' projects/wa-vault/app/src/main/java/com/fer/wavault/MediaArchiver.java
+          ! grep -q 'catch(Throwable ignored){try{tmp.delete();}catch(Throwable ignored)' projects/wa-vault/app/src/main/java/com/fer/wavault/MediaArchiver.java
 
       - name: Static validation
         working-directory: projects/wa-vault
@@ -73,7 +79,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add projects/wa-vault
           if ! git diff --cached --quiet; then
-            git commit -m 'WA Vault v0.5.31 materialize source'
+            git commit -m 'WA Vault v0.5.31 fix Java compiler regression'
             git push origin HEAD:agent/wa-vault-v0.5.31-block7
           fi
 
