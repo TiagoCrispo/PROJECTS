@@ -12,6 +12,7 @@ import java.util.TimeZone;
 final class OfficialAlert {
     enum Source {
         SMN_CAP("SMN"),
+        SMN_API("SMN"),
         MENDOZA_DCC("Contingencias Mendoza");
 
         final String label;
@@ -21,9 +22,10 @@ final class OfficialAlert {
     enum Level {
         UNKNOWN(0, "Oficial"),
         INFO(1, "Información"),
-        YELLOW(2, "Amarillo"),
-        ORANGE(3, "Naranja"),
-        RED(4, "Rojo");
+        ADVISORY(2, "Advertencia"),
+        YELLOW(3, "Amarillo"),
+        ORANGE(4, "Naranja"),
+        RED(5, "Rojo");
 
         final int rank;
         final String label;
