@@ -4,13 +4,15 @@ final class ForecastFreshness {
     static final long FRESH_MILLIS = 90L * 60L * 1000L;
     static final long STALE_MILLIS = 6L * 60L * 60L * 1000L;
     static final long VERY_STALE_MILLIS = 24L * 60L * 60L * 1000L;
+    static final long MAX_FUTURE_SKEW_MILLIS = 10L * 60L * 1000L;
 
     enum State { FRESH, STALE, VERY_STALE, EXPIRED }
 
     private ForecastFreshness() { }
 
     static long ageMillis(long fetchedAtMillis, long nowMillis) {
-        if (fetchedAtMillis <= 0) return Long.MAX_VALUE;
+        if (fetchedAtMillis <= 0L || nowMillis <= 0L) return Long.MAX_VALUE;
+        if (fetchedAtMillis > nowMillis + MAX_FUTURE_SKEW_MILLIS) return Long.MAX_VALUE;
         return Math.max(0L, nowMillis - fetchedAtMillis);
     }
 
