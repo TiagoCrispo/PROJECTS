@@ -1,6 +1,6 @@
 # Damián Crispo
 
-I build practical software around problems I actually run into: Android utilities, Windows tools, AI-assisted learning, media workflows and small web projects.
+I build practical software around problems I actually run into: Android utilities, Windows tools, AI-assisted learning, wearable integration, media workflows and small web projects.
 
 I prefer tools that explain what they are doing, preserve user control and avoid pretending that an unverified result is real.
 
@@ -8,12 +8,12 @@ I prefer tools that explain what they are doing, preserve user control and avoid
 
 | Project | What it is |
 |---|---|
-| [AniFlow](./projects/aniflow.md) | Personal Android anime library and player with AniList metadata, chronological franchise navigation, durable watch progress and Media3 playback. |
+| [AniFlow](./projects/aniflow.md) | Personal Android anime library and Media3 player with AniList metadata, franchise chronology, persistent progress and a visual black/orange streaming UI. |
 | [ProAim](./projects/proaim.md) | Windows performance, latency, mouse, hardware-health and display diagnostics with reversible tuning. |
 | [UTN Scholar](./projects/utn-scholar.md) | Cross-device study workspace for university documents, AI-assisted learning and local tools. |
 | [FurnitureShot AI](./projects/furnitureshot-ai.md) | Android furniture-photo editor focused on product fidelity, clean catalog composition and conservative quality gates. |
 | [BandLab](./projects/bandlab.md) | Local-first Android training companion with Xiaomi Smart Band integration, GPS and workout analytics. |
-| [A53 Performance](./projects/a53-performance.md) | Android maintenance and device-analysis utility focused on clear, bounded actions. |
+| [Galaxy A53 Performance](./projects/galaxy-a53-performance/README.md) | Android performance, storage and diagnostics utility with reversible profiles, Shizuku capability truth and conservative cleanup. |
 | [WA Vault](./projects/wa-vault.md) | Privacy-focused Android project for durable local message/event and media association. |
 | [Meteora Weather](./projects/meteora-weather.md) | Weather client focused on readable forecasts, caching and honest error handling. |
 

@@ -6,11 +6,11 @@ This folder contains the public-facing documentation for the projects shown on m
 
 | Project | Area |
 |---|---|
-| [AniFlow](./aniflow.md) | Android · anime metadata · Media3 · local persistence |
+| [AniFlow](./aniflow.md) | Android · anime · Media3 · AniList · Room |
 | [ProAim](./proaim.md) | Windows · latency · diagnostics |
 | [UTN Scholar](./utn-scholar.md) | Education · documents · AI-assisted learning |
 | [BandLab](./bandlab.md) | Android · fitness · Bluetooth LE |
-| [A53 Performance](./a53-performance.md) | Android · storage · device utilities |
+| [Galaxy A53 Performance](./galaxy-a53-performance/README.md) | Android · performance · storage · Shizuku |
 | [WA Vault](./wa-vault.md) | Android · local data · reliability |
 | [FurnitureShot AI](./furnitureshot-ai.md) | Android · product photography · local image processing |
 | [Meteora Weather](./meteora-weather.md) | Weather · web · data presentation |
