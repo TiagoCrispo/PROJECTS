@@ -1,4 +1,4 @@
-# Mendoza Meteo X10 v6.5 — Release hardening
+# Mendoza Meteo X10 v6.6 — Release hardening
 
 Este documento define el gate físico previo a generar el APK final. CI no sustituye estas pruebas porque Android/One UI, Doze, permisos, launcher y la red real del teléfono pueden comportarse distinto a un runner Linux.
 
@@ -8,13 +8,14 @@ Debe quedar verde en el mismo SHA que se pretenda liberar:
 
 - `provider-contract`: contratos Open-Meteo Best Match, GFS y ECMWF.
 - `official-contract`: SMN cuando el origen permite acceso; si GitHub recibe 403, debe quedar explícitamente `RESTRICTED`, nunca falsamente `OK`. Mendoza DCC debe seguir validándose.
-- `release-contract`: versión, permisos, no background location, no exact alarms, widget 2x2, aislamiento de caché local/UTN, clock-skew guards, Gradle Wrapper verificado, ausencia de material de firma, toolchain Node 24 y ausencia de referencias de versión obsoletas.
+- `release-contract`: versión, permisos, no background location, no exact alarms, widget 2x2, aislamiento de caché local/UTN, clock-skew guards, Gradle Wrapper verificado, User-Agent sincronizado, ausencia de material de firma, toolchain Node 24 y ausencia de referencias de versión obsoletas.
 - `testDebugUnitTest`.
 - `lintRelease`.
 - `assembleDebug` y `assembleRelease` limpios.
 - Build reproducible mediante `./gradlew` del repositorio, nunca un Gradle global implícito.
-- Auditoría Java `-Xlint:deprecation` y Gradle `--warning-mode all` visible en CI.
-- `zipalign`, integridad ZIP y contrato del APK `versionCode 65` / `6.5-native-dev`.
+- `javac -Werror`: cualquier warning Java no suprimido falla el build.
+- Gradle `--warning-mode fail`: cualquier warning/deprecación de Gradle falla el build.
+- `zipalign`, integridad ZIP y contrato del APK `versionCode 66` / `6.6-native-dev`.
 
 ## Gate físico Samsung / One UI
 
@@ -77,4 +78,4 @@ Usar una instalación limpia para el test de release; no actualizar encima de un
 
 ## Criterio de aceptación
 
-No generar ni distribuir APK final mientras exista alguno de estos fallos: crash, widget que mezcle ubicaciones, dato expirado mostrado como fresco, alerta oficial duplicada por X10, notificación obsoleta que no se limpia, background location no solicitada explícitamente, tráfico HTTP claro, versión desincronizada, wrapper no verificable, deprecación propia no justificada o CI rojo.
+No generar ni distribuir APK final mientras exista alguno de estos fallos: crash, widget que mezcle ubicaciones, dato expirado mostrado como fresco, alerta oficial duplicada por X10, notificación obsoleta que no se limpia, background location no solicitada explícitamente, tráfico HTTP claro, versión desincronizada, wrapper no verificable, warning Java no suprimido, warning/deprecación Gradle, deprecación propia no justificada o CI rojo.
