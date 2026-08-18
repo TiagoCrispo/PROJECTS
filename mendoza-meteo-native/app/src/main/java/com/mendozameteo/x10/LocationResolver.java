@@ -261,8 +261,7 @@ final class LocationResolver {
             long delta = SystemClock.elapsedRealtimeNanos() - location.getElapsedRealtimeNanos();
             if (delta >= 0L) return delta / 1_000_000L;
         }
-        if (location.getTime() <= 0L) return Long.MAX_VALUE;
-        return Math.max(0L, nowWall - location.getTime());
+        return LocationPolicy.wallClockAgeMillis(location.getTime(), nowWall);
     }
 
     private Point readSaved(long now, Permission permission) {
@@ -271,7 +270,7 @@ final class LocationResolver {
             return null;
         }
         long savedAt = prefs.getLong(KEY_SAVED_AT, 0L);
-        long savedAge = savedAt <= 0L ? Long.MAX_VALUE : Math.max(0L, now - savedAt);
+        long savedAge = LocationPolicy.wallClockAgeMillis(savedAt, now);
         double lat = Double.longBitsToDouble(prefs.getLong(KEY_LAT, Double.doubleToRawLongBits(Double.NaN)));
         double lon = Double.longBitsToDouble(prefs.getLong(KEY_LON, Double.doubleToRawLongBits(Double.NaN)));
         float accuracy = prefs.getFloat(KEY_ACCURACY, LocationPolicy.MAX_ACCEPTABLE_ACCURACY_METERS);
