@@ -2,14 +2,11 @@ package com.mendozameteo.x10;
 
 import android.Manifest;
 import android.app.Activity;
-import android.content.Context;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Insets;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
-import android.location.Location;
-import android.location.LocationManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.Gravity;
@@ -27,9 +24,11 @@ import java.util.concurrent.Future;
 public final class MainActivity extends Activity {
     private static final double UTN_LAT=-32.896748, UTN_LON=-68.853418;
     private static final int LOCATION_REQUEST=42;
+    private static final long LOCATION_TIMEOUT_MILLIS=4_500L;
     private final LoadGate loadGate=new LoadGate();
     private ExecutorService executor;
     private WeatherRepository repository;
+    private LocationResolver locationResolver;
     private LinearLayout content;
     private TextView status, refresh;
     private volatile boolean destroyed;
@@ -38,11 +37,12 @@ public final class MainActivity extends Activity {
         super.onCreate(state);
         executor=Executors.newFixedThreadPool(3);
         repository=new WeatherRepository(getApplicationContext());
+        locationResolver=new LocationResolver(getApplicationContext());
         buildShell();
         if(hasLocation()) loadAll();
         else {
             status.setText("Permite ubicación para usar tu clima local…");
-            requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION,Manifest.permission.ACCESS_COARSE_LOCATION},LOCATION_REQUEST);
+            requestLocationPermissions();
         }
     }
 
@@ -59,9 +59,13 @@ public final class MainActivity extends Activity {
         scroll.requestApplyInsets();
         LinearLayout head=new LinearLayout(this); head.setGravity(Gravity.CENTER_VERTICAL); head.setOrientation(LinearLayout.HORIZONTAL);
         TextView title=text("Mendoza Meteo",24,Color.WHITE,true); head.addView(title,new LinearLayout.LayoutParams(0,dp(48),1));
-        refresh=text("Actualizar",13,Color.rgb(120,183,255),true); refresh.setGravity(Gravity.CENTER); refresh.setBackground(cardBg(Color.rgb(26,37,56),14)); refresh.setOnClickListener(v->loadAll()); head.addView(refresh,new LinearLayout.LayoutParams(dp(92),dp(38)));
+        refresh=text("Actualizar",13,Color.rgb(120,183,255),true); refresh.setGravity(Gravity.CENTER); refresh.setBackground(cardBg(Color.rgb(26,37,56),14)); refresh.setOnClickListener(v->{if(hasLocation())loadAll();else requestLocationPermissions();}); head.addView(refresh,new LinearLayout.LayoutParams(dp(92),dp(38)));
         content.addView(head);
         status=text("Cargando pronóstico…",12,Color.rgb(174,185,203),false); content.addView(status,new LinearLayout.LayoutParams(-1,dp(34)));
+    }
+
+    private void requestLocationPermissions(){
+        requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION,Manifest.permission.ACCESS_COARSE_LOCATION},LOCATION_REQUEST);
     }
 
     private void applyContentPadding(int l,int t,int r,int b){ if(content!=null) content.setPadding(dp(14)+l,dp(10)+t,dp(14)+r,dp(28)+b); }
@@ -71,15 +75,23 @@ public final class MainActivity extends Activity {
         final long token=loadGate.begin();
         if(token==LoadGate.REJECTED){status.setText("Ya se está actualizando…");return;}
         setLoadingUi(true); while(content.getChildCount()>2)content.removeViewAt(2);
-        Point point=bestPoint(); if(point.fromDevice)savePoint(point);
         executor.execute(()->{
+            LocationResolver.Point point=locationResolver.resolve(UTN_LAT,UTN_LON,LOCATION_TIMEOUT_MILLIS);
+            if(!loadGate.isActive(token)||Thread.currentThread().isInterrupted())return;
+            if(!point.fromUserLocation()){
+                WeatherRepository.Result utn=repository.load("utn",UTN_LAT,UTN_LON);
+                if(!loadGate.isActive(token)||Thread.currentThread().isInterrupted())return;
+                if(utn.isSuccess()) WeatherWidgetProvider.publishForecast(getApplicationContext(),utn.forecast,utn.origin==WeatherRepository.Origin.CACHE,utn.freshness);
+                postResult(token,()->render(utn,utn,point));
+                return;
+            }
             Future<WeatherRepository.Result> localTask=executor.submit(()->repository.load("local",point.lat,point.lon));
             Future<WeatherRepository.Result> utnTask=executor.submit(()->repository.load("utn",UTN_LAT,UTN_LON));
             try{
                 WeatherRepository.Result local=localTask.get(), utn=utnTask.get();
                 if(!loadGate.isActive(token)||Thread.currentThread().isInterrupted())return;
                 if(local.isSuccess()) WeatherWidgetProvider.publishForecast(getApplicationContext(),local.forecast,local.origin==WeatherRepository.Origin.CACHE,local.freshness);
-                postResult(token,()->render(local,utn,point.fromDevice));
+                postResult(token,()->render(local,utn,point));
             }catch(InterruptedException e){Thread.currentThread().interrupt();postResult(token,()->status.setText("Actualización cancelada."));}
             catch(ExecutionException e){postResult(token,()->status.setText("Error interno al actualizar el pronóstico."));}
             finally{localTask.cancel(true);utnTask.cancel(true);}
@@ -87,20 +99,19 @@ public final class MainActivity extends Activity {
     }
 
     private void postResult(long token,Runnable action){ runOnUiThread(()->{ if(destroyed||!loadGate.isActive(token))return; try{action.run();}finally{loadGate.finish(token);setLoadingUi(false);} }); }
-    private void setLoadingUi(boolean loading){ if(status!=null&&loading)status.setText("Actualizando…"); if(refresh!=null){refresh.setEnabled(!loading);refresh.setAlpha(loading?0.55f:1f);} }
+    private void setLoadingUi(boolean loading){ if(status!=null&&loading)status.setText("Buscando ubicación y actualizando…"); if(refresh!=null){refresh.setEnabled(!loading);refresh.setAlpha(loading?0.55f:1f);} }
 
-    private void render(WeatherRepository.Result local,WeatherRepository.Result utn,boolean deviceLocation){
+    private void render(WeatherRepository.Result local,WeatherRepository.Result utn,LocationResolver.Point point){
         WeatherRepository.Result primary=local.isSuccess()?local:(utn.isSuccess()?utn:null);
-        status.setText(combinedStatus(local,utn,deviceLocation));
+        status.setText(combinedStatus(local,utn,point));
         if(primary==null){renderUnavailable("No hay pronóstico disponible ni datos guardados utilizables.");return;}
-        String suffix=local.isSuccess()?(deviceLocation?"":" · referencia UTN"):" · UTN (sin datos locales)";
+        String suffix=local.isSuccess()?(point.fromUserLocation()?"":" · referencia UTN"):" · UTN (sin datos locales)";
         section("7 días"+suffix); renderDays(primary.forecast);
         section("Próximas 24 h"+suffix); renderHours(primary.forecast);
         section("Mi ubicación");
         if(local.isSuccess()){
             LinearLayout current=card(); current.setPadding(dp(14),dp(12),dp(14),dp(12)); current.addView(text(local.forecast.current.temp+"°",36,Color.WHITE,true));
-            String prefix=deviceLocation?"":"Referencia UTN · ";
-            current.addView(text(prefix+"Sensación "+local.forecast.current.feels+"° · Humedad "+local.forecast.current.humidity+"% · Viento "+local.forecast.current.wind+" km/h · Ráfagas "+local.forecast.current.gust+" km/h",12,Color.rgb(174,185,203),false));
+            current.addView(text(point.cardPrefix()+"Sensación "+local.forecast.current.feels+"° · Humedad "+local.forecast.current.humidity+"% · Viento "+local.forecast.current.wind+" km/h · Ráfagas "+local.forecast.current.gust+" km/h",12,Color.rgb(174,185,203),false));
             content.addView(current,new LinearLayout.LayoutParams(-1,-2)); renderPrecaution(local);
         } else renderUnavailable("Tu ubicación no tiene datos disponibles. UTN sigue funcionando como referencia.");
         section("UTN Mendoza");
@@ -136,7 +147,11 @@ public final class MainActivity extends Activity {
         content.addView(alert,lp);
     }
 
-    private String combinedStatus(WeatherRepository.Result local,WeatherRepository.Result utn,boolean deviceLocation){ if(local.isSuccess()){String v=local.statusText();if(!deviceLocation)v="Sin ubicación precisa · "+v;if(!utn.isSuccess())v+=" · UTN sin actualizar";return v;} if(utn.isSuccess())return "Sin datos locales · UTN: "+utn.statusText(); return local.statusText(); }
+    private String combinedStatus(WeatherRepository.Result local,WeatherRepository.Result utn,LocationResolver.Point point){
+        if(local.isSuccess()){String v=point.statusLabel()+" · "+local.statusText();if(!utn.isSuccess()&&point.fromUserLocation())v+=" · UTN sin actualizar";return v;}
+        if(utn.isSuccess())return point.statusLabel()+" · sin datos locales · UTN: "+utn.statusText();
+        return point.statusLabel()+" · "+local.statusText();
+    }
     private void renderUnavailable(String message){LinearLayout v=card();v.setPadding(dp(14),dp(12),dp(14),dp(12));v.setBackground(cardBg(Color.rgb(52,31,31),16));v.addView(text(message,12,Color.rgb(255,178,178),true));content.addView(v,new LinearLayout.LayoutParams(-1,-2));}
     private void section(String name){TextView v=text(name,17,Color.WHITE,true);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,dp(38));lp.topMargin=dp(10);content.addView(v,lp);}
     private LinearLayout card(){LinearLayout v=new LinearLayout(this);v.setOrientation(LinearLayout.VERTICAL);v.setGravity(Gravity.CENTER_VERTICAL);v.setBackground(cardBg(Color.rgb(18,24,36),16));return v;}
@@ -144,9 +159,6 @@ public final class MainActivity extends Activity {
     private TextView text(String value,int sp,int color,boolean bold){TextView t=new TextView(this);t.setText(value);t.setTextSize(sp);t.setTextColor(color);t.setGravity(Gravity.CENTER_VERTICAL);t.setIncludeFontPadding(false);if(bold)t.setTypeface(Typeface.DEFAULT,Typeface.BOLD);return t;}
     private int dp(int value){return Math.round(value*getResources().getDisplayMetrics().density);}
     private boolean hasLocation(){return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED||checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)==PackageManager.PERMISSION_GRANTED;}
-    private Point bestPoint(){if(hasLocation())try{LocationManager lm=(LocationManager)getSystemService(Context.LOCATION_SERVICE);Location best=null;for(String p:lm.getProviders(true)){Location c=lm.getLastKnownLocation(p);if(c!=null&&(best==null||c.getTime()>best.getTime()||(c.getTime()==best.getTime()&&c.getAccuracy()<best.getAccuracy())))best=c;}if(best!=null)return new Point(best.getLatitude(),best.getLongitude(),true);}catch(SecurityException ignored){}return new Point(UTN_LAT,UTN_LON,false);}
-    private void savePoint(Point p){getSharedPreferences("last_location_v6",MODE_PRIVATE).edit().putLong("lat",Double.doubleToRawLongBits(p.lat)).putLong("lon",Double.doubleToRawLongBits(p.lon)).apply();}
     @Override public void onRequestPermissionsResult(int r,String[] p,int[] g){super.onRequestPermissionsResult(r,p,g);if(r==LOCATION_REQUEST)loadAll();}
-    @Override protected void onDestroy(){destroyed=true;loadGate.invalidate();if(executor!=null)executor.shutdownNow();super.onDestroy();}
-    private static final class Point{final double lat,lon;final boolean fromDevice;Point(double lat,double lon,boolean fromDevice){this.lat=lat;this.lon=lon;this.fromDevice=fromDevice;}}
+    @Override protected void onDestroy(){destroyed=true;loadGate.invalidate();if(locationResolver!=null)locationResolver.cancel();if(executor!=null)executor.shutdownNow();super.onDestroy();}
 }
