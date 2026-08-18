@@ -7,6 +7,7 @@ Rebuild nativo del paquete `com.mendozameteo.x10`, sin parches DEX.
 - Widget real 2x2: temperatura actual + 7 días + máxima/mínima + % lluvia.
 - Widget v6.3 location-safe: no consulta GPS en background, usa la última ubicación persistida por foreground hasta 48 h, separa caché `local`/`utn` y rechaza caché de otra zona (>10 km).
 - Open-Meteo mediante HTTPS con timeouts, validación, caché y fallback.
+- Freshness hardening: timestamps de forecast o ubicación absurdamente futuros se invalidan; solo se tolera un pequeño desfase de reloj de hasta 10 min.
 - Alertas oficiales separadas de heurísticas X10: SMN CAP/API + Contingencias Climáticas Mendoza.
 - Cachés oficiales SMN/Mendoza separados, TTL independiente y reutilización limitada al contexto geográfico consultado.
 - Notificaciones Android con `POST_NOTIFICATIONS`, canales por prioridad y WorkManager 2.11.2.
