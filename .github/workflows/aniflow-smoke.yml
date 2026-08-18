@@ -52,6 +52,7 @@ jobs:
           build = root / "build.gradle.kts"
           app_build = root / "app/build.gradle.kts"
           application = root / "app/src/main/java/com/aniflow/app/AniFlowApplication.kt"
+          validator = root / "scripts/validate-block7.py"
 
           text = build.read_text()
           text = text.replace('id("com.android.application") version "9.3.0"', 'id("com.android.application") version "9.3.1"')
@@ -67,6 +68,10 @@ jobs:
           if 'import coil3.disk.directory' not in text:
               text = text.replace('import coil3.disk.DiskCache\n', 'import coil3.disk.DiskCache\nimport coil3.disk.directory\n')
           application.write_text(text)
+
+          text = validator.read_text()
+          text = text.replace('"import coil3.crossfade",', '"import coil3.request.crossfade",\n        "import coil3.disk.directory",')
+          validator.write_text(text)
           PY
           grep -q 'id("com.android.application") version "9.3.1"' "$ROOT/build.gradle.kts"
           grep -q 'androidx.core:core:1.17.0' "$ROOT/app/build.gradle.kts"
