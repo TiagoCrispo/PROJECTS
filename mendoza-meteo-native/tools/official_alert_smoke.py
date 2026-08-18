@@ -17,7 +17,7 @@ import time
 import urllib.error
 import urllib.request
 
-UA = "MendozaMeteoX10-contract/6.5-native-dev"
+UA = "MendozaMeteoX10-contract"
 SMN_CAP = "https://ssl.smn.gob.ar/CAP/AR.php"
 SMN_TOKEN = "https://ws2.smn.gob.ar/"
 SMN_COORD = "https://ws1.smn.gob.ar/v1/georef/location/coord?lat=-32.896748&lon=-68.853418"
