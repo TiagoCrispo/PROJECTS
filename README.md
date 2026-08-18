@@ -1,6 +1,6 @@
 # Damián Crispo
 
-I build practical software around problems I actually run into: Android utilities, Windows tools, AI-assisted learning, wearable integration, 3D/game pipelines and small web projects.
+I build practical software around problems I actually run into: Android utilities, Windows tools, AI-assisted learning, media workflows and small web projects.
 
 I prefer tools that explain what they are doing, preserve user control and avoid pretending that an unverified result is real.
 
@@ -8,7 +8,7 @@ I prefer tools that explain what they are doing, preserve user control and avoid
 
 | Project | What it is |
 |---|---|
-| [Forge3D Studio](./projects/forge3d-studio.md) | Desktop 3D production toolkit for Roblox-oriented asset, character, animation, VFX and world workflows. |
+| [AniFlow](./projects/aniflow.md) | Personal Android anime library and player with AniList metadata, chronological franchise navigation, durable watch progress and Media3 playback. |
 | [ProAim](./projects/proaim.md) | Windows performance, latency, mouse, hardware-health and display diagnostics with reversible tuning. |
 | [UTN Scholar](./projects/utn-scholar.md) | Cross-device study workspace for university documents, AI-assisted learning and local tools. |
 | [FurnitureShot AI](./projects/furnitureshot-ai.md) | Android furniture-photo editor focused on product fidelity, clean catalog composition and conservative quality gates. |
