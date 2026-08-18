@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Live contract smoke for official alert sources.
 
-A day with zero active alerts is valid. TLS verification is never disabled. SMN CAP is
-preferred; if its WMO-registered endpoint blocks automated clients, the smoke validates
-the official ws2/ws1 channel used by the SMN web application instead.
+A day with zero active alerts is valid. TLS verification is never disabled. Direct SMN
+origins are preferred. Some cloud/datacenter IPs are intentionally blocked by SMN with
+HTTP 403; in that case this gate verifies the WMO Alerting Authority registration and
+probes the WMO SWIC aggregate independently. The output explicitly remains RESTRICTED,
+never pretending that an SMN alert payload was fetched when it was not.
 """
 from __future__ import annotations
 
@@ -20,6 +22,8 @@ SMN_CAP = "https://ssl.smn.gob.ar/CAP/AR.php"
 SMN_TOKEN = "https://ws2.smn.gob.ar/"
 SMN_COORD = "https://ws1.smn.gob.ar/v1/georef/location/coord?lat=-32.896748&lon=-68.853418"
 SMN_ALERT_BASE = "https://ws1.smn.gob.ar/v1/warning/alert/location"
+WMO_REGISTRY = "https://alertingauthority.wmo.int/authorities.php?recId=4"
+WMO_SWIC_ALL = "https://severeweather.wmo.int/v2/json/all.json"
 MENDOZA_DCC = "https://www.contingencias.mendoza.gov.ar/alerta/"
 JWT = re.compile(r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")
 TOKEN_PATTERNS = [
@@ -27,6 +31,14 @@ TOKEN_PATTERNS = [
     re.compile(r"[\"']token[\"']\s*:\s*[\"']([^\"']+)[\"']"),
     re.compile(r"token\s*=\s*[\"']([^\"']+)[\"']"),
 ]
+
+
+class FetchFailure(RuntimeError):
+    def __init__(self, url: str, last: Exception):
+        super().__init__(f"official source unavailable: {url}: {last}")
+        self.url = url
+        self.last = last
+        self.status = getattr(last, "code", None)
 
 
 def fetch(url: str, attempts: int = 2, timeout: int = 15, headers: dict[str, str] | None = None) -> tuple[str, str, str]:
@@ -51,7 +63,8 @@ def fetch(url: str, attempts: int = 2, timeout: int = 15, headers: dict[str, str
             last = exc
             if attempt < attempts:
                 time.sleep(attempt)
-    raise RuntimeError(f"official source unavailable: {url}: {last}")
+    assert last is not None
+    raise FetchFailure(url, last)
 
 
 def token_from_html(html: str) -> str:
@@ -89,7 +102,41 @@ def verify_smn_api() -> None:
     )
 
 
+def verify_wmo_registration() -> None:
+    body, content_type, final_url = fetch(WMO_REGISTRY, attempts=3, timeout=20)
+    lower = body.lower()
+    required = ("argentina", "servicio meteorologico nacional", "ssl.smn.gob.ar/cap/ar.php")
+    if not all(token in lower for token in required):
+        preview = re.sub(r"\s+", " ", body[:1200])
+        raise RuntimeError(f"WMO Argentina authority record changed: {preview!r}")
+    if not final_url.lower().startswith("https://"):
+        raise RuntimeError("WMO registry redirected to non-HTTPS")
+    print(f"OFFICIAL_SMOKE_OK wmo_registry bytes={len(body)} type={content_type!r}")
+
+
+def probe_wmo_swic() -> None:
+    try:
+        body, content_type, final_url = fetch(WMO_SWIC_ALL, attempts=2, timeout=20)
+        data = json.loads(body)
+        if not isinstance(data, (dict, list)):
+            raise RuntimeError("WMO SWIC aggregate is not JSON object/list")
+        if not final_url.lower().startswith("https://"):
+            raise RuntimeError("WMO SWIC aggregate redirected to non-HTTPS")
+        serialized = json.dumps(data, ensure_ascii=False).lower()
+        argentina_present = "argentina" in serialized or "ar-smn" in serialized or "smn.gob.ar" in serialized
+        shape = list(data.keys())[:12] if isinstance(data, dict) else f"list[{len(data)}]"
+        print(
+            "OFFICIAL_SMOKE_INFO wmo_swic "
+            f"bytes={len(body)} type={content_type!r} shape={shape!r} argentina_active={argentina_present}"
+        )
+    except Exception as error:
+        # SWIC aggregate is supplemental: the authoritative registry is the contract gate.
+        print(f"OFFICIAL_SMOKE_INFO wmo_swic_unavailable {type(error).__name__}: {error}")
+
+
 def verify_smn() -> None:
+    cap_error: Exception | None = None
+    api_error: Exception | None = None
     try:
         body, content_type, final_url = fetch(SMN_CAP)
         lower = body.lower()
@@ -102,9 +149,27 @@ def verify_smn() -> None:
             raise RuntimeError(f"SMN CAP redirected to non-HTTPS URL: {final_url}")
         print(f"OFFICIAL_SMOKE_OK smn_cap bytes={len(body)} type={content_type!r} final={final_url}")
         return
-    except Exception as cap_error:
-        print(f"OFFICIAL_SMOKE_DEGRADED smn_cap {type(cap_error).__name__}: {cap_error}")
-    verify_smn_api()
+    except Exception as error:
+        cap_error = error
+        print(f"OFFICIAL_SMOKE_DEGRADED smn_cap {type(error).__name__}: {error}")
+
+    try:
+        verify_smn_api()
+        return
+    except Exception as error:
+        api_error = error
+        print(f"OFFICIAL_SMOKE_DEGRADED smn_api {type(error).__name__}: {error}")
+
+    # Only classify this as an environmental restriction when both direct official
+    # entry points explicitly returned HTTP 403. Other failures still fail the gate.
+    cap_403 = isinstance(cap_error, FetchFailure) and cap_error.status == 403
+    api_403 = isinstance(api_error, FetchFailure) and api_error.status == 403
+    if not (cap_403 and api_403):
+        raise RuntimeError(f"SMN direct contracts failed unexpectedly: CAP={cap_error}; API={api_error}")
+
+    verify_wmo_registration()
+    probe_wmo_swic()
+    print("OFFICIAL_SMOKE_RESTRICTED smn_origin_http403_from_github_runner=true payload_live_tested=false")
 
 
 def verify_mendoza() -> None:
@@ -121,8 +186,15 @@ def verify_mendoza() -> None:
 
 
 def main() -> int:
-    verify_smn()
-    verify_mendoza()
+    failures: list[str] = []
+    for name, check in (("smn", verify_smn), ("mendoza_dcc", verify_mendoza)):
+        try:
+            check()
+        except Exception as exc:
+            failures.append(f"{name}: {type(exc).__name__}: {exc}")
+            print(f"OFFICIAL_SMOKE_FAIL_SOURCE {failures[-1]}", file=sys.stderr)
+    if failures:
+        raise RuntimeError("; ".join(failures))
     return 0
 
 
