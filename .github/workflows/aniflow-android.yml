@@ -1,0 +1,169 @@
+name: AniFlow Android v1
+
+on:
+  pull_request:
+    paths:
+      - "projects/aniflow/**"
+      - ".ci/aniflow-src-rc1.b64.part-*"
+      - ".github/workflows/aniflow-android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  validate-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ANIFLOW_ROOT: ${{ runner.temp }}/aniflow-src
+    steps:
+      - name: Checkout source branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Materialize AniFlow source
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$ANIFLOW_ROOT"
+          mkdir -p "$ANIFLOW_ROOT"
+          if [ -f "projects/aniflow/settings.gradle.kts" ]; then
+            cp -a projects/aniflow/. "$ANIFLOW_ROOT/"
+          else
+            test -s .ci/aniflow-src-rc1.b64.part-00
+            cat .ci/aniflow-src-rc1.b64.part-* | base64 -d > "$RUNNER_TEMP/aniflow-src-rc1.tgz"
+            tar -xzf "$RUNNER_TEMP/aniflow-src-rc1.tgz" -C "$ANIFLOW_ROOT"
+          fi
+          test -s "$ANIFLOW_ROOT/settings.gradle.kts"
+          test -s "$ANIFLOW_ROOT/app/build.gradle.kts"
+
+      - name: Publish materialized source tree to branch
+        if: ${{ github.event_name == 'pull_request' && !hashFiles('projects/aniflow/settings.gradle.kts') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p projects/aniflow
+          cp -a "$ANIFLOW_ROOT"/. projects/aniflow/
+          rm -f .ci/aniflow-src-rc1.b64.part-*
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add projects/aniflow
+          git add -A .ci
+          if git diff --cached --quiet; then
+            echo "Source tree already published."
+          else
+            git commit -m "Publish AniFlow v1 source tree"
+            git push || echo "::warning::Could not push materialized source; build will continue from runner temp."
+          fi
+
+      - name: JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+
+      - name: Gradle 9.5.0
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.5.0"
+
+      - name: Static regression guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$ANIFLOW_ROOT"
+          python3 scripts/validate-block2.py
+          python3 scripts/validate-block3.py
+          python3 scripts/validate-block4.py
+          python3 scripts/validate-block5.py
+          python3 scripts/validate-block6.py
+          python3 scripts/validate-block7.py
+
+      - name: Gradle configuration gate
+        run: gradle -p "$ANIFLOW_ROOT" help --stacktrace --no-daemon
+
+      - name: Gradle dry run
+        run: gradle -p "$ANIFLOW_ROOT" build --dry-run --stacktrace --no-daemon
+
+      - name: Unit tests
+        run: gradle -p "$ANIFLOW_ROOT" :app:testDebugUnitTest --stacktrace --no-daemon
+
+      - name: Android lint debug
+        run: gradle -p "$ANIFLOW_ROOT" :app:lintDebug --stacktrace --no-daemon
+
+      - name: Assemble debug
+        run: gradle -p "$ANIFLOW_ROOT" :app:assembleDebug --stacktrace --no-daemon
+
+      - name: Assemble minified release
+        run: gradle -p "$ANIFLOW_ROOT" :app:assembleRelease --stacktrace --no-daemon
+
+      - name: Sign release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          UNSIGNED="$ANIFLOW_ROOT/app/build/outputs/apk/release/app-release-unsigned.apk"
+          test -s "$UNSIGNED"
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/36.0.0"
+          KEYSTORE="$RUNNER_TEMP/aniflow-v1-release.jks"
+          ALIGNED="$RUNNER_TEMP/AniFlow-v1.0.0-rc1-aligned.apk"
+          FINAL="$RUNNER_TEMP/AniFlow-v1.0.0-rc1.apk"
+          keytool -genkeypair -v \
+            -keystore "$KEYSTORE" \
+            -storepass aniflow-ci-v1 \
+            -keypass aniflow-ci-v1 \
+            -alias aniflow \
+            -keyalg RSA -keysize 3072 -validity 3650 \
+            -dname "CN=AniFlow Personal, OU=Android, O=AniFlow, L=Mendoza, C=AR"
+          "$BUILD_TOOLS/zipalign" -p -f 4 "$UNSIGNED" "$ALIGNED"
+          "$BUILD_TOOLS/apksigner" sign \
+            --ks "$KEYSTORE" \
+            --ks-key-alias aniflow \
+            --ks-pass pass:aniflow-ci-v1 \
+            --key-pass pass:aniflow-ci-v1 \
+            --out "$FINAL" \
+            "$ALIGNED"
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$FINAL"
+          unzip -t "$FINAL" >/dev/null
+          unzip -l "$FINAL" | grep -q "AndroidManifest.xml"
+          unzip -l "$FINAL" | grep -q "classes.dex"
+          "$BUILD_TOOLS/aapt" dump badging "$FINAL" | tee "$RUNNER_TEMP/apk-badging.txt"
+          sha256sum "$FINAL" | tee "$RUNNER_TEMP/apk-sha256.txt"
+
+      - name: Package source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$ANIFLOW_ROOT"
+          zip -qr "$RUNNER_TEMP/AniFlow-v1.0.0-rc1-source.zip" . \
+            -x '.gradle/*' '.idea/*' '.kotlin/*' 'app/build/*' '**/build/*'
+
+      - name: Stage deliverables
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/aniflow-deliverables"
+          mkdir -p "$OUT"
+          cp "$RUNNER_TEMP/AniFlow-v1.0.0-rc1.apk" "$OUT/"
+          cp "$ANIFLOW_ROOT/app/build/outputs/apk/debug/app-debug.apk" "$OUT/AniFlow-v1.0.0-rc1-debug.apk"
+          cp "$RUNNER_TEMP/AniFlow-v1.0.0-rc1-source.zip" "$OUT/"
+          cp "$RUNNER_TEMP/apk-sha256.txt" "$OUT/"
+          cp "$RUNNER_TEMP/apk-badging.txt" "$OUT/"
+          if [ -f "$ANIFLOW_ROOT/app/build/reports/lint-results-debug.html" ]; then
+            cp "$ANIFLOW_ROOT/app/build/reports/lint-results-debug.html" "$OUT/lint-results-debug.html"
+          fi
+
+      - name: Upload AniFlow deliverables
+        uses: actions/upload-artifact@v4
+        with:
+          name: AniFlow-v1.0.0-rc1
+          path: ${{ runner.temp }}/aniflow-deliverables/*
+          if-no-files-found: error
