@@ -53,31 +53,35 @@ jobs:
           app_build = root / "app/build.gradle.kts"
           application = root / "app/src/main/java/com/aniflow/app/AniFlowApplication.kt"
           validator = root / "scripts/validate-block7.py"
+          theme = root / "app/src/main/res/values/themes.xml"
+          theme_v27 = root / "app/src/main/res/values-v27/themes.xml"
 
-          text = build.read_text()
-          text = text.replace('id("com.android.application") version "9.3.0"', 'id("com.android.application") version "9.3.1"')
+          text = build.read_text().replace('id("com.android.application") version "9.3.0"', 'id("com.android.application") version "9.3.1"')
           build.write_text(text)
 
-          text = app_build.read_text()
-          text = text.replace('androidx.core:core:1.19.0', 'androidx.core:core:1.17.0')
-          text = text.replace('androidx.activity:activity-compose:1.13.0', 'androidx.activity:activity-compose:1.12.4')
+          text = app_build.read_text().replace('androidx.core:core:1.19.0', 'androidx.core:core:1.17.0').replace('androidx.activity:activity-compose:1.13.0', 'androidx.activity:activity-compose:1.12.4')
           app_build.write_text(text)
 
-          text = application.read_text()
-          text = text.replace('import coil3.crossfade', 'import coil3.request.crossfade')
+          text = application.read_text().replace('import coil3.crossfade', 'import coil3.request.crossfade')
           if 'import coil3.disk.directory' not in text:
               text = text.replace('import coil3.disk.DiskCache\n', 'import coil3.disk.DiskCache\nimport coil3.disk.directory\n')
           application.write_text(text)
 
-          text = validator.read_text()
-          text = text.replace('"import coil3.crossfade",', '"import coil3.request.crossfade",\n        "import coil3.disk.directory",')
+          text = validator.read_text().replace('"import coil3.crossfade",', '"import coil3.request.crossfade",\n        "import coil3.disk.directory",')
           validator.write_text(text)
+
+          text = theme.read_text().replace('        <item name="android:windowLightNavigationBar">false</item>\n', '')
+          theme.write_text(text)
+          theme_v27.parent.mkdir(parents=True, exist_ok=True)
+          theme_v27.write_text('''<resources>\n    <style name="Theme.AniFlow" parent="android:style/Theme.Material.NoActionBar">\n        <item name="android:windowLightNavigationBar">false</item>\n    </style>\n</resources>\n''')
           PY
           grep -q 'id("com.android.application") version "9.3.1"' "$ROOT/build.gradle.kts"
           grep -q 'androidx.core:core:1.17.0' "$ROOT/app/build.gradle.kts"
           grep -q 'androidx.activity:activity-compose:1.12.4' "$ROOT/app/build.gradle.kts"
           grep -q 'import coil3.request.crossfade' "$ROOT/app/src/main/java/com/aniflow/app/AniFlowApplication.kt"
           grep -q 'import coil3.disk.directory' "$ROOT/app/src/main/java/com/aniflow/app/AniFlowApplication.kt"
+          test -s "$ROOT/app/src/main/res/values-v27/themes.xml"
+          ! grep -q 'windowLightNavigationBar' "$ROOT/app/src/main/res/values/themes.xml"
 
       - name: Regression guards
         shell: bash
@@ -93,7 +97,19 @@ jobs:
         run: gradle -p "$RUNNER_TEMP/aniflow-src" :app:testDebugUnitTest --stacktrace --no-daemon
 
       - name: Android lint
-        run: gradle -p "$RUNNER_TEMP/aniflow-src" :app:lintDebug --stacktrace --no-daemon
+        shell: bash
+        run: |
+          set +e
+          ROOT="$RUNNER_TEMP/aniflow-src"
+          gradle -p "$ROOT" :app:lintDebug --stacktrace --no-daemon
+          STATUS=$?
+          REPORT="$ROOT/app/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt"
+          if [ -f "$REPORT" ]; then
+            echo "===== FULL LINT REPORT ====="
+            cat "$REPORT"
+            echo "===== END LINT REPORT ====="
+          fi
+          exit "$STATUS"
 
       - name: Assemble debug and release
         run: gradle -p "$RUNNER_TEMP/aniflow-src" :app:assembleDebug :app:assembleRelease --stacktrace --no-daemon
