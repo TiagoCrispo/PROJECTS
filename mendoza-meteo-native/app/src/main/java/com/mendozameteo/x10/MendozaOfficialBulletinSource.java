@@ -40,8 +40,10 @@ final class MendozaOfficialBulletinSource {
         }
         String hazardLine = firstHazardLine(text);
         if (hazardLine.isEmpty()) return result;
+        // The provincial page exposes a calendar date but not a trustworthy issue time or
+        // formal validity interval. Keep the date only as internal freshness metadata; do
+        // not fabricate start/end timestamps that might be shown as official validity.
         String issueIso = formatIssue(issueMillis);
-        String expiresIso = formatIssue(issueMillis + MAX_AGE_MS);
         result.add(new OfficialAlert(
                 "mendoza-dcc-" + issueMillis,
                 OfficialAlert.Source.MENDOZA_DCC,
@@ -52,8 +54,8 @@ final class MendozaOfficialBulletinSource {
                 "",
                 "Provincia de Mendoza",
                 issueIso,
-                issueIso,
-                expiresIso,
+                "",
+                "",
                 false,
                 ""));
         return result;
