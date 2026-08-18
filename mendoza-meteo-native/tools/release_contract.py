@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 
 ROOT = Path(__file__).resolve().parents[1]
+REPO = ROOT.parent
 SELF = Path(__file__).resolve()
 
 
@@ -19,10 +20,15 @@ def require(condition: bool, message: str) -> None:
 
 def verify_version() -> None:
     gradle = read("app/build.gradle")
-    require(re.search(r"\bversionCode\s+63\b", gradle) is not None, "versionCode must be 63")
-    require("versionName '6.3-native-dev'" in gradle, "versionName must be 6.3-native-dev")
+    require(re.search(r"\bversionCode\s+64\b", gradle) is not None, "versionCode must be 64")
+    require("versionName '6.4-native-dev'" in gradle, "versionName must be 6.4-native-dev")
+    require("-Xlint:deprecation" in gradle, "Java deprecation audit must stay enabled")
 
-    forbidden = ("6.2-native-dev", "versionCode 62", "MendozaMeteoX10/6-native-dev")
+    forbidden = (
+        "6.3-native-dev", "versionCode 63",
+        "6.2-native-dev", "versionCode 62",
+        "MendozaMeteoX10/6-native-dev",
+    )
     offenders: list[str] = []
     for path in ROOT.rglob("*"):
         if path.resolve() == SELF:
@@ -116,6 +122,17 @@ def verify_freshness_contract() -> None:
             "forecast future-timestamp rejection missing")
 
 
+def verify_ci_contract() -> None:
+    workflow = (REPO / ".github/workflows/mendoza-meteo-native.yml").read_text(encoding="utf-8")
+    require("actions/checkout@v7" in workflow, "CI checkout action must remain on Node-24 generation")
+    require("android-actions/setup-android@v4" in workflow, "Android setup action must remain on Node 24")
+    require("gradle/actions/setup-gradle@v6" in workflow, "Gradle setup action must remain on Node 24")
+    require("cache-provider: basic" in workflow, "Gradle cache must remain on the open-source basic provider")
+    require("--warning-mode all" in workflow, "Gradle deprecation audit must remain visible")
+    require("versionCode='64'" in workflow, "APK CI contract must inspect versionCode 64")
+    require("versionName='6.4-native-dev'" in workflow, "APK CI contract must inspect v6.4")
+
+
 def verify_no_signing_material() -> None:
     forbidden_suffixes = {".jks", ".keystore", ".p12", ".pfx", ".pem", ".key"}
     offenders = [str(p.relative_to(ROOT)) for p in ROOT.rglob("*") if p.is_file() and p.suffix.lower() in forbidden_suffixes]
@@ -128,8 +145,9 @@ def main() -> None:
     verify_widget_contract()
     verify_background_contract()
     verify_freshness_contract()
+    verify_ci_contract()
     verify_no_signing_material()
-    print("RELEASE_CONTRACT_OK version=6.3-native-dev code=63 widget=2x2 location_bound=true clock_skew_guard=true background_location=false")
+    print("RELEASE_CONTRACT_OK version=6.4-native-dev code=64 widget=2x2 location_bound=true clock_skew_guard=true node24_ci=true background_location=false")
 
 
 if __name__ == "__main__":
