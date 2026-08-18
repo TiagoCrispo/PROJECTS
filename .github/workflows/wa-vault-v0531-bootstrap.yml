@@ -1,0 +1,114 @@
+name: WA Vault v0.5.31 Bootstrap Build
+
+on:
+  push:
+    branches:
+      - agent/wa-vault-v0.5.31-block7
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wa-vault-v0531-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  materialize-and-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct verified v0.5.31 source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          B=bootstrap/wa-vault-v0.5.31
+          OUT="$RUNNER_TEMP/wa-vault-v0.5.31.b64"
+          : > "$OUT"
+          for f in \
+            "$B/part-000" "$B/part-001" "$B/part-002" "$B/part-003" \
+            "$B/fix-part-004-0" "$B/fix-part-004-1" "$B/fix-part-004-2" \
+            "$B/part-005" "$B/part-006" \
+            "$B/fix-part-007-0" "$B/fix-part-007-1" "$B/fix-part-007-2" \
+            "$B/part-008" "$B/part-009" \
+            "$B/fix-part-010-0" "$B/fix-part-010-1" "$B/fix-part-010-2" \
+            "$B/fix-part-011-0" "$B/fix-part-011-1a" "$B/fix-part-011-1b" "$B/fix-part-011-2" \
+            "$B/fix-part-012-0" "$B/fix-part-012-1" "$B/fix-part-012-2" \
+            "$B/fix-part-013-0" "$B/fix-part-013-1" "$B/fix-part-013-2" \
+            "$B/fix-part-014-0" "$B/fix-part-014-1" "$B/fix-part-014-2" \
+            "$B/fix-part-015-0" "$B/fix-part-015-1a" "$B/fix-part-015-1b" "$B/fix-part-015-2"
+          do
+            test -f "$f"
+            cat "$f" >> "$OUT"
+          done
+          base64 --decode "$OUT" > "$RUNNER_TEMP/wa-vault-v0.5.31.tar.xz"
+          echo 'ee1f59d1c112f397cedf8fa2ffb9b4044b3c6c57d8263125b8c18bf1b166aec8  '"$RUNNER_TEMP/wa-vault-v0.5.31.tar.xz" | sha256sum -c -
+          rm -rf projects/wa-vault
+          mkdir -p projects/wa-vault
+          tar -xJf "$RUNNER_TEMP/wa-vault-v0.5.31.tar.xz" -C projects/wa-vault
+          test -f projects/wa-vault/app/build.gradle.kts
+          grep -q 'versionCode = 81' projects/wa-vault/app/build.gradle.kts
+          grep -q 'versionName = "0.5.31"' projects/wa-vault/app/build.gradle.kts
+
+      - name: Static validation
+        working-directory: projects/wa-vault
+        run: tools/run_static_validation.sh
+
+      - name: Commit materialized source to branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add projects/wa-vault
+          if ! git diff --cached --quiet; then
+            git commit -m 'WA Vault v0.5.31 materialize source'
+            git push origin HEAD:${GITHUB_REF_NAME}
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Install Android SDK packages
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'platform-tools'
+
+      - name: Generate pinned Gradle wrapper
+        working-directory: projects/wa-vault
+        run: |
+          gradle wrapper --gradle-version 8.13 --distribution-type bin
+          ./gradlew --version
+
+      - name: Build and verify Android artifacts
+        working-directory: projects/wa-vault
+        run: tools/build_and_verify.sh
+
+      - name: Upload build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wa-vault-v0.5.31-bootstrap-build-evidence
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            projects/wa-vault/app/build/outputs/apk/debug/*.apk
+            projects/wa-vault/app/build/outputs/apk/androidTest/debug/*.apk
+            projects/wa-vault/app/build/outputs/apk/release/*.apk
+            projects/wa-vault/app/build/outputs/bundle/release/*.aab
+            projects/wa-vault/app/build/outputs/mapping/release/**
+            projects/wa-vault/app/build/outputs/wavault-release-evidence/**
+            projects/wa-vault/app/build/reports/lint-results-*.xml
+            projects/wa-vault/app/build/reports/tests/**
+            projects/wa-vault/app/build/test-results/**
