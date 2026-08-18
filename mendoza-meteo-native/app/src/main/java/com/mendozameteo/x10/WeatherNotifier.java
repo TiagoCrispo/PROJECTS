@@ -22,6 +22,8 @@ final class WeatherNotifier {
     private static final String GROUP_OFFICIAL = "mendoza_meteo_official";
     private static final String GROUP_X10 = "mendoza_meteo_x10";
     private static final long NO_EXPIRY_STALE_TIMEOUT_MILLIS = 36L * 60L * 60L * 1000L;
+    private static final int OFFICIAL_ID_BASE = 100_000_000;
+    private static final int OFFICIAL_ID_RANGE = 1_000_000_000;
 
     private WeatherNotifier() { }
 
@@ -108,7 +110,7 @@ final class WeatherNotifier {
 
         int id = existingNotificationId != 0
                 ? existingNotificationId
-                : notificationId("official|" + alert.source.name() + "|" + alert.id + "|" + alert.event + "|" + alert.startIso);
+                : officialNotificationId("official|" + alert.source.name() + "|" + alert.id + "|" + alert.event + "|" + alert.startIso);
         manager.notify(id, builder.build());
         return id;
     }
@@ -202,15 +204,15 @@ final class WeatherNotifier {
         return 700_000 + kind.ordinal();
     }
 
+    private static int officialNotificationId(String stable) {
+        int hash = stable == null ? 0 : stable.hashCode() & 0x7fffffff;
+        return OFFICIAL_ID_BASE + (hash % OFFICIAL_ID_RANGE);
+    }
+
     private static void append(StringBuilder target, String value) {
         if (value == null || value.trim().isEmpty()) return;
         if (target.length() > 0) target.append(" · ");
         target.append(value.trim());
-    }
-
-    private static int notificationId(String stable) {
-        int value = stable == null ? 1 : stable.hashCode() & 0x7fffffff;
-        return value == 0 ? 1 : value;
     }
 
     private static String clip(String value, int max) {
