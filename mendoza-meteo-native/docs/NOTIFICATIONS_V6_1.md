@@ -48,6 +48,6 @@ Official alerts always take precedence over heuristics.
 
 Retry is source-aware rather than blind. Timeouts, network failures and retryable HTTP responses can request one WorkManager retry. Permanent HTTP responses such as 403 and malformed/non-retryable payloads do not enter a repeated retry loop. A transient SMN failure gets one retry because SMN is the primary authority; a transient Mendoza-source failure is retried when SMN is also unavailable. The normal 30-minute periodic schedule remains the long-term fallback.
 
-WorkManager is reliable deferred work, not a real-time push transport. Android/Doze/OEM battery policy can delay a periodic run. The app therefore must not claim second-by-second official alert delivery.
+WorkManager is reliable deferred work, not a real-time push transport. Android/Doze/OEM battery policy can delay a periodic run. Swiping the app away or letting its process die normally does not remove the persisted WorkManager schedule. Android **Force stop** from system settings is different: the OS intentionally prevents scheduled/background execution until the user launches the app again. Mendoza Meteo does not attempt to bypass that platform rule.
 
-The SMN origin currently returns HTTP 403 to GitHub-hosted runners; CI validates the registered official contract plus the live Mendoza provincial source, while device-network validation remains part of the final physical-device release gate.
+The app therefore must not claim second-by-second official alert delivery. The SMN origin currently returns HTTP 403 to GitHub-hosted runners; CI validates the registered official contract plus the live Mendoza provincial source, while device-network validation remains part of the final physical-device release gate.
