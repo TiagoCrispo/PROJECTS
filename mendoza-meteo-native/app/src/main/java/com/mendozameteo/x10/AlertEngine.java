@@ -245,7 +245,7 @@ final class AlertEngine {
             boolean strongShortEvent = duration >= 2 && peakGust >= 65 && eventEvidence >= 7;
             if (!persistentEnough && !strongSingleHour && !strongShortEvent) continue;
 
-            Severity severity = zondaSeverity(peakGust, duration, eventEvidence);
+            Severity severity = zondaSeverity(peakGust);
             out.add(new Event(Kind.ZONDA, severity, Source.HEURISTIC_X10,
                     hours.get(start).iso, endExclusive(hours, end), duration,
                     -1, 0.0, 0.0, peakGust, eventEvidence, zone.label,
@@ -253,13 +253,11 @@ final class AlertEngine {
         }
     }
 
-    private static Severity zondaSeverity(int peakGust, int duration, int evidence) {
-        // Gust breakpoints are used as internal calibration only. They intentionally do not
-        // reuse SMN color names or claim an official alert classification.
+    private static Severity zondaSeverity(int peakGust) {
+        // These gust breakpoints calibrate X10 intensity only. They deliberately do not
+        // reuse SMN color names and never convert the heuristic into an official alert.
         if (peakGust > 90) return Severity.DANGER;
         if (peakGust >= 65) return Severity.IMPORTANT;
-        if (duration >= 4 && peakGust >= 55) return Severity.IMPORTANT;
-        if (evidence >= 9 && peakGust >= 60) return Severity.IMPORTANT;
         return Severity.PRECAUTION;
     }
 
