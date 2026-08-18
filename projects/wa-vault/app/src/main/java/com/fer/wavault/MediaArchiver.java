@@ -972,7 +972,7 @@ public final class MediaArchiver {
         try(FileOutputStream out=new FileOutputStream(tmp)){
             Properties p=new Properties();p.setProperty("type",type==null?"":type);p.setProperty("message_id",String.valueOf(Math.max(0L,messageId)));p.setProperty("source_time",String.valueOf(Math.max(0L,sourceTime)));p.setProperty("retention_state",String.valueOf(retentionState));p.setProperty("expires_at",String.valueOf(Math.max(0L,expiresAt)));p.setProperty("origin",origin==null?"STAGING_RECOVERY":origin);p.setProperty("extension",safeExtensionHint(displayHint));p.store(out,null);out.flush();out.getFD().sync();
             if(!tmp.renameTo(meta)){try{tmp.delete();}catch(Throwable ignored){}}
-        }catch(Throwable ignored){try{tmp.delete();}catch(Throwable ignored){}}
+        }catch(Throwable stagingFailure){try{tmp.delete();}catch(Throwable cleanupFailure){}}
         return ready;
     }
     private static String safeExtensionHint(String name){if(name==null)return "";String n=name.trim().toLowerCase(Locale.ROOT);int d=n.lastIndexOf('.');if(d<0||d==n.length()-1)return "";String e=n.substring(d);return e.matches("\\.[a-z0-9]{1,10}")?e:"";}
