@@ -1,4 +1,6 @@
-# Mendoza Meteo X10 — Notification subsystem (v6.2)
+# Mendoza Meteo X10 — Notification subsystem
+
+Documentación vigente para `6.5-native-dev` (`versionCode 65`).
 
 ## Goal
 
@@ -19,6 +21,8 @@ Deliver useful weather notifications while keeping official alerts and X10 heuri
 The worker does not request `ACCESS_BACKGROUND_LOCATION` or obtain a new GPS fix in the background. It uses the last foreground location persisted by `LocationResolver` for up to 48 hours, then explicitly falls back to UTN Mendoza.
 
 Official-alert cache reuse is location-bound to a 10 km context. SMN and Mendoza caches are stored separately with independent six-hour freshness timestamps, so a successful provincial request cannot accidentally rejuvenate stale SMN data. A material location-context change clears persisted official/X10 notification state and removes cards belonging to the previous zone. The UTN fallback uses the `utn` forecast cache key rather than overwriting the user's `local` forecast cache.
+
+Persisted location and forecast timestamps also reject impossible future values. A small wall-clock skew of up to 10 minutes is tolerated; larger future timestamps are invalidated rather than treated as indefinitely fresh.
 
 ## Official-alert policy
 
@@ -53,3 +57,7 @@ Official alerts are loaded, pruned and posted before the general forecast is fet
 WorkManager is deferred background work, not a real-time push transport. Doze/OEM battery policy can delay a run. Swiping the app away normally does not remove persisted WorkManager scheduling, while Android **Force stop** intentionally blocks scheduled/background execution until the app is launched again.
 
 The SMN origin currently returns HTTP 403 to GitHub-hosted runners, so CI records that restriction rather than pretending a live SMN payload passed. The registered official contract and live Mendoza provincial endpoint remain in the automated gate; physical-device/network validation remains a final release gate.
+
+## Release verification
+
+The project is built with the committed Gradle Wrapper 9.5.0. CI validates the wrapper checksum, runs unit tests, Lint and clean debug/release builds, and inspects the resulting release APK contract. Physical Samsung/One UI validation remains mandatory before generating/distributing the final APK.
