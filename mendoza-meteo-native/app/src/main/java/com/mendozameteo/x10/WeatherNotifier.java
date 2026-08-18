@@ -10,12 +10,18 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
 
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
+
 final class WeatherNotifier {
     static final String CHANNEL_OFFICIAL_URGENT = "official_urgent_v1";
     static final String CHANNEL_OFFICIAL = "official_alerts_v1";
     static final String CHANNEL_X10 = "x10_signals_v1";
     private static final String GROUP_OFFICIAL = "mendoza_meteo_official";
     private static final String GROUP_X10 = "mendoza_meteo_x10";
+    private static final long NO_EXPIRY_STALE_TIMEOUT_MILLIS = 36L * 60L * 60L * 1000L;
 
     private WeatherNotifier() { }
 
@@ -52,7 +58,8 @@ final class WeatherNotifier {
     }
 
     static int notifyOfficial(Context context, OfficialAlert alert,
-                              NotificationPolicy.OfficialChange change, String locationLabel, long nowMillis) {
+                              NotificationPolicy.OfficialChange change, String locationLabel,
+                              long nowMillis, int existingNotificationId) {
         if (alert == null || change == NotificationPolicy.OfficialChange.NONE || !canPost(context)) return 0;
         createChannels(context);
         NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
@@ -64,8 +71,11 @@ final class WeatherNotifier {
         String source = alert.sourceLabel();
         String event = alert.event.isEmpty() ? alert.title() : alert.event;
         String title = source + (level.isEmpty() ? "" : " · " + level) + " · " + clip(event, 80);
-        String prefix = change == NotificationPolicy.OfficialChange.ESCALATION ? "Escalada oficial. "
-                : change == NotificationPolicy.OfficialChange.IMPORTANT_UPDATE ? "Actualización oficial. " : "";
+        String prefix;
+        if (change == NotificationPolicy.OfficialChange.ESCALATION) prefix = "Escalada oficial. ";
+        else if (change == NotificationPolicy.OfficialChange.DEESCALATION) prefix = "Nivel oficial reducido. ";
+        else if (change == NotificationPolicy.OfficialChange.IMPORTANT_UPDATE) prefix = "Actualización oficial. ";
+        else prefix = "";
         String body = prefix + buildOfficialBody(alert, locationLabel, nowMillis);
 
         Notification.Builder builder = builder(context, channel)
@@ -77,16 +87,21 @@ final class WeatherNotifier {
                 .setCategory(Notification.CATEGORY_EVENT)
                 .setVisibility(Notification.VISIBILITY_PUBLIC)
                 .setAutoCancel(true)
-                .setOnlyAlertOnce(false)
+                .setOnlyAlertOnce(change == NotificationPolicy.OfficialChange.DEESCALATION)
                 .setGroup(GROUP_OFFICIAL)
                 .setWhen(nowMillis)
                 .setShowWhen(true)
                 .setPriority(urgent ? Notification.PRIORITY_HIGH : Notification.PRIORITY_DEFAULT);
-        if (Build.VERSION.SDK_INT >= 26 && alert.expiresMillis > nowMillis) {
-            builder.setTimeoutAfter(alert.expiresMillis - nowMillis);
+        if (Build.VERSION.SDK_INT >= 26) {
+            long timeout = alert.expiresMillis > nowMillis
+                    ? alert.expiresMillis - nowMillis
+                    : NO_EXPIRY_STALE_TIMEOUT_MILLIS;
+            builder.setTimeoutAfter(timeout);
         }
 
-        int id = notificationId("official|" + alert.source.name() + "|" + alert.id + "|" + alert.event + "|" + alert.startIso);
+        int id = existingNotificationId != 0
+                ? existingNotificationId
+                : notificationId("official|" + alert.source.name() + "|" + alert.id + "|" + alert.event + "|" + alert.startIso);
         manager.notify(id, builder.build());
         return id;
     }
@@ -99,7 +114,7 @@ final class WeatherNotifier {
         String title = "X10 · " + event.severity.label + " · " + event.title();
         String body = event.detailText() + " · " + locationLabel
                 + ". Heurística X10: no es una alerta oficial del SMN.";
-        Notification notification = builder(context, CHANNEL_X10)
+        Notification.Builder builder = builder(context, CHANNEL_X10)
                 .setSmallIcon(R.drawable.ic_notification)
                 .setContentTitle(title)
                 .setContentText(clip(body, 150))
@@ -112,11 +127,19 @@ final class WeatherNotifier {
                 .setGroup(GROUP_X10)
                 .setWhen(nowMillis)
                 .setShowWhen(true)
-                .setPriority(Notification.PRIORITY_DEFAULT)
-                .build();
-        int id = 700_000 + event.kind.ordinal();
-        manager.notify(id, notification);
+                .setPriority(Notification.PRIORITY_DEFAULT);
+        if (Build.VERSION.SDK_INT >= 26) {
+            long end = eventEndMillis(event.endExclusiveIso);
+            if (end > nowMillis) builder.setTimeoutAfter(end - nowMillis);
+        }
+        int id = x10NotificationId(event.kind);
+        manager.notify(id, builder.build());
         return id;
+    }
+
+    static void cancelX10(Context context, AlertEngine.Kind kind) {
+        if (kind == null) return;
+        cancel(context, x10NotificationId(kind));
     }
 
     static void cancel(Context context, int notificationId) {
@@ -147,6 +170,23 @@ final class WeatherNotifier {
         if (locationLabel != null && !locationLabel.isEmpty()) append(body, locationLabel);
         if (body.length() == 0) body.append(alert.title());
         return body.toString();
+    }
+
+    private static long eventEndMillis(String iso) {
+        if (iso == null || iso.length() < 16) return -1L;
+        SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm", Locale.US);
+        format.setLenient(false);
+        format.setTimeZone(WeatherClient.MENDOZA_TZ);
+        try {
+            Date date = format.parse(iso.substring(0, 16));
+            return date == null ? -1L : date.getTime();
+        } catch (ParseException ignored) {
+            return -1L;
+        }
+    }
+
+    private static int x10NotificationId(AlertEngine.Kind kind) {
+        return 700_000 + kind.ordinal();
     }
 
     private static void append(StringBuilder target, String value) {
