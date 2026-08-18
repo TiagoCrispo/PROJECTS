@@ -10,8 +10,8 @@ android {
         applicationId 'com.mendozameteo.x10'
         minSdk 24
         targetSdk 36
-        versionCode 60
-        versionName '6.0-native-dev'
+        versionCode 61
+        versionName '6.1-native-dev'
     }
 
     buildTypes {
