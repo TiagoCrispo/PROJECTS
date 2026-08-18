@@ -12,7 +12,8 @@ import java.util.List;
 import java.util.Map;
 
 final class NotificationStateStore {
-    private static final String PREFS = "notification_state_v1";
+    private static final String PREFS = "notification_state_v2";
+    private static final String LEGACY_PREFS = "notification_state_v1";
     private static final String OFFICIAL_PREFIX = "official.";
     private static final String X10_PREFIX = "x10.";
     private static final long OFFICIAL_NO_EXPIRY_STALE_GUARD_MILLIS = 36L * 60L * 60L * 1000L;
@@ -20,7 +21,12 @@ final class NotificationStateStore {
     private final SharedPreferences prefs;
 
     NotificationStateStore(Context context) {
-        prefs = context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        Context app = context.getApplicationContext();
+        // v1 mixed the source-provided expiry with our internal stale guard. Never carry that
+        // ambiguous state into v2; this development line intentionally starts notification
+        // bookkeeping clean.
+        app.getSharedPreferences(LEGACY_PREFS, Context.MODE_PRIVATE).edit().clear().apply();
+        prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
     NotificationPolicy.PreviousOfficial findMatchingOfficial(OfficialAlert current) {
@@ -55,7 +61,8 @@ final class NotificationStateStore {
             value.put("levelRank", alert.level.rank);
             value.put("contentHash", NotificationPolicy.officialContentHash(alert));
             value.put("notifiedAt", nowMillis);
-            value.put("expires", staleAt);
+            value.put("staleAt", staleAt);
+            value.put("sourceExpires", alert.expiresMillis);
             value.put("notificationId", notificationId);
             value.put("event", alert.event);
             value.put("start", alert.startMillis);
@@ -73,10 +80,10 @@ final class NotificationStateStore {
         if (current == null) return Collections.emptyList();
         ArrayList<NotificationPolicy.PreviousOfficial> removed = new ArrayList<>();
         for (NotificationPolicy.PreviousOfficial previous : loadOfficial()) {
-            boolean expire = NotificationPolicy.isExpired(previous, nowMillis);
+            boolean stale = NotificationPolicy.isExpired(previous, nowMillis);
             boolean sourceAvailable = isSourceAvailable(previous.source, current);
             boolean stillPresent = matchesAny(previous, current.alerts);
-            if (expire || (sourceAvailable && !stillPresent)) {
+            if (stale || (sourceAvailable && !stillPresent)) {
                 removeOfficial(previous);
                 removed.add(previous);
             }
@@ -95,7 +102,7 @@ final class NotificationStateStore {
             return new AlertCooldownPolicy.Previous(storedKind, severity, value.optString("startIso"),
                     value.optLong("notifiedAt", 0L));
         } catch (JSONException | IllegalArgumentException ignored) {
-            prefs.edit().remove(X10_PREFIX + kind.name()).apply();
+            clearX10(kind);
             return null;
         }
     }
@@ -112,6 +119,11 @@ final class NotificationStateStore {
         } catch (JSONException ignored) { }
     }
 
+    void clearX10(AlertEngine.Kind kind) {
+        if (kind == null) return;
+        prefs.edit().remove(X10_PREFIX + kind.name()).apply();
+    }
+
     List<NotificationPolicy.PreviousOfficial> loadOfficial() {
         ArrayList<NotificationPolicy.PreviousOfficial> result = new ArrayList<>();
         for (Map.Entry<String, ?> entry : prefs.getAll().entrySet()) {
@@ -122,8 +134,9 @@ final class NotificationStateStore {
                 result.add(new NotificationPolicy.PreviousOfficial(
                         entry.getKey(), value.optString("id"), source, value.optInt("levelRank", 0),
                         value.optInt("contentHash", 0), value.optLong("notifiedAt", 0L),
-                        value.optLong("expires", -1L), value.optInt("notificationId", 0),
-                        value.optString("event"), value.optLong("start", -1L)));
+                        value.optLong("staleAt", -1L), value.optLong("sourceExpires", -1L),
+                        value.optInt("notificationId", 0), value.optString("event"),
+                        value.optLong("start", -1L)));
             } catch (JSONException | IllegalArgumentException ignored) {
                 prefs.edit().remove(entry.getKey()).apply();
             }
