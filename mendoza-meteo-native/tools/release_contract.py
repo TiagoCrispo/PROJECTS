@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 
 ROOT = Path(__file__).resolve().parents[1]
-APP = ROOT / "app"
+SELF = Path(__file__).resolve()
 
 
 def read(relative: str) -> str:
@@ -25,6 +25,8 @@ def verify_version() -> None:
     forbidden = ("6.2-native-dev", "versionCode 62", "MendozaMeteoX10/6-native-dev")
     offenders: list[str] = []
     for path in ROOT.rglob("*"):
+        if path.resolve() == SELF:
+            continue
         if not path.is_file() or path.suffix.lower() not in {".java", ".xml", ".gradle", ".md", ".py", ".properties", ".yml", ".yaml"}:
             continue
         try:
@@ -93,6 +95,26 @@ def verify_background_contract() -> None:
     require("point.personalized ? \"local\" : \"utn\"" in worker,
             "notification worker must isolate local and UTN caches")
 
+    notification_location = read("app/src/main/java/com/mendozameteo/x10/NotificationLocation.java")
+    location_resolver = read("app/src/main/java/com/mendozameteo/x10/LocationResolver.java")
+    location_policy = read("app/src/main/java/com/mendozameteo/x10/LocationPolicy.java")
+    require("wallClockAgeMillis(savedAt, nowMillis)" in notification_location,
+            "background location must reject invalid persisted timestamps")
+    require("wallClockAgeMillis(savedAt, now)" in location_resolver,
+            "foreground saved location must reject invalid persisted timestamps")
+    require("wallClockAgeMillis(location.getTime(), nowWall)" in location_resolver,
+            "device wall-clock location fallback must reject invalid future timestamps")
+    require("MAX_FUTURE_SKEW_MILLIS" in location_policy,
+            "location clock-skew policy missing")
+
+
+def verify_freshness_contract() -> None:
+    freshness = read("app/src/main/java/com/mendozameteo/x10/ForecastFreshness.java")
+    require("MAX_FUTURE_SKEW_MILLIS" in freshness,
+            "forecast cache must defend against impossible future timestamps")
+    require("fetchedAtMillis > nowMillis + MAX_FUTURE_SKEW_MILLIS" in freshness,
+            "forecast future-timestamp rejection missing")
+
 
 def verify_no_signing_material() -> None:
     forbidden_suffixes = {".jks", ".keystore", ".p12", ".pfx", ".pem", ".key"}
@@ -105,8 +127,9 @@ def main() -> None:
     verify_manifest()
     verify_widget_contract()
     verify_background_contract()
+    verify_freshness_contract()
     verify_no_signing_material()
-    print("RELEASE_CONTRACT_OK version=6.3-native-dev code=63 widget=2x2 location_bound=true background_location=false")
+    print("RELEASE_CONTRACT_OK version=6.3-native-dev code=63 widget=2x2 location_bound=true clock_skew_guard=true background_location=false")
 
 
 if __name__ == "__main__":
