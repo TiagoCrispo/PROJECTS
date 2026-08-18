@@ -52,7 +52,7 @@ final class HttpJsonTransport {
             connection.setUseCaches(false);
             connection.setRequestProperty("Accept", "application/json");
             connection.setRequestProperty("Accept-Encoding", "gzip");
-            connection.setRequestProperty("User-Agent", "MendozaMeteoX10/6.3-native-dev");
+            connection.setRequestProperty("User-Agent", "MendozaMeteoX10/6.4-native-dev");
             int status = connection.getResponseCode();
             if (status < 200 || status >= 300) {
                 WeatherException.Kind kind = RetryPolicy.isRetryableHttpStatus(status)
