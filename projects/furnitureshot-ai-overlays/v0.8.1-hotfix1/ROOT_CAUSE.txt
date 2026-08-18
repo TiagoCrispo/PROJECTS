@@ -1,0 +1,1 @@
+Deterministic crash: recoverLinearStructures iterated y/x from 2 while reading +/-3 indices. First y=2 vertical read accesses negative index; equivalent overflow occurs at lower boundary. Fix loop bounds to start/end at 3. Additional memory ceilings and fault containment are included.
