@@ -101,6 +101,9 @@ final class OfficialAlertRepository {
         if (first != null) all.addAll(first);
         if (second != null) all.addAll(second);
 
+        // CAP feeds are not guaranteed to be returned in chronological order. Process by
+        // sent timestamp so a later update/cancellation deterministically wins.
+        all.sort(Comparator.comparingLong(a -> a == null || a.sentMillis <= 0 ? Long.MIN_VALUE : a.sentMillis));
         for (OfficialAlert alert : all) {
             if (alert == null) continue;
             if (alert.cancellation) {
