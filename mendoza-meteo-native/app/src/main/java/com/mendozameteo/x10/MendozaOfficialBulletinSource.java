@@ -11,7 +11,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 final class MendozaOfficialBulletinSource {
-    static final String ALERT_URL = "https://www.contingencias.mendoza.gov.ar/alerta/";
+    static final String ALERT_URL = "https://contingencias.mendoza.gov.ar/alerta/";
     private static final long MAX_AGE_MS = 36L * 60L * 60L * 1000L;
     private static final Pattern DATE_PATTERN = Pattern.compile("(?i)(?:lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo)?\\s*(\\d{1,2})\\s+de\\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\\s+de\\s+(20\\d{2})");
     private static final String[] HAZARDS = {
