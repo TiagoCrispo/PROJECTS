@@ -47,6 +47,17 @@ public final class CapAlertParserTest {
         assertEquals(OfficialAlert.Level.UNKNOWN, alerts.get(0).level);
     }
 
+    @Test public void referenceOnlyCancellationIsPreserved() throws Exception {
+        String xml = "<?xml version='1.0'?><alert xmlns='urn:oasis:names:tc:emergency:cap:1.2'>"
+                + "<identifier>cancel-1</identifier><sender>smn@smn.gob.ar</sender>"
+                + "<sent>2026-08-18T14:30:00-03:00</sent><status>Actual</status><msgType>Cancel</msgType>"
+                + "<scope>Public</scope><references>target-id,smn@smn.gob.ar,2026-08-18T13:00:00-03:00</references></alert>";
+        List<OfficialAlert> alerts = CapAlertParser.parse(xml, -32.89, -68.84, NOW);
+        assertEquals(1, alerts.size());
+        assertTrue(alerts.get(0).cancellation);
+        assertTrue(alerts.get(0).references.startsWith("target-id,"));
+    }
+
     @Test public void fallbackAreaDescriptionUsesOperationalZoneConservatively() {
         assertTrue(CapAlertParser.fallbackAreaMatch("MENDOZA: CAPITAL - GODOY CRUZ", -32.89, -68.84));
         assertFalse(CapAlertParser.fallbackAreaMatch("MENDOZA: SAN RAFAEL - MALARGÜE", -32.89, -68.84));
