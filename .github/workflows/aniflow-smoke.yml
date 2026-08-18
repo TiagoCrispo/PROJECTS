@@ -47,41 +47,121 @@ jobs:
           fi
           python3 - "$ROOT" <<'PY'
           from pathlib import Path
+          import shutil
           import sys
+
           root = Path(sys.argv[1])
-          build = root / "build.gradle.kts"
+
+          def replace(path, old, new):
+              p = root / path
+              text = p.read_text()
+              if old in text:
+                  text = text.replace(old, new)
+              p.write_text(text)
+
+          replace("build.gradle.kts", 'id("com.android.application") version "9.3.0"', 'id("com.android.application") version "9.3.1"')
+          replace("app/build.gradle.kts", 'versionCode = 1', 'versionCode = 1000001')
+          replace("app/build.gradle.kts", 'versionName = "0.7.0-block7"', 'versionName = "1.0.0-rc1"')
+          replace("app/build.gradle.kts", 'androidx.core:core:1.19.0', 'androidx.core:core-ktx:1.17.0')
+          replace("app/build.gradle.kts", 'androidx.activity:activity-compose:1.13.0', 'androidx.activity:activity-compose:1.12.4')
           app_build = root / "app/build.gradle.kts"
-          application = root / "app/src/main/java/com/aniflow/app/AniFlowApplication.kt"
-          validator = root / "scripts/validate-block7.py"
-          theme = root / "app/src/main/res/values/themes.xml"
-          theme_v27 = root / "app/src/main/res/values-v27/themes.xml"
-
-          text = build.read_text().replace('id("com.android.application") version "9.3.0"', 'id("com.android.application") version "9.3.1"')
-          build.write_text(text)
-
-          text = app_build.read_text().replace('androidx.core:core:1.19.0', 'androidx.core:core:1.17.0').replace('androidx.activity:activity-compose:1.13.0', 'androidx.activity:activity-compose:1.12.4')
+          text = app_build.read_text()
+          if 'androidx.annotation:annotation-experimental:1.6.0' not in text:
+              text = text.replace('    implementation("androidx.core:core-ktx:1.17.0")\n', '    implementation("androidx.core:core-ktx:1.17.0")\n    implementation("androidx.annotation:annotation-experimental:1.6.0")\n')
           app_build.write_text(text)
 
+          application = root / "app/src/main/java/com/aniflow/app/AniFlowApplication.kt"
           text = application.read_text().replace('import coil3.crossfade', 'import coil3.request.crossfade')
           if 'import coil3.disk.directory' not in text:
               text = text.replace('import coil3.disk.DiskCache\n', 'import coil3.disk.DiskCache\nimport coil3.disk.directory\n')
           application.write_text(text)
 
-          text = validator.read_text().replace('"import coil3.crossfade",', '"import coil3.request.crossfade",\n        "import coil3.disk.directory",')
+          validator = root / "scripts/validate-block7.py"
+          text = validator.read_text()
+          text = text.replace('"import coil3.crossfade",', '"import coil3.request.crossfade",\n        "import coil3.disk.directory",')
+          text = text.replace('require(\'versionName = "0.7.0-block7"\' in build, "Block 7 version checkpoint missing")', 'm_version = re.search(r\'versionName\\s*=\\s*"(\\d+)\\.(\\d+)\\.(\\d+)(?:-[^"]+)?"\', build)\n    require(m_version is not None and tuple(map(int, m_version.groups())) >= (0, 7, 0), "Block 7 version checkpoint missing")')
           validator.write_text(text)
 
+          manifest = root / "app/src/main/AndroidManifest.xml"
+          text = manifest.read_text()
+          if '<uses-feature android:name="android.software.picture_in_picture"' not in text:
+              text = text.replace('    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />\n', '    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />\n    <uses-feature android:name="android.software.picture_in_picture" android:required="false" />\n')
+          text = text.replace('android:fullBackupContent="true"', 'android:fullBackupContent="@xml/backup_rules"\n        android:dataExtractionRules="@xml/data_extraction_rules"')
+          text = text.replace('android:label="AniFlow"', 'android:label="@string/app_name"')
+          text = text.replace('            android:screenOrientation="unspecified"\n', '')
+          if 'android:resizeableActivity="true"' not in text:
+              text = text.replace('            android:supportsPictureInPicture="true"\n', '            android:supportsPictureInPicture="true"\n            android:resizeableActivity="true"\n')
+          manifest.write_text(text)
+
+          xml = root / "app/src/main/res/xml"
+          xml.mkdir(parents=True, exist_ok=True)
+          (xml / "backup_rules.xml").write_text('''<full-backup-content>\n    <include domain="database" path="." />\n    <include domain="sharedpref" path="." />\n    <include domain="file" path="datastore/" />\n</full-backup-content>\n''')
+          (xml / "data_extraction_rules.xml").write_text('''<data-extraction-rules>\n    <cloud-backup>\n        <include domain="database" path="." />\n        <include domain="sharedpref" path="." />\n        <include domain="file" path="datastore/" />\n    </cloud-backup>\n    <device-transfer>\n        <include domain="database" path="." />\n        <include domain="sharedpref" path="." />\n        <include domain="file" path="datastore/" />\n    </device-transfer>\n</data-extraction-rules>\n''')
+
+          theme = root / "app/src/main/res/values/themes.xml"
           text = theme.read_text().replace('        <item name="android:windowLightNavigationBar">false</item>\n', '')
           theme.write_text(text)
+          theme_v27 = root / "app/src/main/res/values-v27/themes.xml"
           theme_v27.parent.mkdir(parents=True, exist_ok=True)
           theme_v27.write_text('''<resources>\n    <style name="Theme.AniFlow" parent="android:style/Theme.Material.NoActionBar">\n        <item name="android:windowLightNavigationBar">false</item>\n    </style>\n</resources>\n''')
+
+          colors = root / "app/src/main/res/values/colors.xml"
+          text = colors.read_text().replace('    <color name="aniflow_orange">#FF6A00</color>\n', '')
+          colors.write_text(text)
+          shutil.rmtree(root / "app/src/main/res/mipmap-anydpi-v26", ignore_errors=True)
+
+          for rel in [
+              "app/src/main/java/com/aniflow/app/feature/detail/AnimeDetailScreen.kt",
+              "app/src/main/java/com/aniflow/app/feature/search/SearchScreen.kt",
+              "app/src/main/java/com/aniflow/app/feature/player/PlayerScreen.kt",
+          ]:
+              p = root / rel
+              text = p.read_text()
+              text = text.replace('import androidx.compose.material.icons.filled.ArrowBack', 'import androidx.compose.material.icons.automirrored.filled.ArrowBack')
+              text = text.replace('Icons.Default.ArrowBack', 'Icons.AutoMirrored.Filled.ArrowBack')
+              p.write_text(text)
+
+          components = root / "app/src/main/java/com/aniflow/app/ui/components/AniFlowComponents.kt"
+          text = components.read_text()
+          text = text.replace('''fun EmptyState(\n    title: String,\n    subtitle: String? = null,\n    icon: ImageVector = Icons.Default.Inbox,\n    actionLabel: String? = null,\n    onAction: (() -> Unit)? = null,\n    modifier: Modifier = Modifier,\n)''', '''fun EmptyState(\n    title: String,\n    modifier: Modifier = Modifier,\n    subtitle: String? = null,\n    icon: ImageVector = Icons.Default.Inbox,\n    actionLabel: String? = null,\n    onAction: (() -> Unit)? = null,\n)''')
+          components.write_text(text)
+
+          player = root / "app/src/main/java/com/aniflow/app/feature/player/PlayerScreen.kt"
+          text = player.read_text()
+          text = text.replace('@file:OptIn(androidx.media3.common.util.UnstableApi::class)', '@file:androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)')
+          text = text.replace('import android.content.pm.ActivityInfo\n', '')
+          text = text.replace('import android.net.Uri\n', '')
+          if 'import android.graphics.Rect\n' not in text:
+              text = text.replace('import android.content.Intent\n', 'import android.content.Intent\nimport android.graphics.Rect\n')
+          if 'import android.os.Build\n' not in text:
+              text = text.replace('import android.graphics.Rect\n', 'import android.graphics.Rect\nimport android.os.Build\n')
+          if 'import androidx.core.net.toUri\n' not in text:
+              text = text.replace('import androidx.core.view.WindowCompat\n', 'import androidx.core.net.toUri\nimport androidx.core.view.WindowCompat\n')
+          text = text.replace('setUri(Uri.parse(uri))', 'setUri(uri.toUri())')
+          text = text.replace('''        ExoPlayer.Builder(context)\n            .setAudioAttributes(audioAttributes, true)\n            .setHandleAudioBecomingNoisy(true)\n            .build()\n    }\n    var isPlaying by remember { mutableStateOf(false) }''', '''        ExoPlayer.Builder(context)\n            .setAudioAttributes(audioAttributes, true)\n            .setHandleAudioBecomingNoisy(true)\n            .build()\n    }\n    val playerViewHolder = remember { arrayOfNulls<PlayerView>(1) }\n    var isPlaying by remember { mutableStateOf(false) }''')
+          text = text.replace('''    DisposableEffect(fullscreen, activity) {\n        if (activity != null) applyFullscreen(activity, fullscreen)\n        onDispose {\n            if (activity != null && fullscreen) applyFullscreen(activity, false)\n        }\n    }\n\n    Box(''', '''    DisposableEffect(fullscreen, activity) {\n        if (activity != null) applyFullscreen(activity, fullscreen)\n        onDispose {\n            if (activity != null && fullscreen) applyFullscreen(activity, false)\n        }\n    }\n\n    DisposableEffect(activity, state.mediaId, state.episode) {\n        onDispose {\n            activity?.let { updatePictureInPictureParams(it, null, autoEnter = false) }\n        }\n    }\n\n    Box(''')
+          text = text.replace('''                    layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)\n                    this.player = player\n                }\n            },\n            update = { it.player = player },''', '''                    layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)\n                    this.player = player\n                    playerViewHolder[0] = this\n                    activity?.let { owner -> updatePictureInPictureParams(owner, this, autoEnter = true) }\n                }\n            },\n            update = { view ->\n                view.player = player\n                playerViewHolder[0] = view\n                activity?.let { owner -> updatePictureInPictureParams(owner, view, autoEnter = true) }\n            },''')
+          text = text.replace('''                onPip = {\n                    activity?.enterPictureInPictureMode(\n                        PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9)).build()\n                    )\n                },''', '''                onPip = {\n                    activity?.let { owner ->\n                        owner.enterPictureInPictureMode(buildPictureInPictureParams(playerViewHolder[0], autoEnter = true))\n                    }\n                },''')
+          text = text.replace('        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE\n', '')
+          text = text.replace('        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED\n', '')
+          helper = '''private fun buildPictureInPictureParams(playerView: PlayerView?, autoEnter: Boolean): PictureInPictureParams {\n    val builder = PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9))\n    val sourceRect = Rect()\n    if (playerView?.getGlobalVisibleRect(sourceRect) == true && !sourceRect.isEmpty) {\n        builder.setSourceRectHint(sourceRect)\n    }\n    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {\n        builder.setAutoEnterEnabled(autoEnter)\n    }\n    return builder.build()\n}\n\nprivate fun updatePictureInPictureParams(activity: Activity, playerView: PlayerView?, autoEnter: Boolean) {\n    activity.setPictureInPictureParams(buildPictureInPictureParams(playerView, autoEnter))\n}\n\n'''
+          marker = 'private fun applyFullscreen(activity: Activity, fullscreen: Boolean) {\n'
+          if helper not in text:
+              text = text.replace(marker, helper + marker)
+          player.write_text(text)
+          package_info = player.parent / "package-info.kt"
+          if package_info.exists():
+              package_info.unlink()
           PY
+
           grep -q 'id("com.android.application") version "9.3.1"' "$ROOT/build.gradle.kts"
-          grep -q 'androidx.core:core:1.17.0' "$ROOT/app/build.gradle.kts"
-          grep -q 'androidx.activity:activity-compose:1.12.4' "$ROOT/app/build.gradle.kts"
-          grep -q 'import coil3.request.crossfade' "$ROOT/app/src/main/java/com/aniflow/app/AniFlowApplication.kt"
-          grep -q 'import coil3.disk.directory' "$ROOT/app/src/main/java/com/aniflow/app/AniFlowApplication.kt"
-          test -s "$ROOT/app/src/main/res/values-v27/themes.xml"
-          ! grep -q 'windowLightNavigationBar' "$ROOT/app/src/main/res/values/themes.xml"
+          grep -q 'androidx.core:core-ktx:1.17.0' "$ROOT/app/build.gradle.kts"
+          grep -q 'androidx.annotation:annotation-experimental:1.6.0' "$ROOT/app/build.gradle.kts"
+          grep -q '@file:androidx.annotation.OptIn' "$ROOT/app/src/main/java/com/aniflow/app/feature/player/PlayerScreen.kt"
+          grep -q 'setAutoEnterEnabled' "$ROOT/app/src/main/java/com/aniflow/app/feature/player/PlayerScreen.kt"
+          grep -q 'setSourceRectHint' "$ROOT/app/src/main/java/com/aniflow/app/feature/player/PlayerScreen.kt"
+          grep -q 'android:dataExtractionRules' "$ROOT/app/src/main/AndroidManifest.xml"
+          ! grep -q 'screenOrientation' "$ROOT/app/src/main/AndroidManifest.xml"
 
       - name: Regression guards
         shell: bash
