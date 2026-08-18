@@ -40,6 +40,13 @@ jobs:
           test -s "$ANIFLOW_ROOT/settings.gradle.kts"
           test -s "$ANIFLOW_ROOT/app/build.gradle.kts"
 
+      - name: Align final Android toolchain checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          sed -i 's/id("com.android.application") version "9\.3\.0"/id("com.android.application") version "9.3.1"/' "$ANIFLOW_ROOT/build.gradle.kts"
+          grep -q 'id("com.android.application") version "9.3.1"' "$ANIFLOW_ROOT/build.gradle.kts"
+
       - name: Publish materialized source tree to branch
         if: ${{ github.event_name == 'pull_request' && !hashFiles('projects/aniflow/settings.gradle.kts') }}
         shell: bash
