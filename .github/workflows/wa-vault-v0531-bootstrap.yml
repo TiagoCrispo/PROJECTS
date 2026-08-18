@@ -50,7 +50,8 @@ jobs:
             cat "$f" >> "$OUT"
           done
           base64 --decode "$OUT" > "$RUNNER_TEMP/wa-vault-v0.5.31.tar.xz"
-          echo 'ee1f59d1c112f397cedf8fa2ffb9b4044b3c6c57d8263125b8c18bf1b166aec8  '"$RUNNER_TEMP/wa-vault-v0.5.31.tar.xz" | sha256sum -c -
+          sha256sum "$RUNNER_TEMP/wa-vault-v0.5.31.tar.xz"
+          echo 'ee1f59d1dcaed955b7c6780015bf781cfe2a6c6fe2bc7e8786d09c77b166aec8  '"$RUNNER_TEMP/wa-vault-v0.5.31.tar.xz" | sha256sum -c -
           rm -rf projects/wa-vault
           mkdir -p projects/wa-vault
           tar -xJf "$RUNNER_TEMP/wa-vault-v0.5.31.tar.xz" -C projects/wa-vault
