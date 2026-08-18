@@ -9,8 +9,9 @@ I prefer tools that explain what they are doing, preserve user control and avoid
 | Project | What it is |
 |---|---|
 | [Forge3D Studio](./projects/forge3d-studio.md) | Desktop 3D production toolkit for Roblox-oriented asset, character, animation, VFX and world workflows. |
-| [ProAim](./projects/proaim.md) | Windows performance, latency, mouse and display diagnostics with reversible tuning. |
+| [ProAim](./projects/proaim.md) | Windows performance, latency, mouse, hardware-health and display diagnostics with reversible tuning. |
 | [UTN Scholar](./projects/utn-scholar.md) | Cross-device study workspace for university documents, AI-assisted learning and local tools. |
+| [FurnitureShot AI](./projects/furnitureshot-ai.md) | Android furniture-photo editor focused on product fidelity, clean catalog composition and conservative quality gates. |
 | [BandLab](./projects/bandlab.md) | Local-first Android training companion with Xiaomi Smart Band integration, GPS and workout analytics. |
 | [A53 Performance](./projects/a53-performance.md) | Android maintenance and device-analysis utility focused on clear, bounded actions. |
 | [WA Vault](./projects/wa-vault.md) | Privacy-focused Android project for durable local message/event and media association. |
@@ -22,7 +23,9 @@ I prefer tools that explain what they are doing, preserve user control and avoid
 
 ## How I work
 
-I usually build in iterations: get the core behavior working, test it, identify fragile or confusing parts, then improve them without throwing away what already works. Across projects I care about clear state, useful diagnostics, recoverable changes, local-first behavior where appropriate and separating real validation from assumptions.
+I use a root-cause-first workflow: understand and reproduce the problem, make the smallest structural fix, run the relevant checks/builds, look for regressions, then document the resulting state. UI work also gets an explicit pass for hierarchy, accessibility, adaptive behavior and purposeful motion.
+
+Across projects I care about clear state, useful diagnostics, recoverable changes, local-first behavior where appropriate and separating real validation from assumptions. Repository-wide engineering rules live in [`AGENTS.md`](./AGENTS.md).
 
 ## Project index
 

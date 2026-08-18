@@ -1,24 +1,27 @@
 # ProAim
 
-ProAim is a Windows utility focused on understanding and tuning the parts of a gaming PC that affect input feel, display behavior and latency.
+ProAim is a Windows utility focused on understanding and tuning the parts of a gaming PC that affect input feel, display behavior, hardware health and latency.
 
-## What it does
+## Current development snapshot
 
-- checks Windows mouse configuration and 1:1 input-related settings;
-- measures input/polling evidence instead of assuming a configured value is being achieved;
-- inventories connected displays, active resolution and available refresh rates;
-- can apply supported display changes while preserving the selected resolution;
-- collects HID, PnP and latency-related diagnostic evidence;
-- uses snapshots and restore logic for settings it changes;
-- supports bounded, evidence-based optimization instead of broad registry tweaking;
-- includes package-integrity, configuration and recovery tools for the application itself.
+**ProAim v26.0.2 — Hardware Truth & Diagnostics Fix**
 
-## Engineering focus
+This release keeps the v26.0.1 runtime-stability architecture and corrects hardware/driver interpretation discovered during real Windows testing.
 
-ProAim is deliberately not a generic “FPS booster”. A setting is only useful when the application can explain what it changes, verify the result where possible and restore the previous state.
+### Current capabilities
 
-Diagnostics are kept separate from fixes: detecting DPC/ISR activity, a device issue or an inconclusive polling sample does not automatically mean Windows should be modified.
+- Driver Center inventories exact active PnP-signed drivers where possible and compares against live official vendor information without inventing an update when a page cannot be verified.
+- Logitech G HUB detection uses registry, files and process fallbacks rather than one fragile exact display name.
+- Storage UI renders all detected physical disks and all lettered volumes instead of only the first disk / C:.
+- Windows Health surfaces DISM repairable and pending-reboot state; the repair path runs RestoreHealth + SFC only when repairable state is actually confirmed.
+- Process modes are explained in-product and protect Windows/security/audio-critical components and Memory Compression.
+- Power modes distinguish AUTO, COMPETITIVE and MAX; COMPETITIVE is not claimed to be universally faster and should be kept only when measurements justify it.
+- Mouse, display, benchmark and tuning workflows continue to prefer measurable evidence and reversible changes.
 
 ## Safety principles
 
-The project avoids aggressive shortcuts such as disabling security features, forcing unsafe process priority, generic network tweaks, arbitrary service removal or deleting personal files. Optimizations are intended to stay narrow, understandable and reversible.
+ProAim does not use HPET/BCD forcing, REALTIME process priority, generic RAM purging, process injection, Defender/Firewall disabling or broad low-level tweak packs as a substitute for evidence. Diagnostics and fixes remain separate, and system mutations should be understandable and reversible.
+
+## Release target
+
+Windows 11 x64, native Win32 GUI, Go/amd64 with CGO disabled.

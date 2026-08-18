@@ -1,25 +1,27 @@
 # Forge3D Studio
 
-Forge3D Studio is a desktop 3D production toolkit designed around Roblox-oriented workflows. The goal is to make it easier to inspect, prepare, transform and assemble game assets before they reach Roblox Studio.
+Forge3D Studio is a desktop 3D production toolkit designed around Roblox-oriented workflows. It is intended to inspect, prepare, transform, compile and assemble game assets before they reach Roblox Studio.
 
-## What it does
+## Current development snapshot
 
-- imports and inspects models, characters, armor, weapons, wings, props and other assets independently;
-- provides scene, transform and asset-compilation workflows;
-- supports character, rig and equipment preparation;
-- includes animation and character-movement tooling;
-- includes ability and VFX-oriented workflows;
-- supports terrain, water, environment and world-building work;
-- includes MU Online world reconstruction tooling for supported map/object data;
-- provides structured automation/agent interfaces for inspecting projects and planning controlled changes;
-- prepares project data for Roblox-side compilation and integration.
+**Forge3D Studio v7.0.3 — Create3D + Asset Compiler · Block 3**
 
-## Engineering focus
+Pipeline: **Codex → Forge3D OmniGraph → asset/character/world compilers → production gate → Roblox Studio**.
 
-Forge3D is intentionally broader than a single file converter. It treats a project as a production environment with stable asset identity, dependencies, validation and controlled mutation. Destructive or multi-domain operations are designed around explicit planning and validation instead of blind automation.
+### Block 3 foundation
 
-The project also distinguishes supported decoding from approximation. Unsupported or unknown proprietary formats should fail clearly rather than being presented as fully decoded.
+- GLB is the canonical working asset format.
+- Each `AssetId` keeps source, working, compiled, textures, LOD, history and manifest data separated.
+- GLTF packages preserve `.gltf` + `.bin` + textures as source while reopening through a self-contained working GLB.
+- OBJ can keep MTL/textures; FBX conversion uses Blender when available.
+- AI generation and procedural generation are explicitly separated so procedural output is not presented as generative AI.
+- Asset Compiler writes `compiled.glb` separately from `working.glb` and ties compile reports/SHA-256 evidence to the asset identity.
+- Static meshes can use Blender-backed cleanup, LODs and collision generation; skinned/morph assets stay in a safer non-destructive path.
+- UV audit, material compilation, Roblox triangle-budget reporting, split guidance and reproducible thumbnails are included in the compiler workflow.
+- Blocks 1 and 2 remain the foundation: production shell plus Unified Viewer / Scene Core.
 
-## Direction
+## Boundaries
 
-The long-term direction is a practical bridge between 3D asset preparation, automation and Roblox Studio, while keeping models, characters, equipment, animation, VFX and world data usable as separate parts of the same pipeline.
+Without Blender, compilation remains in a safer limited mode and does not pretend physical LOD/collision generation occurred. Unknown proprietary formats should fail explicitly rather than being presented as fully decoded. Final import, materials and performance still require validation in Roblox Studio.
+
+Large source datasets such as the Lorencia MU map corpus are intentionally kept outside the public code snapshot rather than being mixed into the application source.
