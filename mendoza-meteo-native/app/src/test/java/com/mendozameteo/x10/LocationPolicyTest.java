@@ -2,6 +2,7 @@ package com.mendozameteo.x10;
 
 import org.junit.Test;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
@@ -42,5 +43,16 @@ public class LocationPolicyTest {
 
     @Test public void savedLocationExpires() {
         assertFalse(LocationPolicy.usableSaved(LocationPolicy.SAVED_MAX_AGE_MILLIS + 1L, 100f, false, false));
+    }
+
+    @Test public void smallWallClockSkewIsTolerated() {
+        long now = 1_000_000_000L;
+        assertEquals(0L, LocationPolicy.wallClockAgeMillis(now + 1_000L, now));
+    }
+
+    @Test public void impossibleFuturePersistedTimestampIsRejected() {
+        long now = 1_000_000_000L;
+        long impossible = now + LocationPolicy.MAX_FUTURE_SKEW_MILLIS + 1L;
+        assertEquals(Long.MAX_VALUE, LocationPolicy.wallClockAgeMillis(impossible, now));
     }
 }
