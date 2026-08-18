@@ -1,0 +1,156 @@
+-            return ShadowAnalysis(null, confidence, floatingScore, null)
++            return buildContactOcclusion(alpha, supportY, width, height, left, right, bounds, requestedStrength)
+         }
+ 
+         val bitmap = buildShadowBitmap(shadow, width, height)
+         return ShadowAnalysis(bitmap, confidence, floatingScore, null)
+     }
+ 
++    private fun buildContactOcclusion(
++        alpha: FloatArray,
++        supportY: IntArray,
++        width: Int,
++        height: Int,
++        left: Int,
++        right: Int,
++        bounds: RectF,
++        requestedStrength: Float,
++    ): ShadowAnalysis {
++        var globalBottom = -1
++        for (x in left..right) globalBottom = max(globalBottom, supportY[x])
++        if (globalBottom < 0) return ShadowAnalysis(null, 0f, 0f, null)
++
++        val groundBand = (bounds.height() * 0.018f).roundToInt().coerceIn(2, 12)
++        val depth = (bounds.height() * 0.012f).roundToInt().coerceIn(3, 14)
++        val mask = FloatArray(width * height)
++        var runCount = 0
++        var contactColumns = 0
++        var x = left
++        while (x <= right) {
++            while (x <= right && (supportY[x] < globalBottom - groundBand || supportY[x] < 0)) x++
++            if (x > right) break
++            val start = x
++            while (x <= right && supportY[x] >= globalBottom - groundBand) x++
++            val end = x - 1
++            if (end - start + 1 < 2) continue
++            runCount++
++            for (cx in start..end) {
++                val foot = supportY[cx]
++                if (foot < 0) continue
++                contactColumns++
++                val startY = (foot + 1).coerceAtMost(height - 1)
++                for (dy in 0 until depth) {
++                    val yy = startY + dy
++                    if (yy >= height) break
++                    val idx = yy * width + cx
++                    if (alpha[idx] > 0.10f) continue
++                    val t = 1f - dy.toFloat() / depth.toFloat()
++                    val strength = if (requestedStrength <= 0f) 0.48f else requestedStrength.coerceIn(0.35f, 0.80f)
++                    mask[idx] = max(mask[idx], t * t * strength)
++                }
++            }
++        }
++
++        if (runCount == 0 || contactColumns < 3) return ShadowAnalysis(null, 0f, 0f, null)
++        blurFloatMask(mask, width, height, 1)
++        // Never allow a reconstructed contact shadow to start away from a support.
++        suppressDetachedShadow(mask, supportY, width, height, left, right, depth + groundBand)
++        val bitmap = buildShadowBitmap(mask, width, height)
++        val confidence = (0.42f + min(0.30f, runCount * 0.06f) + min(0.20f, contactColumns / 80f)).coerceIn(0f, 0.86f)
++        return ShadowAnalysis(bitmap, confidence, 0f, null)
++    }
++
+     private fun estimateFloorBackground(
+         pixels: IntArray,
+         alpha: FloatArray,
+@@ -1373,8 +1494,10 @@
+             var r = Color.red(src[i]).toFloat()
+             var g = Color.green(src[i]).toFloat()
+             var b = Color.blue(src[i]).toFloat()
+-            if (aFloat < 0.995f) {
+-                // simple color decontamination against the estimated previous background
++            if (aFloat in 0.30f..0.995f) {
++                // Decontaminate only when alpha is sufficiently reliable. Dividing
++                // very low-alpha pixels by alpha amplified noise/saturation in beta22
++                // and could produce colored edge halos.
+                 r = ((r - bg[0] * (1f - aFloat)) / aFloat).coerceIn(0f, 255f)
+                 g = ((g - bg[1] * (1f - aFloat)) / aFloat).coerceIn(0f, 255f)
+                 b = ((b - bg[2] * (1f - aFloat)) / aFloat).coerceIn(0f, 255f)
+@@ -1388,44 +1511,10 @@
+     }
+ 
+     private fun finalizeComposite(source: Bitmap): Bitmap {
+-        val width = source.width
+-        val height = source.height
+-        val pixels = IntArray(width * height)
+-        source.getPixels(pixels, 0, width, 0, 0, width, height)
+-        val out = pixels.clone()
+-
+-        fun bgLike(c: Int): Boolean = Color.red(c) >= 242 && Color.green(c) >= 238 && Color.blue(c) >= 232
+-        fun objectLike(c: Int): Boolean = !bgLike(c)
+-
+-        for (y in 1 until height - 1) {
+-            for (x in 1 until width - 1) {
+-                val i = y * width + x
+-                val c = pixels[i]
+-                if (!bgLike(c)) continue
+-                var objNeighbors = 0
+-                var rs = 0
+-                var gs = 0
+-                var bs = 0
+-                for (dy in -1..1) {
+-                    for (dx in -1..1) {
+-                        if (dx == 0 && dy == 0) continue
+-                        val n = pixels[(y + dy) * width + (x + dx)]
+-                        if (objectLike(n)) {
+-                            objNeighbors++
+-                            rs += Color.red(n)
+-                            gs += Color.green(n)
+-                            bs += Color.blue(n)
+-                        }
+-                    }
+-                }
+-                if (objNeighbors >= 6) {
+-                    out[i] = Color.argb(255, rs / objNeighbors, gs / objNeighbors, bs / objNeighbors)
+-                }
+-            }
+-        }
+-
+-        return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also {
+-            it.setPixels(out, 0, width, 0, 0, width, height)
+-        }
++        // beta23: no post-composite hole filling. The beta22 heuristic could close
++        // intentional slat gaps/interior openings when a background pixel had many
++        // foreground neighbours. Matte correction now happens exclusively in alpha
++        // space through CompositeQualityEngine, preserving real negative space.
++        return source
+     }
+ }
+diff -ruN beta22base/furnitureshot-ai/app/src/main/java/com/tiagocrispo/furnitureshot/processing/MaterialAwareEnhancer.kt beta23src/furnitureshot-ai/app/src/main/java/com/tiagocrispo/furnitureshot/processing/MaterialAwareEnhancer.kt
+--- beta22base/furnitureshot-ai/app/src/main/java/com/tiagocrispo/furnitureshot/processing/MaterialAwareEnhancer.kt	2026-08-17 22:52:01.000000000 +0000
++++ beta23src/furnitureshot-ai/app/src/main/java/com/tiagocrispo/furnitureshot/processing/MaterialAwareEnhancer.kt	2026-08-18 00:45:23.660992358 +0000
+@@ -45,6 +45,7 @@
+         source: Bitmap,
+         alpha: FloatArray,
+         inputQuality: InputQualityReport,
++        strengthMultiplier: Float = 1f,
+     ): MaterialEnhancementResult {
+         val width = source.width
+         val height = source.height
+@@ -55,7 +56,7 @@
+         val pixels = IntArray(width * height)
+         source.getPixels(pixels, 0, width, 0, 0, width, height)
+         val analysis = classifyMaterial(pixels, alpha, width, height)
+-        val parameters = parametersFor(analysis.material, analysis.confidence, inputQuality)
++        val parameters = parametersFor(analysis.material, analysis.confidence, inputQuality, strengthMultiplier)
+         if (parameters.detailGain <= 0.001f && abs(parameters.saturationGain - 1f) < 0.001f) {
+             return MaterialEnhancementResult(source, analysis, applied = false)
+         }
+@@ -141,11 +142,13 @@
+         material: SurfaceMaterial,
+         confidence: Float,
+         quality: InputQualityReport,
++        strengthMultiplier: Float,
+     ): EnhancementParameters {
+         val confidenceGuard = if (confidence < 0.45f) 0.45f else confidence.coerceIn(0.45f, 1f)
+         val noiseGuard = (1f - quality.noiseScore * 0.62f).coerceIn(0.30f, 1f)
