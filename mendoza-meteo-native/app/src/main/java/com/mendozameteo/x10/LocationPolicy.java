@@ -5,11 +5,18 @@ final class LocationPolicy {
     static final long DEVICE_MAX_AGE_MILLIS = 2L * 60L * 60L * 1000L;
     static final long SAVED_MAX_AGE_MILLIS = 6L * 60L * 60L * 1000L;
     static final long STABILIZE_MAX_AGE_MILLIS = 30L * 60L * 1000L;
+    static final long MAX_FUTURE_SKEW_MILLIS = 10L * 60L * 1000L;
     static final float MAX_ACCEPTABLE_ACCURACY_METERS = 10_000f;
     static final float QUICK_REUSE_ACCURACY_METERS = 2_000f;
     private static final double EARTH_RADIUS_METERS = 6_371_000d;
 
     private LocationPolicy() { }
+
+    static long wallClockAgeMillis(long timestampMillis, long nowMillis) {
+        if (timestampMillis <= 0L || nowMillis <= 0L) return Long.MAX_VALUE;
+        if (timestampMillis > nowMillis + MAX_FUTURE_SKEW_MILLIS) return Long.MAX_VALUE;
+        return Math.max(0L, nowMillis - timestampMillis);
+    }
 
     static boolean validCoordinate(double latitude, double longitude) {
         return Double.isFinite(latitude) && Double.isFinite(longitude)
