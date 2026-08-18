@@ -30,7 +30,7 @@ final class NotificationLocation {
     static Point load(Context context, long nowMillis) {
         SharedPreferences prefs = context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         long savedAt = prefs.getLong("saved_at", 0L);
-        long age = savedAt <= 0L ? Long.MAX_VALUE : Math.max(0L, nowMillis - savedAt);
+        long age = LocationPolicy.wallClockAgeMillis(savedAt, nowMillis);
         double lat = Double.longBitsToDouble(prefs.getLong("lat", Double.doubleToRawLongBits(Double.NaN)));
         double lon = Double.longBitsToDouble(prefs.getLong("lon", Double.doubleToRawLongBits(Double.NaN)));
         if (age <= MAX_PERSONALIZED_AGE_MILLIS && LocationPolicy.validCoordinate(lat, lon)) {
