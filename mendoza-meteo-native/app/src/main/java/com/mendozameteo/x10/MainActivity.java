@@ -28,6 +28,7 @@ public final class MainActivity extends Activity {
     private final LoadGate loadGate=new LoadGate();
     private ExecutorService executor;
     private WeatherRepository repository;
+    private OfficialAlertRepository officialAlerts;
     private LocationResolver locationResolver;
     private LinearLayout content;
     private TextView status, refresh;
@@ -35,8 +36,9 @@ public final class MainActivity extends Activity {
 
     @Override protected void onCreate(Bundle state){
         super.onCreate(state);
-        executor=Executors.newFixedThreadPool(3);
+        executor=Executors.newFixedThreadPool(4);
         repository=new WeatherRepository(getApplicationContext());
+        officialAlerts=new OfficialAlertRepository(getApplicationContext());
         locationResolver=new LocationResolver(getApplicationContext());
         buildShell();
         if(hasLocation()) loadAll();
@@ -79,32 +81,41 @@ public final class MainActivity extends Activity {
             LocationResolver.Point point=locationResolver.resolve(UTN_LAT,UTN_LON,LOCATION_TIMEOUT_MILLIS);
             if(!loadGate.isActive(token)||Thread.currentThread().isInterrupted())return;
             if(!point.fromUserLocation()){
-                WeatherRepository.Result utn=repository.load("utn",UTN_LAT,UTN_LON);
-                if(!loadGate.isActive(token)||Thread.currentThread().isInterrupted())return;
-                if(utn.isSuccess()) WeatherWidgetProvider.publishForecast(getApplicationContext(),utn.forecast,utn.origin==WeatherRepository.Origin.CACHE,utn.freshness);
-                postResult(token,()->render(utn,utn,point));
+                Future<WeatherRepository.Result> weatherTask=executor.submit(()->repository.load("utn",UTN_LAT,UTN_LON));
+                Future<OfficialAlertRepository.Result> officialTask=executor.submit(()->officialAlerts.load(UTN_LAT,UTN_LON));
+                try{
+                    WeatherRepository.Result utn=weatherTask.get();
+                    OfficialAlertRepository.Result official=officialTask.get();
+                    if(!loadGate.isActive(token)||Thread.currentThread().isInterrupted())return;
+                    if(utn.isSuccess()) WeatherWidgetProvider.publishForecast(getApplicationContext(),utn.forecast,utn.origin==WeatherRepository.Origin.CACHE,utn.freshness);
+                    postResult(token,()->render(utn,utn,point,official));
+                }catch(InterruptedException e){Thread.currentThread().interrupt();postResult(token,()->status.setText("Actualización cancelada."));}
+                catch(ExecutionException e){postResult(token,()->status.setText("Error interno al actualizar."));}
+                finally{weatherTask.cancel(true);officialTask.cancel(true);}
                 return;
             }
             Future<WeatherRepository.Result> localTask=executor.submit(()->repository.load("local",point.lat,point.lon));
             Future<WeatherRepository.Result> utnTask=executor.submit(()->repository.load("utn",UTN_LAT,UTN_LON));
+            Future<OfficialAlertRepository.Result> officialTask=executor.submit(()->officialAlerts.load(point.lat,point.lon));
             try{
                 WeatherRepository.Result local=localTask.get(), utn=utnTask.get();
+                OfficialAlertRepository.Result official=officialTask.get();
                 if(!loadGate.isActive(token)||Thread.currentThread().isInterrupted())return;
                 if(local.isSuccess()) WeatherWidgetProvider.publishForecast(getApplicationContext(),local.forecast,local.origin==WeatherRepository.Origin.CACHE,local.freshness);
-                postResult(token,()->render(local,utn,point));
+                postResult(token,()->render(local,utn,point,official));
             }catch(InterruptedException e){Thread.currentThread().interrupt();postResult(token,()->status.setText("Actualización cancelada."));}
             catch(ExecutionException e){postResult(token,()->status.setText("Error interno al actualizar el pronóstico."));}
-            finally{localTask.cancel(true);utnTask.cancel(true);}
+            finally{localTask.cancel(true);utnTask.cancel(true);officialTask.cancel(true);}
         });
     }
 
     private void postResult(long token,Runnable action){ runOnUiThread(()->{ if(destroyed||!loadGate.isActive(token))return; try{action.run();}finally{loadGate.finish(token);setLoadingUi(false);} }); }
     private void setLoadingUi(boolean loading){ if(status!=null&&loading)status.setText("Buscando ubicación y actualizando…"); if(refresh!=null){refresh.setEnabled(!loading);refresh.setAlpha(loading?0.55f:1f);} }
 
-    private void render(WeatherRepository.Result local,WeatherRepository.Result utn,LocationResolver.Point point){
+    private void render(WeatherRepository.Result local,WeatherRepository.Result utn,LocationResolver.Point point,OfficialAlertRepository.Result official){
         WeatherRepository.Result primary=local.isSuccess()?local:(utn.isSuccess()?utn:null);
-        status.setText(combinedStatus(local,utn,point));
-        if(primary==null){renderUnavailable("No hay pronóstico disponible ni datos guardados utilizables.");return;}
+        status.setText(combinedStatus(local,utn,point,official));
+        if(primary==null){renderUnavailable("No hay pronóstico disponible ni datos guardados utilizables.");if(official!=null&&official.hasAlerts())renderOfficialAlerts(official);return;}
         String suffix=local.isSuccess()?(point.fromUserLocation()?"":" · referencia UTN"):" · UTN (sin datos locales)";
         section("7 días"+suffix); renderDays(primary.forecast);
         section("Próximas 24 h"+suffix); renderHours(primary.forecast);
@@ -112,8 +123,13 @@ public final class MainActivity extends Activity {
         if(local.isSuccess()){
             LinearLayout current=card(); current.setPadding(dp(14),dp(12),dp(14),dp(12)); current.addView(text(local.forecast.current.temp+"°",36,Color.WHITE,true));
             current.addView(text(point.cardPrefix()+"Sensación "+local.forecast.current.feels+"° · Humedad "+local.forecast.current.humidity+"% · Viento "+local.forecast.current.wind+" km/h · Ráfagas "+local.forecast.current.gust+" km/h",12,Color.rgb(174,185,203),false));
-            content.addView(current,new LinearLayout.LayoutParams(-1,-2)); renderPrecaution(local);
-        } else renderUnavailable("Tu ubicación no tiene datos disponibles. UTN sigue funcionando como referencia.");
+            content.addView(current,new LinearLayout.LayoutParams(-1,-2));
+            renderOfficialAlerts(official);
+            renderPrecaution(local,official);
+        } else {
+            renderUnavailable("Tu ubicación no tiene datos disponibles. UTN sigue funcionando como referencia.");
+            renderOfficialAlerts(official);
+        }
         section("UTN Mendoza");
         if(utn.isSuccess()){
             LinearLayout c=card(); c.setPadding(dp(14),dp(12),dp(14),dp(12)); WeatherClient.Forecast f=utn.forecast;
@@ -136,20 +152,43 @@ public final class MainActivity extends Activity {
         scroll.addView(row); content.addView(scroll,new LinearLayout.LayoutParams(-1,dp(94)));
     }
 
-    private void renderPrecaution(WeatherRepository.Result result){
+    private void renderOfficialAlerts(OfficialAlertRepository.Result result){
+        if(result==null||!result.hasAlerts())return;
+        int shown=0;
+        for(OfficialAlert official:result.alerts){
+            if(shown++>=3)break;
+            LinearLayout alert=card(); alert.setPadding(dp(14),dp(11),dp(14),dp(11));
+            int bg=Color.rgb(28,39,58), titleColor=Color.rgb(184,211,255);
+            if(official.level==OfficialAlert.Level.YELLOW){bg=Color.rgb(66,58,17);titleColor=Color.rgb(255,226,104);}
+            else if(official.level==OfficialAlert.Level.ORANGE){bg=Color.rgb(82,43,16);titleColor=Color.rgb(255,181,96);}
+            else if(official.level==OfficialAlert.Level.RED){bg=Color.rgb(78,25,29);titleColor=Color.rgb(255,143,151);}
+            alert.setBackground(cardBg(bg,16));
+            String level=official.level==OfficialAlert.Level.UNKNOWN?"":(" · "+official.level.label);
+            alert.addView(text("OFICIAL · "+official.sourceLabel()+level,11,titleColor,true));
+            alert.addView(text(clip(official.title(),180),13,Color.WHITE,true));
+            if(!official.area.isEmpty())alert.addView(text(clip(official.area,220),10,Color.rgb(218,220,224),false));
+            if(!official.description.isEmpty())alert.addView(text(clip(official.description,360),10,Color.rgb(232,224,208),false));
+            if(!official.instruction.isEmpty())alert.addView(text(clip(official.instruction,260),10,titleColor,true));
+            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.topMargin=dp(8);content.addView(alert,lp);
+        }
+        if(result.alerts.size()>3){TextView more=text("+"+(result.alerts.size()-3)+" alerta(s) oficial(es) vigente(s)",10,Color.rgb(174,185,203),false);content.addView(more,new LinearLayout.LayoutParams(-1,dp(24)));}
+    }
+
+    private void renderPrecaution(WeatherRepository.Result result,OfficialAlertRepository.Result official){
         LinearLayout alert=card(); alert.setPadding(dp(14),dp(11),dp(14),dp(11)); LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2); lp.topMargin=dp(8);
         if(!result.safeForAlerts()){
             alert.setBackground(cardBg(Color.rgb(47,45,28),16));
-            alert.addView(text("Precauciones pausadas · datos guardados hace "+ForecastFreshness.ageLabel(result.ageMillis),12,Color.rgb(241,211,139),true));
-            alert.addView(text("No se generan señales X10 con datos meteorológicos antiguos.",10,Color.rgb(188,180,145),false));
+            alert.addView(text("Precauciones X10 pausadas · datos guardados hace "+ForecastFreshness.ageLabel(result.ageMillis),12,Color.rgb(241,211,139),true));
+            alert.addView(text("Las alertas oficiales de arriba son independientes del forecast X10.",10,Color.rgb(188,180,145),false));
             content.addView(alert,lp); return;
         }
 
         AlertEngine.Report report=AlertEngine.analyze(result.forecast);
         if(!report.hasHazards()){
             alert.setBackground(cardBg(Color.rgb(20,47,39),16));
-            alert.addView(text("✓ Sin precauciones relevantes en las próximas 24 h",13,Color.rgb(156,232,194),true));
-            alert.addView(text("Detección X10 · solo horas futuras",10,Color.rgb(125,184,157),false));
+            String label=official!=null&&official.hasAlerts()?"✓ Sin señales X10 adicionales en las próximas 24 h":"✓ Sin precauciones relevantes en las próximas 24 h";
+            alert.addView(text(label,13,Color.rgb(156,232,194),true));
+            alert.addView(text("Heurística X10 · solo horas futuras · no sustituye al SMN",10,Color.rgb(125,184,157),false));
             content.addView(alert,lp); return;
         }
 
@@ -157,7 +196,7 @@ public final class MainActivity extends Activity {
         if(report.highestSeverity==AlertEngine.Severity.IMPORTANT){ bg=Color.rgb(78,43,18); titleColor=Color.rgb(255,190,112); }
         else if(report.highestSeverity==AlertEngine.Severity.DANGER){ bg=Color.rgb(74,27,31); titleColor=Color.rgb(255,151,157); }
         alert.setBackground(cardBg(bg,16));
-        alert.addView(text("Precaución inteligente X10 · "+report.highestSeverity.label,13,titleColor,true));
+        alert.addView(text((official!=null&&official.hasAlerts()?"Complemento X10":"Precaución inteligente X10")+" · "+report.highestSeverity.label,13,titleColor,true));
         int shown=0;
         for(AlertEngine.Event event:report.events){
             if(shown>=3)break;
@@ -165,15 +204,17 @@ public final class MainActivity extends Activity {
             shown++;
         }
         if(report.events.size()>shown)alert.addView(text("+"+(report.events.size()-shown)+" evento(s) adicional(es) en 24 h",10,Color.rgb(202,190,169),false));
-        alert.addView(text("Heurística X10 · no es una alerta oficial SMN · las oficiales tendrán prioridad",10,Color.rgb(202,190,169),false));
+        alert.addView(text("Heurística X10 · nunca cambia el nivel de una alerta oficial",10,Color.rgb(202,190,169),false));
         content.addView(alert,lp);
     }
 
-    private String combinedStatus(WeatherRepository.Result local,WeatherRepository.Result utn,LocationResolver.Point point){
-        if(local.isSuccess()){String v=point.statusLabel()+" · "+local.statusText();if(!utn.isSuccess()&&point.fromUserLocation())v+=" · UTN sin actualizar";return v;}
-        if(utn.isSuccess())return point.statusLabel()+" · sin datos locales · UTN: "+utn.statusText();
-        return point.statusLabel()+" · "+local.statusText();
+    private String combinedStatus(WeatherRepository.Result local,WeatherRepository.Result utn,LocationResolver.Point point,OfficialAlertRepository.Result official){
+        String officialStatus=official==null?"alertas oficiales pendientes":official.statusText();
+        if(local.isSuccess()){String v=point.statusLabel()+" · "+local.statusText();if(!utn.isSuccess()&&point.fromUserLocation())v+=" · UTN sin actualizar";return v+" · "+officialStatus;}
+        if(utn.isSuccess())return point.statusLabel()+" · sin datos locales · UTN: "+utn.statusText()+" · "+officialStatus;
+        return point.statusLabel()+" · "+local.statusText()+" · "+officialStatus;
     }
+    private String clip(String value,int max){if(value==null)return "";String clean=value.trim().replaceAll("\\s+"," ");return clean.length()<=max?clean:clean.substring(0,max-1)+"…";}
     private void renderUnavailable(String message){LinearLayout v=card();v.setPadding(dp(14),dp(12),dp(14),dp(12));v.setBackground(cardBg(Color.rgb(52,31,31),16));v.addView(text(message,12,Color.rgb(255,178,178),true));content.addView(v,new LinearLayout.LayoutParams(-1,-2));}
     private void section(String name){TextView v=text(name,17,Color.WHITE,true);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,dp(38));lp.topMargin=dp(10);content.addView(v,lp);}
     private LinearLayout card(){LinearLayout v=new LinearLayout(this);v.setOrientation(LinearLayout.VERTICAL);v.setGravity(Gravity.CENTER_VERTICAL);v.setBackground(cardBg(Color.rgb(18,24,36),16));return v;}
