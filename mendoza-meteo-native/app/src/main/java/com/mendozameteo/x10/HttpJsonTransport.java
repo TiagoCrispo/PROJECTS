@@ -18,6 +18,7 @@ final class HttpJsonTransport {
     private static final int CONNECT_TIMEOUT_MS = 3500;
     private static final int READ_TIMEOUT_MS = 5000;
     private static final int MAX_RESPONSE_BYTES = 1024 * 1024;
+    private static final String USER_AGENT = "MendozaMeteoX10/" + BuildConfig.VERSION_NAME;
 
     JSONObject get(String endpoint, int maxAttempts) throws WeatherException {
         int attempts = Math.max(1, maxAttempts);
@@ -52,7 +53,7 @@ final class HttpJsonTransport {
             connection.setUseCaches(false);
             connection.setRequestProperty("Accept", "application/json");
             connection.setRequestProperty("Accept-Encoding", "gzip");
-            connection.setRequestProperty("User-Agent", "MendozaMeteoX10/6.5-native-dev");
+            connection.setRequestProperty("User-Agent", USER_AGENT);
             int status = connection.getResponseCode();
             if (status < 200 || status >= 300) {
                 WeatherException.Kind kind = RetryPolicy.isRetryableHttpStatus(status)
