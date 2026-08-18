@@ -1,0 +1,15 @@
+name: AniFlow Smoke
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "projects/aniflow/**"
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "AniFlow trigger OK"
