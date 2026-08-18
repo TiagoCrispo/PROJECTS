@@ -46,8 +46,8 @@ jobs:
 
   emulator-smoke:
     needs: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
+    runs-on: macos-14
+    timeout-minutes: 25
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -59,6 +59,7 @@ jobs:
           arch: x86_64
           profile: pixel_6
           disable-animations: true
+          emulator-boot-timeout: 600
           script: |
             adb install -r artifact/MendozaMeteo_X10_v6.0_debug.apk
             adb logcat -c
@@ -70,3 +71,4 @@ jobs:
               echo 'Fatal Android crash detected'
               exit 1
             fi
+            echo 'MENDOZA_METEO_NATIVE_EMULATOR_SMOKE_OK'
