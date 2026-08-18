@@ -1,34 +1,38 @@
 # Galaxy A53 Performance
 
-Galaxy A53 Performance is an Android device-maintenance and performance utility originally built around the Samsung Galaxy A53 5G. The current portfolio release is **v1.16.0 FINAL** (`versionCode 38`).
+Galaxy A53 Performance is an Android device-maintenance and performance utility originally built around the Samsung Galaxy A53 5G.
 
-## Engineering focus
+The current recovery release is **v1.16.1 SAFE RECOVERY** (`versionCode 39`). It intentionally prioritizes launch stability over accumulated binary tweaks after the v1.16.0 branch continued to crash on the physical device.
 
-The project deliberately avoids placebo booster behavior. Changes are treated as valid only when they can be measured or read back from Android/Shizuku, and ambiguous results are reported as **NC / not confirmed** instead of being presented as success.
+## Current stability strategy
 
-Core areas include:
+v1.16.1 uses the exact executable DEX payload from the known-working v1.15.2 SAFE_AREA baseline:
 
-- reversible Gaming / Battery / Cool profiles;
-- Data Saver and per-UID network policy management;
-- AppOps-based background isolation with rollback;
-- Shizuku capability checks instead of assuming root-like access;
-- manual RAM cleanup with before/after measurement;
-- cache cleanup using cache-only paths rather than app-data deletion;
-- storage indexing, duplicate/similar-file review and resumable scanning;
-- protected storage rules for WhatsApp, documents, recordings, recent files and user-protected folders;
-- an application-managed trash workflow with recovery support;
-- Android thermal-status integration and bounded foreground work.
+- `classes.dex` byte-identical;
+- `classes2.dex` byte-identical;
+- `classes3.dex` byte-identical;
+- `classes4.dex` byte-identical;
+- `res/`, `assets/` and `resources.arsc` byte-identical.
 
-## v1.16.0 FINAL stability hotfix
+Only the manifest release identity/security fields change: `versionName 1.16.1`, `versionCode 39`, `debuggable=false`, and `allowBackup=false`. The APK is signed with the X10 branch certificate so it can replace later X10 builds.
 
-An experimental P16 binary rewrite of `TrashStore.writeAll()` correlated with a real-device crash report. The final release does **not** patch that method. Its complete DEX `code_item`, including the original try/catch structure, is restored byte-for-byte to the known v1.15.2/P12 implementation.
+This deliberately removes every hand-edited DEX instruction introduced in P2-P16. Static branch/checksum validation was not sufficient to reproduce ART's full bytecode/type verifier, so the project now treats physical launch evidence as mandatory before reintroducing any behavioral patch.
 
-The release keeps the accumulated X10 fixes from P2-P12 and updates the product identity to `1.16.0` / `38`.
+## Product scope
+
+The known-working baseline contains:
+
+- Gaming / Battery / Cool profiles;
+- Shizuku-backed device actions;
+- Data Saver and per-app rules;
+- storage scanning, duplicates and similar-photo workflows;
+- application-managed trash and restore;
+- RAM/cache actions;
+- thermal status integration;
+- protected storage rules and local diagnostics.
 
 ## Validation contract
 
-The final APK passed ZIP integrity, DEX SHA-1/Adler32 checks, structural control-flow validation across all DEX code methods, four-byte APK entry alignment, APK Signature Scheme v2 digest recomputation and RSA/SHA-256 verification. `res/`, `assets/` and `resources.arsc` remain byte-identical to the v1.15.2 SAFE_AREA visual baseline.
+A build is not called production/final merely because ZIP integrity, DEX checksums or APK signing pass. The release package includes an ADB runtime capture script that performs a clean install, launches the application and captures `logcat`, package/activity state and process survival.
 
-Static validation is explicitly not treated as physical-device validation. Samsung/One UI/Shizuku behavior must still be exercised on the target Galaxy A53.
-
-See [`release/v1.16.0/`](./release/v1.16.0/) for the release notes and verification record.
+See [`release/v1.16.1/`](./release/v1.16.1/) for the current recovery notes and validation record.
