@@ -31,6 +31,14 @@ public final class NotificationPolicyTest {
                 NotificationPolicy.officialChange(previous, current, NOW));
     }
 
+    @Test public void deescalationAlsoUpdatesImmediatelySoOldSeverityCannotLinger() {
+        OfficialAlert before = official(OfficialAlert.Level.ORANGE, "Tormenta", "A");
+        OfficialAlert current = official(OfficialAlert.Level.YELLOW, "Tormenta", "A");
+        NotificationPolicy.PreviousOfficial previous = previous(before, NOW - 60_000L);
+        assertEquals(NotificationPolicy.OfficialChange.DEESCALATION,
+                NotificationPolicy.officialChange(previous, current, NOW));
+    }
+
     @Test public void sameLevelImportantUpdateWaitsForCooldown() {
         OfficialAlert before = official(OfficialAlert.Level.YELLOW, "Tormenta", "A");
         OfficialAlert current = official(OfficialAlert.Level.YELLOW, "Tormenta", "B");
