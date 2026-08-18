@@ -58,6 +58,8 @@ jobs:
           test -f projects/wa-vault/app/build.gradle.kts
           grep -q 'versionCode = 81' projects/wa-vault/app/build.gradle.kts
           grep -q 'versionName = "0.5.31"' projects/wa-vault/app/build.gradle.kts
+          cp "$B/v0530_block3_db_migration_test.py" projects/wa-vault/tools/v0530_block3_db_migration_test.py
+          ! grep -RIn '/mnt/data' projects/wa-vault/tools projects/wa-vault/app/src/test projects/wa-vault/app/src/androidTest
 
       - name: Static validation
         working-directory: projects/wa-vault
