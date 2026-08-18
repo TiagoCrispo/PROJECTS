@@ -26,7 +26,7 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install Android 16 SDK
-        run: yes | sdkmanager "platforms;android-36" "build-tools;35.0.0"
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
 
       - name: Gradle 8.13
         uses: gradle/actions/setup-gradle@v4
@@ -41,6 +41,7 @@ jobs:
           cp -a projects/furnitureshot-ai "$BUILD_DIR"
           OVERLAY="projects/furnitureshot-ai-overlays/v0.7.1-beta22"
           TARGET="$BUILD_DIR/app/src/main/java/com/tiagocrispo/furnitureshot/processing"
+          rm -f "$TARGET/HighFidelityEnhancementEngine.kt"
           cp "$OVERLAY/LocalEnhancementEngine.kt" "$TARGET/LocalEnhancementEngine.kt"
           cp "$OVERLAY/FinishPassEngine.kt" "$TARGET/FinishPassEngine.kt"
           cp "$OVERLAY/PromptPolicy.kt" "$TARGET/PromptPolicy.kt"
