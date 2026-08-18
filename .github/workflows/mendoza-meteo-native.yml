@@ -55,8 +55,8 @@ jobs:
           grep -F 'gradle-9.5.0-bin.zip' mendoza-meteo-native/gradle/wrapper/gradle-wrapper.properties
           grep -F 'distributionSha256Sum=553c78f50dafcd54d65b9a444649057857469edf836431389695608536d6b746' mendoza-meteo-native/gradle/wrapper/gradle-wrapper.properties
           (cd mendoza-meteo-native && ./gradlew --version)
-      - name: Unit tests, lint and clean builds
-        run: (cd mendoza-meteo-native && ./gradlew clean testDebugUnitTest lintRelease assembleDebug assembleRelease --stacktrace --warning-mode all)
+      - name: Unit tests, lint and warning-clean builds
+        run: (cd mendoza-meteo-native && ./gradlew clean testDebugUnitTest lintRelease assembleDebug assembleRelease --stacktrace --warning-mode fail)
       - name: Inspect release output
         run: |
           APK=mendoza-meteo-native/app/build/outputs/apk/release/app-release-unsigned.apk
@@ -64,8 +64,8 @@ jobs:
           "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -p -v 4 "$APK"
           BADGING="$($AAPT dump badging "$APK")"
           echo "$BADGING" | grep -E "package:|sdkVersion:|targetSdkVersion:"
-          echo "$BADGING" | grep "versionCode='65'"
-          echo "$BADGING" | grep "versionName='6.5-native-dev'"
+          echo "$BADGING" | grep "versionCode='66'"
+          echo "$BADGING" | grep "versionName='6.6-native-dev'"
           "$AAPT" dump permissions "$APK" | grep "android.permission.POST_NOTIFICATIONS"
           ! "$AAPT" dump permissions "$APK" | grep -q "android.permission.ACCESS_BACKGROUND_LOCATION"
           ! "$AAPT" dump permissions "$APK" | grep -q "android.permission.SCHEDULE_EXACT_ALARM"
