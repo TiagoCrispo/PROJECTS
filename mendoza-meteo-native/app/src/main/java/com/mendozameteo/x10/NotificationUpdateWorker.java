@@ -19,10 +19,11 @@ public final class NotificationUpdateWorker extends Worker {
 
         long now = System.currentTimeMillis();
         NotificationLocation.Point point = NotificationLocation.load(app, now);
-        OfficialAlertRepository.Result official = new OfficialAlertRepository(app).load(point.lat, point.lon);
-        WeatherRepository.Result weather = new WeatherRepository(app).load("local", point.lat, point.lon);
         NotificationStateStore state = new NotificationStateStore(app);
 
+        // Official state is processed before the general forecast so a slow/failing model fetch
+        // can never delay an SMN/Mendoza notification that was already retrieved successfully.
+        OfficialAlertRepository.Result official = new OfficialAlertRepository(app).load(point.lat, point.lon);
         for (NotificationPolicy.PreviousOfficial removed : state.pruneOfficial(official, now)) {
             WeatherNotifier.cancel(app, removed.notificationId);
         }
@@ -33,7 +34,15 @@ public final class NotificationUpdateWorker extends Worker {
             if (change == NotificationPolicy.OfficialChange.NONE) continue;
             int existingId = previous == null ? 0 : previous.notificationId;
             int notificationId = WeatherNotifier.notifyOfficial(app, alert, change, point.label(), now, existingId);
-            if (notificationId == 0) continue;
+            if (notificationId == 0) {
+                // If the destination channel was disabled, never leave an older lower/higher
+                // severity card visible as if it were still current.
+                if (previous != null) {
+                    WeatherNotifier.cancel(app, previous.notificationId);
+                    state.removeOfficial(previous);
+                }
+                continue;
+            }
             if (previous != null) {
                 if (previous.notificationId != notificationId) WeatherNotifier.cancel(app, previous.notificationId);
                 state.removeOfficial(previous);
@@ -41,6 +50,7 @@ public final class NotificationUpdateWorker extends Worker {
             state.markOfficial(alert, notificationId, now);
         }
 
+        WeatherRepository.Result weather = new WeatherRepository(app).load("local", point.lat, point.lon);
         if (weather.isSuccess() && weather.safeForAlerts()) {
             AlertEngine.Report report = AlertEngine.analyze(weather.forecast);
             boolean hasThunderstorm = false;
@@ -61,8 +71,14 @@ public final class NotificationUpdateWorker extends Worker {
                 if (retainedKinds.add(event.kind)) retained.add(event);
             }
 
+            // A fresh evaluation is authoritative for X10 cards. Remove both the Android card
+            // and its cooldown state when the event resolved, became low severity, or is now
+            // covered by an overlapping official alert. Stale/failed weather never clears them.
             for (AlertEngine.Kind kind : AlertEngine.Kind.values()) {
-                if (!retainedKinds.contains(kind)) WeatherNotifier.cancelX10(app, kind);
+                if (!retainedKinds.contains(kind)) {
+                    WeatherNotifier.cancelX10(app, kind);
+                    state.clearX10(kind);
+                }
             }
 
             for (AlertEngine.Event event : retained) {
