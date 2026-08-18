@@ -8,6 +8,14 @@ on:
   workflow_dispatch:
 
 jobs:
+  provider-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Provider contract smoke
+        run: python3 mendoza-meteo-native/tools/provider_smoke.py
+
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -23,8 +31,6 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.5.0'
-      - name: Provider contract smoke
-        run: python3 mendoza-meteo-native/tools/provider_smoke.py
       - name: Unit tests, lint and clean builds
         run: gradle -p mendoza-meteo-native clean testDebugUnitTest lintRelease assembleDebug assembleRelease --stacktrace
       - name: Inspect release output

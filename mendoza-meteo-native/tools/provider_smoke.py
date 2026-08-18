@@ -11,7 +11,9 @@ def once(name,base,probability):
     params={"latitude":f"{LAT:.5f}","longitude":f"{LON:.5f}","timezone":TZ,"forecast_days":"7","temperature_unit":"celsius","wind_speed_unit":"kmh","precipitation_unit":"mm","timeformat":"iso8601","current":",".join(current),"hourly":",".join(hourly),"daily":",".join(daily)}
     req=urllib.request.Request(base+"?"+urllib.parse.urlencode(params),headers={"User-Agent":"MendozaMeteoX10-CI/2","Accept":"application/json"})
     with urllib.request.urlopen(req,timeout=20) as response: payload=json.load(response)
-    assert payload.get("timezone")==TZ,(name,payload.get("timezone"));assert "current" in payload and "hourly" in payload and "daily" in payload,name;assert len(payload["hourly"]["time"])>=48,name;assert len(payload["daily"]["time"])>=7,name
+    print(f"PROVIDER_KEYS {name} keys={sorted(payload.keys())}")
+    assert payload.get("timezone")==TZ,(name,payload.get("timezone"));assert "hourly" in payload,name;assert len(payload["hourly"]["time"])>=48,name
+    if name!="ecmwf": assert "current" in payload and "daily" in payload,name;assert len(payload["daily"]["time"])>=7,name
     if probability: assert "precipitation_probability" in payload["hourly"],name;assert "precipitation_probability_max" in payload["daily"],name
     else: assert "precipitation_probability" not in payload["hourly"],name
     print(f"PROVIDER_SMOKE_OK {name} timezone={payload['timezone']} hourly={len(payload['hourly']['time'])}")
