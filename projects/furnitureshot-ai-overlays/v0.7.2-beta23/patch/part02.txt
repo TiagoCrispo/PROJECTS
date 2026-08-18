@@ -1,0 +1,165 @@
+--- beta22base/furnitureshot-ai/app/src/main/java/com/tiagocrispo/furnitureshot/processing/ArtifactDetector.kt	1970-01-01 00:00:00.000000000 +0000
++++ beta23src/furnitureshot-ai/app/src/main/java/com/tiagocrispo/furnitureshot/processing/ArtifactDetector.kt	2026-08-18 00:43:09.302554719 +0000
+@@ -0,0 +1,122 @@
++package com.tiagocrispo.furnitureshot.processing
++
++import android.graphics.Bitmap
++import android.graphics.Color
++import kotlin.math.abs
++import kotlin.math.max
++import kotlin.math.sqrt
++
++data class ArtifactReport(
++    val geometryAccepted: Boolean,
++    val edgeEnergyRatio: Float,
++    val novelEdgeRatio: Float,
++    val highlightClipRatio: Float,
++    val shadowClipRatio: Float,
++    val edgeColorShift: Float,
++    val doubleEdgeScore: Float,
++    val accepted: Boolean,
++)
++
++/**
++ * Conservative post-processing detector. It is intentionally biased toward false
++ * negatives: if a candidate looks suspicious, the pipeline should fall back to an
++ * earlier, more faithful image rather than delivering a synthetic-looking product.
++ */
++object ArtifactDetector {
++    fun evaluate(reference: Bitmap, candidate: Bitmap, alpha: FloatArray): ArtifactReport {
++        if (
++            reference.width != candidate.width || reference.height != candidate.height ||
++            alpha.size != reference.width * reference.height
++        ) {
++            return ArtifactReport(false, 0f, 1f, 1f, 1f, 1f, 1f, false)
++        }
++
++        val geometry = StructureGeometryLockEngine.evaluate(reference, candidate, alpha)
++        val width = reference.width
++        val height = reference.height
++        val ref = IntArray(width * height)
++        val cand = IntArray(width * height)
++        reference.getPixels(ref, 0, width, 0, 0, width, height)
++        candidate.getPixels(cand, 0, width, 0, 0, width, height)
++        val step = max(1, sqrt((width * height / 220_000.0)).toInt())
++
++        var refEdge = 0f
++        var candEdge = 0f
++        var count = 0
++        var hi = 0
++        var lo = 0
++        var edgeShift = 0f
++        var edgeShiftCount = 0
++        var doubled = 0
++        var strongEdges = 0
++
++        for (y in 2 until height - 2 step step) {
++            for (x in 2 until width - 2 step step) {
++                val i = y * width + x
++                if (alpha[i] < 0.70f) continue
++                count++
++                val rl = luma(ref[i])
++                val cl = luma(cand[i])
++                if (cl >= 0.985f) hi++
++                if (cl <= 0.015f) lo++
++
++                val re = edge(ref, width, i)
++                val ce = edge(cand, width, i)
++                refEdge += re
++                candEdge += ce
++
++                if (re >= 0.055f) {
++                    strongEdges++
++                    if (ce >= re * 1.85f) doubled++
++                }
++
++                val alphaEdge = max(
++                    abs(alpha[i + 1] - alpha[i - 1]),
++                    abs(alpha[i + width] - alpha[i - width]),
++                )
++                if (alphaEdge > 0.12f || re > 0.05f) {
++                    edgeShift += rgbDistance(ref[i], cand[i])
++                    edgeShiftCount++
++                }
++            }
++        }
++
++        val edgeRatio = if (refEdge <= 0.0001f) 1f else candEdge / refEdge
++        val highlight = if (count == 0) 0f else hi.toFloat() / count
++        val shadow = if (count == 0) 0f else lo.toFloat() / count
++        val meanEdgeShift = if (edgeShiftCount == 0) 0f else edgeShift / edgeShiftCount
++        val doubleEdge = if (strongEdges == 0) 0f else doubled.toFloat() / strongEdges
++        val accepted = geometry.accepted &&
++            edgeRatio in 0.78f..1.22f &&
++            geometry.novelEdgeRatio <= 0.18f &&
++            highlight <= 0.025f &&
++            shadow <= 0.025f &&
++            meanEdgeShift <= 0.075f &&
++            doubleEdge <= 0.12f
++
++        return ArtifactReport(
++            geometryAccepted = geometry.accepted,
++            edgeEnergyRatio = edgeRatio,
++            novelEdgeRatio = geometry.novelEdgeRatio,
++            highlightClipRatio = highlight,
++            shadowClipRatio = shadow,
++            edgeColorShift = meanEdgeShift,
++            doubleEdgeScore = doubleEdge,
++            accepted = accepted,
++        )
++    }
++
++    private fun edge(pixels: IntArray, width: Int, i: Int): Float = max(
++        abs(luma(pixels[i + 1]) - luma(pixels[i - 1])),
++        abs(luma(pixels[i + width]) - luma(pixels[i - width])),
++    )
++
++    private fun rgbDistance(a: Int, b: Int): Float = (
++        abs(Color.red(a) - Color.red(b)) +
++            abs(Color.green(a) - Color.green(b)) +
++            abs(Color.blue(a) - Color.blue(b))
++        ) / (255f * 3f)
++
++    private fun luma(c: Int): Float =
++        (0.2126f * Color.red(c) + 0.7152f * Color.green(c) + 0.0722f * Color.blue(c)) / 255f
++}
+diff -ruN beta22base/furnitureshot-ai/app/src/main/java/com/tiagocrispo/furnitureshot/processing/HighFrequencyRecoveryEngine.kt beta23src/furnitureshot-ai/app/src/main/java/com/tiagocrispo/furnitureshot/processing/HighFrequencyRecoveryEngine.kt
+--- beta22base/furnitureshot-ai/app/src/main/java/com/tiagocrispo/furnitureshot/processing/HighFrequencyRecoveryEngine.kt	2026-08-17 23:15:33.000000000 +0000
++++ beta23src/furnitureshot-ai/app/src/main/java/com/tiagocrispo/furnitureshot/processing/HighFrequencyRecoveryEngine.kt	2026-08-18 00:43:29.841212318 +0000
+@@ -36,6 +36,7 @@
+         processed: Bitmap,
+         alpha: FloatArray,
+         inputQuality: InputQualityReport,
++        strengthMultiplier: Float = 1f,
+     ): HighFrequencyRecoveryResult {
+         if (
+             original.width != processed.width ||
+@@ -53,7 +54,8 @@
+         val output = processed.copy(Bitmap.Config.ARGB_8888, true)
+         val noiseGuard = (1f - inputQuality.noiseScore * 0.72f).coerceIn(0.28f, 1f)
+         val blurAssist = if (inputQuality.blurScore < 0.30f) 1.08f else 1f
+-        val globalStrength = (0.42f * noiseGuard * blurAssist).coerceIn(0.16f, 0.44f)
++        val profileStrength = strengthMultiplier.coerceIn(0.45f, 1.25f)
++        val globalStrength = (0.42f * noiseGuard * blurAssist * profileStrength).coerceIn(0.14f, 0.54f)
+ 
+         var tiles = 0
+         var changed = 0L
+diff -ruN beta22base/furnitureshot-ai/app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalEnhancementEngine.kt beta23src/furnitureshot-ai/app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalEnhancementEngine.kt
+--- beta22base/furnitureshot-ai/app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalEnhancementEngine.kt	2026-08-17 23:36:00.000000000 +0000
++++ beta23src/furnitureshot-ai/app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalEnhancementEngine.kt	2026-08-18 00:46:45.216096717 +0000
+@@ -19,6 +19,7 @@
+ import com.tiagocrispo.furnitureshot.data.ImageStore
+ import com.tiagocrispo.furnitureshot.model.ProcessResult
+ import com.tiagocrispo.furnitureshot.model.ProcessSettings
++import com.tiagocrispo.furnitureshot.model.QualityProfile
+ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.ensureActive
+ import kotlinx.coroutines.tasks.await
+@@ -42,7 +43,7 @@
+             withContext(Dispatchers.Main) { onProgress(progress.coerceIn(0, 100), stage) }
+         }
+ 
+-        val primaryMaxDimension = chooseProcessingDimension(context)
++        val primaryMaxDimension = chooseProcessingDimension(context, settings.qualityProfile)
+         reportProgress(6, "Cargando foto")
+         try {
