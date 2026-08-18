@@ -17,6 +17,7 @@ final class HttpTextTransport {
     private static final int READ_TIMEOUT_MS = 5000;
     private static final int MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
     private static final int MAX_REDIRECTS = 3;
+    private static final String USER_AGENT = "MendozaMeteoX10/" + BuildConfig.VERSION_NAME;
 
     String get(String endpoint, int maxAttempts) throws WeatherException {
         return get(endpoint, maxAttempts, Collections.emptyMap());
@@ -56,7 +57,7 @@ final class HttpTextTransport {
             connection.setUseCaches(false);
             connection.setRequestProperty("Accept", "application/json,application/xml,text/xml,application/rss+xml,text/html;q=0.8,*/*;q=0.2");
             connection.setRequestProperty("Accept-Encoding", "gzip");
-            connection.setRequestProperty("User-Agent", "MendozaMeteoX10/6.5-native-dev");
+            connection.setRequestProperty("User-Agent", USER_AGENT);
             for (Map.Entry<String,String> header : headers.entrySet()) {
                 if (header.getKey() != null && header.getValue() != null) {
                     connection.setRequestProperty(header.getKey(), header.getValue());
