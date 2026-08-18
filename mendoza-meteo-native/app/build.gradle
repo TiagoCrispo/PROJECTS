@@ -10,8 +10,8 @@ android {
         applicationId 'com.mendozameteo.x10'
         minSdk 24
         targetSdk 36
-        versionCode 63
-        versionName '6.3-native-dev'
+        versionCode 64
+        versionName '6.4-native-dev'
     }
 
     buildTypes {
@@ -28,6 +28,10 @@ android {
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        options.compilerArgs += ['-Xlint:deprecation']
     }
 
     lint {
