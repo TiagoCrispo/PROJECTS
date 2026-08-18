@@ -12,10 +12,11 @@ Deliver useful weather notifications while keeping official alerts and X10 heuri
   - `official_urgent_v1`: orange/red official alerts, high importance.
   - `official_alerts_v1`: official information/advisories/yellow alerts, default importance.
   - `x10_signals_v1`: important/danger X10 heuristic signals, default importance.
+- Channel opt-outs are respected individually; a blocked channel is not recorded as successfully delivered.
 - No full-screen intents.
 - No exact alarms.
 - No foreground service.
-- WorkManager 2.11.2: 30-minute periodic work with a 10-minute flex window plus an immediate one-time sync after scheduling.
+- WorkManager 2.11.2: periodic work every 30 minutes with a 10-minute flex window and a 30-minute initial delay. There is no duplicate immediate worker while the foreground UI is already fetching the same data.
 
 ## Privacy and location
 
@@ -29,19 +30,23 @@ Official alerts always take precedence over heuristics.
 
 - New official alert: notify.
 - Official escalation: notify immediately even inside cooldown.
+- Official de-escalation: update immediately so an old higher severity cannot remain visible; the replacement is configured not to re-alert when Android can update the same notification.
 - Same-level material update: notify only after a 30-minute cooldown.
 - Identical official payload: suppress.
-- CAP/API SMN source switching can be matched by event + start-time family to reduce duplicate notifications.
+- CAP/API SMN source switching can be matched by event + start-time family to reduce duplicate notifications and reuse the existing Android notification ID.
 - CAP `references` are used to follow superseded messages.
 - Expired or cleared official alerts cancel their prior Android notification.
-- Official messages without an explicit expiry receive an internal 36-hour stale guard for cleanup only; no fabricated expiry is shown to the user.
+- Official messages without an explicit expiry receive an internal 36-hour stale guard anchored to their issue time for cleanup only; no fabricated expiry is shown to the user. On Android 8+ the same internal guard is also used as a notification timeout so a stale card cannot remain indefinitely if later background work is delayed.
 - X10 `PRECAUTION`: app-only, no push.
 - X10 `IMPORTANT` / `DANGER`: eligible for push through the existing 3-hour cooldown policy.
-- X10 rain is suppressed when a thunderstorm event already covers the same report.
-- X10 event families matching a current official alert are suppressed from push.
-- Maximum two X10 pushes per worker run.
+- X10 rain is suppressed and any prior rain push is cleared when a thunderstorm event covers the same report.
+- X10 event families matching a current official alert are suppressed from push and any prior same-family X10 card is cleared on a fresh evaluation.
+- X10 cards are removed when the fresh forecast no longer contains that retained event; on Android 8+ they also time out at the event end time.
+- At most two distinct X10 event families are retained for notification from one fresh worker evaluation.
 
-## Reliability limits
+## Retry and reliability
+
+If both official-source paths are unavailable and no official cache is usable, one WorkManager retry is requested even when the general weather forecast succeeded. The normal 30-minute periodic schedule then remains the long-term fallback.
 
 WorkManager is reliable deferred work, not a real-time push transport. Android/Doze/OEM battery policy can delay a periodic run. The app therefore must not claim second-by-second official alert delivery.
 
