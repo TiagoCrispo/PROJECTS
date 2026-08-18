@@ -20,6 +20,15 @@ public final class NotificationUpdateWorker extends Worker {
         long now = System.currentTimeMillis();
         NotificationLocation.Point point = NotificationLocation.load(app, now);
         NotificationStateStore state = new NotificationStateStore(app);
+        NotificationStateStore.LocationReset locationReset = state.syncLocationContext(point.lat, point.lon);
+        if (locationReset.changed) {
+            for (int notificationId : locationReset.officialNotificationIds) {
+                WeatherNotifier.cancel(app, notificationId);
+            }
+            for (AlertEngine.Kind kind : AlertEngine.Kind.values()) {
+                WeatherNotifier.cancelX10(app, kind);
+            }
+        }
 
         // Official state is processed before the general forecast so a slow/failing model fetch
         // can never delay an SMN/Mendoza notification that was already retrieved successfully.
