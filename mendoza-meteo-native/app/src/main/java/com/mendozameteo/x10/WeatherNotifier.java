@@ -67,6 +67,7 @@ final class WeatherNotifier {
 
         boolean urgent = alert.level == OfficialAlert.Level.ORANGE || alert.level == OfficialAlert.Level.RED;
         String channel = urgent ? CHANNEL_OFFICIAL_URGENT : CHANNEL_OFFICIAL;
+        if (!channelCanPost(manager, channel)) return 0;
         String level = alert.level == OfficialAlert.Level.UNKNOWN ? "" : alert.level.label;
         String source = alert.sourceLabel();
         String event = alert.event.isEmpty() ? alert.title() : alert.event;
@@ -93,9 +94,15 @@ final class WeatherNotifier {
                 .setShowWhen(true)
                 .setPriority(urgent ? Notification.PRIORITY_HIGH : Notification.PRIORITY_DEFAULT);
         if (Build.VERSION.SDK_INT >= 26) {
-            long timeout = alert.expiresMillis > nowMillis
-                    ? alert.expiresMillis - nowMillis
-                    : NO_EXPIRY_STALE_TIMEOUT_MILLIS;
+            long timeout;
+            if (alert.expiresMillis > nowMillis) {
+                timeout = alert.expiresMillis - nowMillis;
+            } else {
+                long base = alert.sentMillis > 0L ? alert.sentMillis : nowMillis;
+                long staleAt = base + NO_EXPIRY_STALE_TIMEOUT_MILLIS;
+                if (staleAt <= nowMillis) return 0;
+                timeout = staleAt - nowMillis;
+            }
             builder.setTimeoutAfter(timeout);
         }
 
@@ -110,7 +117,7 @@ final class WeatherNotifier {
         if (event == null || !canPost(context)) return 0;
         createChannels(context);
         NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
-        if (manager == null) return 0;
+        if (manager == null || !channelCanPost(manager, CHANNEL_X10)) return 0;
         String title = "X10 · " + event.severity.label + " · " + event.title();
         String body = event.detailText() + " · " + locationLabel
                 + ". Heurística X10: no es una alerta oficial del SMN.";
@@ -146,6 +153,12 @@ final class WeatherNotifier {
         if (notificationId == 0) return;
         NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (manager != null) manager.cancel(notificationId);
+    }
+
+    private static boolean channelCanPost(NotificationManager manager, String channelId) {
+        if (Build.VERSION.SDK_INT < 26) return true;
+        NotificationChannel channel = manager.getNotificationChannel(channelId);
+        return channel != null && channel.getImportance() != NotificationManager.IMPORTANCE_NONE;
     }
 
     private static Notification.Builder builder(Context context, String channel) {
