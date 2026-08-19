@@ -69,7 +69,19 @@ jobs:
 
           mkdir -p "$RUNNER_TEMP/src"
           unzip -q /tmp/source.zip -d "$RUNNER_TEMP/src"
-          test -f "$RUNNER_TEMP/src/WA-Vault/settings.gradle.kts"
+          PROJECT="$RUNNER_TEMP/src/WA-Vault"
+          test -f "$PROJECT/settings.gradle.kts"
+
+          for spec in \
+            "root-build.gradle.kts:$PROJECT/build.gradle.kts" \
+            "gradle.properties:$PROJECT/gradle.properties" \
+            "app-build.gradle.kts:$PROJECT/app/build.gradle.kts"; do
+            src="${spec%%:*}"
+            dest="${spec#*:}"
+            gh api "repos/${GITHUB_REPOSITORY}/contents/.wa-vault-fix/patch/${src}?ref=${SOURCE_REF}" --jq '.content' \
+              | tr -d '\n' | base64 -d > "$dest"
+          done
+
           shred -u /tmp/private.pem /tmp/aes.key /tmp/source.enc /tmp/source.b64 /tmp/key.enc || true
 
       - name: Set up JDK 17
@@ -94,11 +106,17 @@ jobs:
 
       - name: Gradle configuration
         working-directory: ${{ runner.temp }}/src/WA-Vault
-        run: gradle --no-daemon help
+        shell: bash
+        run: |
+          set +e
+          mkdir -p app/build/diagnostics
+          gradle --no-daemon help --stacktrace 2>&1 | tee app/build/diagnostics/gradle-help.log
+          code=${PIPESTATUS[0]}
+          exit "$code"
 
       - name: Unit tests
         working-directory: ${{ runner.temp }}/src/WA-Vault
-        run: gradle --no-daemon :app:testDebugUnitTest
+        run: gradle --no-daemon :app:testDebugUnitTest --stacktrace
 
       - name: Lint
         working-directory: ${{ runner.temp }}/src/WA-Vault
@@ -116,7 +134,7 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
-      - name: Upload reports
+      - name: Upload reports and diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -124,5 +142,6 @@ jobs:
           path: |
             ${{ runner.temp }}/src/WA-Vault/app/build/reports/**
             ${{ runner.temp }}/src/WA-Vault/app/build/test-results/**
+            ${{ runner.temp }}/src/WA-Vault/app/build/diagnostics/**
           retention-days: 1
           if-no-files-found: ignore
