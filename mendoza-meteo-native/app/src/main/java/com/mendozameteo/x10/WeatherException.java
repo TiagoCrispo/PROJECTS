@@ -1,6 +1,8 @@
 package com.mendozameteo.x10;
 
 final class WeatherException extends Exception {
+    private static final long serialVersionUID = 1L;
+
     enum Kind {
         OFFLINE,
         TIMEOUT,
