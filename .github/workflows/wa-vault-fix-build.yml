@@ -116,15 +116,33 @@ jobs:
 
       - name: Unit tests
         working-directory: ${{ runner.temp }}/src/WA-Vault
-        run: gradle --no-daemon :app:testDebugUnitTest --stacktrace
+        shell: bash
+        run: |
+          set +e
+          mkdir -p app/build/diagnostics
+          gradle --no-daemon :app:testDebugUnitTest --stacktrace 2>&1 | tee app/build/diagnostics/unit-tests.log
+          code=${PIPESTATUS[0]}
+          exit "$code"
 
       - name: Lint
         working-directory: ${{ runner.temp }}/src/WA-Vault
-        run: gradle --no-daemon :app:lintDebug
+        shell: bash
+        run: |
+          set +e
+          mkdir -p app/build/diagnostics
+          gradle --no-daemon :app:lintDebug --stacktrace 2>&1 | tee app/build/diagnostics/lint.log
+          code=${PIPESTATUS[0]}
+          exit "$code"
 
       - name: Assemble debug
         working-directory: ${{ runner.temp }}/src/WA-Vault
-        run: gradle --no-daemon :app:assembleDebug
+        shell: bash
+        run: |
+          set +e
+          mkdir -p app/build/diagnostics
+          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee app/build/diagnostics/assemble.log
+          code=${PIPESTATUS[0]}
+          exit "$code"
 
       - name: Upload internal validation APK
         uses: actions/upload-artifact@v4
