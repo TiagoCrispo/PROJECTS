@@ -1,0 +1,78 @@
+name: Galaxy A53 v1.19 gaming overlay build
+
+on:
+  push:
+    branches:
+      - galaxy-a53-v1.19-gaming2
+    paths:
+      - projects/galaxy-a53-performance/v1.19-overlay/**
+      - .github/workflows/galaxy-a53-v119-overlay.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - projects/galaxy-a53-performance/v1.19-overlay/**
+      - .github/workflows/galaxy-a53-v119-overlay.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-overlay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 35
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Compile v1.19 overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="projects/galaxy-a53-performance/v1.19-overlay"
+          ANDROID_JAR="$ANDROID_HOME/platforms/android-35/android.jar"
+          mkdir -p "$ROOT/build/stubs" "$ROOT/build/classes" "$ROOT/build/dex"
+
+          javac -source 8 -target 8 \
+            -cp "$ANDROID_JAR" \
+            -d "$ROOT/build/stubs" \
+            "$ROOT/stubs/com/fer/a53performance/MainActivitw.java" \
+            "$ROOT/stubs/com/fer/a53performance/ShizukuShell.java"
+
+          jar cf "$ROOT/build/base-stubs.jar" -C "$ROOT/build/stubs" .
+
+          javac -source 8 -target 8 \
+            -cp "$ANDROID_JAR:$ROOT/build/base-stubs.jar" \
+            -d "$ROOT/build/classes" \
+            "$ROOT/src/com/fer/a53performance/MainActivity.java"
+
+          mapfile -t CLASS_FILES < <(find "$ROOT/build/classes" -name '*.class' -type f | sort)
+          "$ANDROID_HOME/build-tools/35.0.0/d8" \
+            --min-api 26 \
+            --lib "$ANDROID_JAR" \
+            --output "$ROOT/build/dex" \
+            "${CLASS_FILES[@]}"
+
+          test -s "$ROOT/build/dex/classes.dex"
+          sha256sum "$ROOT/build/dex/classes.dex" | tee "$ROOT/build/overlay-sha256.txt"
+          (cd "$ROOT/build/dex" && zip -9 ../Galaxy_A53_v1.19_Gaming2_overlay.zip classes.dex)
+
+      - name: Upload overlay dex
+        uses: actions/upload-artifact@v4
+        with:
+          name: galaxy-a53-v1.19-gaming2-overlay
+          path: |
+            projects/galaxy-a53-performance/v1.19-overlay/build/Galaxy_A53_v1.19_Gaming2_overlay.zip
+            projects/galaxy-a53-performance/v1.19-overlay/build/overlay-sha256.txt
+          if-no-files-found: error
+          retention-days: 3
