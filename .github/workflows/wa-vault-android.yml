@@ -116,3 +116,55 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
           path: ${{ runner.temp }}/wavault-repro.log
+
+  emulator:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Enable KVM acceleration
+        shell: bash
+        run: |
+          if [[ -e /dev/kvm ]]; then
+            sudo chmod 666 /dev/kvm
+            ls -l /dev/kvm
+          else
+            echo 'ERROR: /dev/kvm is unavailable on this runner.' >&2
+            exit 1
+          fi
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - name: Generate pinned Gradle wrapper
+        working-directory: projects/wa-vault
+        run: |
+          gradle wrapper --gradle-version 8.13 --distribution-type bin
+          ./gradlew --version
+      - name: Android 15 instrumented acceptance
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: cd projects/wa-vault && ./gradlew connectedDebugAndroidTest --stacktrace
+      - name: Upload emulator evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wa-vault-v0.5.31-emulator-evidence
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            projects/wa-vault/app/build/reports/androidTests/connected/**
+            projects/wa-vault/app/build/outputs/androidTest-results/**
+            projects/wa-vault/app/build/outputs/apk/debug/*.apk
+            projects/wa-vault/app/build/outputs/apk/androidTest/debug/*.apk

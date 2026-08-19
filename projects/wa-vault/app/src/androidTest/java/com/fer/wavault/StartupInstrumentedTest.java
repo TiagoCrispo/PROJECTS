@@ -11,6 +11,9 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PermissionInfo;
 import android.os.Build;
+import android.os.ParcelFileDescriptor;
+import android.os.SystemClock;
+import android.provider.Settings;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
@@ -22,6 +25,7 @@ import androidx.test.platform.app.InstrumentationRegistry;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import java.io.InputStream;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -48,7 +52,39 @@ public final class StartupInstrumentedTest {
                 .putBoolean("battery_exemption_prompted",true)
                 .putBoolean("samsung_never_sleep_prompted_v034",true)
                 .putBoolean("voice_bank_auto_picker_shown",true)
-                .apply();
+                .commit();
+        grantNotificationListenerForSmokeTest();
+    }
+
+    /**
+     * MainActivity intentionally opens Android notification-listener Settings when the listener
+     * is not enabled. That is correct production behavior, but it steals foreground focus from
+     * ActivityScenario and makes lifecycle/recreate smoke tests nondeterministic. Grant the real
+     * listener through Android's shell test surface rather than weakening production startup.
+     */
+    private static void grantNotificationListenerForSmokeTest() {
+        if (notificationAccessGranted()) return;
+        String component=new ComponentName(app(),WhatsAppNotificationListener.class).flattenToShortString();
+        try {
+            ParcelFileDescriptor pfd=InstrumentationRegistry.getInstrumentation().getUiAutomation()
+                    .executeShellCommand("cmd notification allow_listener "+component);
+            try(InputStream in=new ParcelFileDescriptor.AutoCloseInputStream(pfd)) {
+                byte[] buffer=new byte[256];
+                while(in.read(buffer)!=-1) { /* drain command output and wait for completion */ }
+            }
+        } catch (Throwable t) {
+            throw new AssertionError("Unable to enable WA Vault notification listener for smoke test",t);
+        }
+        for(int i=0;i<40;i++) {
+            if(notificationAccessGranted()) return;
+            SystemClock.sleep(50L);
+        }
+        throw new AssertionError("WA Vault notification listener did not become enabled for smoke test");
+    }
+
+    private static boolean notificationAccessGranted() {
+        String flat=Settings.Secure.getString(app().getContentResolver(),"enabled_notification_listeners");
+        return flat!=null&&flat.contains(app().getPackageName());
     }
 
     @Test public void cleanLaunchDoesNotCrashAndOpensDeletedMessages() {
@@ -76,7 +112,6 @@ public final class StartupInstrumentedTest {
         assertFalse(info.exported);
         assertEquals("android.permission.BIND_NOTIFICATION_LISTENER_SERVICE",info.permission);
     }
-
 
     @Test public void android16AndPermissionSurfaceMatchesSecurityContract() throws Exception {
         PackageManager pm=app().getPackageManager();
@@ -109,6 +144,7 @@ public final class StartupInstrumentedTest {
             });
         } finally { scenario.close(); }
     }
+
     @Test public void bootReceiverAndShareProviderArePrivate() throws Exception {
         PackageManager pm=app().getPackageManager();
         ActivityInfo receiver=pm.getReceiverInfo(new ComponentName(app(),BootReceiver.class),0);
