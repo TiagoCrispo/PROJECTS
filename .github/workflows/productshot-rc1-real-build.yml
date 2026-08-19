@@ -99,7 +99,7 @@ jobs:
           "$SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose "$APK"
           "$SDK_ROOT/build-tools/36.0.0/aapt2" dump badging "$APK" | tee "$RUNNER_TEMP/productshot-badging.txt"
           grep -q "package: name='com.productshot.app.rc'" "$RUNNER_TEMP/productshot-badging.txt"
-          grep -q "sdkVersion:'29'" "$RUNNER_TEMP/productshot-badging.txt"
+          grep -q "minSdkVersion:'29'" "$RUNNER_TEMP/productshot-badging.txt"
           grep -q "targetSdkVersion:'36'" "$RUNNER_TEMP/productshot-badging.txt"
           mkdir -p "$OUT"
           cp "$APK" "$OUT/ProductShot-v0.1.0-rc1-internal.apk"
@@ -112,7 +112,7 @@ jobs:
           fi
 
       - name: Upload internal validation artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4 release line
         with:
           name: ProductShot-v0.1.0-rc1-real-build
           path: ${{ runner.temp }}/productshot-rc1-deliverables/*
