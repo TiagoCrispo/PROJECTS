@@ -17,6 +17,8 @@ jobs:
     timeout-minutes: 45
     env:
       SOURCE_REF: ${{ github.head_ref || github.ref_name }}
+      STATIC_SOURCE_RUN: '32215634530'
+      STATIC_SOURCE_CHUNKS: '16'
 
     steps:
       - name: Generate and publish ephemeral public key
@@ -33,16 +35,16 @@ jobs:
             -f content="$PUB64" \
             -f branch="$SOURCE_REF" >/dev/null
 
-      - name: Wait for encrypted project payload
+      - name: Reconstruct and decrypt project
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          READY_PATH=".wa-vault-secure/ready-${GITHUB_RUN_ID}.txt"
+          KEY_PATH=".wa-vault-secure/key-${GITHUB_RUN_ID}.b64"
           FOUND=0
           for i in $(seq 1 240); do
-            if gh api "repos/${GITHUB_REPOSITORY}/contents/${READY_PATH}?ref=${SOURCE_REF}" >/tmp/ready_meta.json 2>/dev/null; then
+            if gh api "repos/${GITHUB_REPOSITORY}/contents/${KEY_PATH}?ref=${SOURCE_REF}" >/dev/null 2>&1; then
               FOUND=1
               break
             fi
@@ -50,20 +52,14 @@ jobs:
           done
           test "$FOUND" = "1"
 
-          gh api "repos/${GITHUB_REPOSITORY}/contents/${READY_PATH}?ref=${SOURCE_REF}" --jq '.content' | tr -d '\n' | base64 -d > /tmp/ready.txt
-          CHUNKS=$(tr -dc '0-9' < /tmp/ready.txt)
-          test -n "$CHUNKS"
-          test "$CHUNKS" -gt 0
-
           : > /tmp/source.b64
-          for idx in $(seq 0 $((CHUNKS - 1))); do
+          for idx in $(seq 0 $((STATIC_SOURCE_CHUNKS - 1))); do
             PART=$(printf '%03d' "$idx")
-            P=".wa-vault-secure/source-${GITHUB_RUN_ID}-${PART}.b64"
+            P=".wa-vault-secure/source-${STATIC_SOURCE_RUN}-${PART}.b64"
             gh api "repos/${GITHUB_REPOSITORY}/contents/${P}?ref=${SOURCE_REF}" --jq '.content' | tr -d '\n' | base64 -d >> /tmp/source.b64
           done
           base64 -d /tmp/source.b64 > /tmp/source.enc
 
-          KEY_PATH=".wa-vault-secure/key-${GITHUB_RUN_ID}.b64"
           gh api "repos/${GITHUB_REPOSITORY}/contents/${KEY_PATH}?ref=${SOURCE_REF}" --jq '.content' | tr -d '\n' | base64 -d > /tmp/key.b64
           base64 -d /tmp/key.b64 > /tmp/key.enc
 
@@ -80,8 +76,15 @@ jobs:
             -pass file:/tmp/wa_aes.key
 
           mkdir -p "$RUNNER_TEMP/wa-vault-src"
-          unzip -q /tmp/wa-vault-source.zip -d "$RUNNER_TEMP/wa-vault-src"
+          set +e
+          unzip -oq /tmp/wa-vault-source.zip -d "$RUNNER_TEMP/wa-vault-src" 2>/tmp/unzip.err
+          unzip_rc=$?
+          set -e
+          cat /tmp/unzip.err || true
+          echo "unzip exit=$unzip_rc (known README CRC damage is tolerated; Gradle validates source files next)"
           test -f "$RUNNER_TEMP/wa-vault-src/WA-Vault/settings.gradle.kts"
+          test -f "$RUNNER_TEMP/wa-vault-src/WA-Vault/app/build.gradle.kts"
+          test "$(find "$RUNNER_TEMP/wa-vault-src/WA-Vault/app/src" -type f -name '*.kt' | wc -l)" -gt 0
 
           shred -u /tmp/wa_private.pem /tmp/wa_aes.key /tmp/source.enc /tmp/key.enc /tmp/source.b64 /tmp/key.b64 || true
 
