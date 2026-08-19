@@ -13,7 +13,7 @@ Debe quedar verde en el mismo SHA que se pretenda liberar:
 - `lintRelease`.
 - `assembleDebug` y `assembleRelease` limpios.
 - Build reproducible mediante `./gradlew` del repositorio, nunca un Gradle global implícito.
-- `javac -Werror`: cualquier warning de nuestro código falla el build. Solo se aíslan deprecaciones de framework necesarias para API 24–29 y warnings `classfile` originados por metadatos opcionales de dependencias externas.
+- `javac -Werror`: cualquier warning Java, salvo deprecaciones de framework necesarias para compatibilidad API 24–29, falla el build. Los metadatos Room requeridos al leer bytecode de WorkManager se suministran con `compileOnly androidx.room:room-common:2.7.0`; `classfile` no se silencia globalmente.
 - Gradle `--warning-mode fail`: cualquier warning/deprecación de Gradle falla el build.
 - `zipalign`, integridad ZIP y contrato del APK `versionCode 68` / `6.8-native-dev`.
 - APK TEST debug firmado por CI, `com.mendozameteo.x10.debug`, `6.8-native-dev-debug`, publicado automáticamente como artifact `MendozaMeteo-X10-v6.8-TEST`.
@@ -79,6 +79,6 @@ Usar una instalación limpia para el test de release; no actualizar encima de un
 
 ## Criterio de aceptación
 
-No generar ni distribuir APK final de producción mientras exista alguno de estos fallos: crash, widget que mezcle ubicaciones, dato expirado mostrado como fresco, alerta oficial duplicada por X10, notificación obsoleta que no se limpia, background location no solicitada explícitamente, tráfico HTTP claro, versión desincronizada, wrapper no verificable, warning propio no aislado/corregido, warning/deprecación Gradle o CI rojo.
+No generar ni distribuir APK final de producción mientras exista alguno de estos fallos: crash, widget que mezcle ubicaciones, dato expirado mostrado como fresco, alerta oficial duplicada por X10, notificación obsoleta que no se limpia, background location no solicitada explícitamente, tráfico HTTP claro, versión desincronizada, wrapper no verificable, warning Java no corregido/justificado, warning/deprecación Gradle o CI rojo.
 
 El APK TEST sí puede generarse cuando el gate automático está verde; su objetivo es ejecutar precisamente el smoke físico anterior antes del firmado de producción.
