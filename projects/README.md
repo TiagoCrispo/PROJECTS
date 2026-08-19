@@ -6,7 +6,6 @@ This folder contains the public-facing documentation for the projects shown on m
 
 | Project | Area |
 |---|---|
-| [Forge3D Studio](./forge3d-studio.md) | 3D tooling · Roblox · asset pipelines |
 | [ProAim](./proaim.md) | Windows · latency · diagnostics |
 | [UTN Scholar](./utn-scholar.md) | Education · documents · AI-assisted learning |
 | [BandLab](./bandlab.md) | Android · fitness · Bluetooth LE |
