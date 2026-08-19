@@ -65,7 +65,7 @@ need(perm is not None and perm.get(ANDROID+'name')=='com.fer.wavault.permission.
 need('INTERNAL_PERMISSION = "com.fer.wavault.permission.INTERNAL_EVENTS"' in notifier, 'notifier permission constant missing')
 need('sendBroadcast(i, INTERNAL_PERMISSION)' in notifier, 'internal broadcast sender not permission-protected')
 need('registerReceiver(dataChangedReceiver,f,VaultUiNotifier.INTERNAL_PERMISSION,null,Context.RECEIVER_NOT_EXPORTED)' in main, 'API33+ internal receiver not permission-protected')
-need('registerReceiver(dataChangedReceiver,f,VaultUiNotifier.INTERNAL_PERMISSION,null)' in main, 'API26-32 internal receiver not permission-protected')
+need('registerUiReceiverPre33(f)' in main and 'registerReceiver(dataChangedReceiver, filter, VaultUiNotifier.INTERNAL_PERMISSION, null)' in main and '@android.annotation.SuppressLint("UnspecifiedRegisterReceiverFlag")' in main, 'API26-32 internal receiver helper not permission-protected')
 
 # Backup/D2D leakage must be explicitly disabled, not only allowBackup=false.
 app=root.find('application')

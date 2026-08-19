@@ -208,9 +208,16 @@ public class MainActivity extends Activity {
         try{
             IntentFilter f=new IntentFilter(VaultUiNotifier.ACTION_DATA_CHANGED);
             if(Build.VERSION.SDK_INT>=33) registerReceiver(dataChangedReceiver,f,VaultUiNotifier.INTERNAL_PERMISSION,null,Context.RECEIVER_NOT_EXPORTED);
-            else registerReceiver(dataChangedReceiver,f,VaultUiNotifier.INTERNAL_PERMISSION,null);
+            else registerUiReceiverPre33(f);
             uiReceiverRegistered=true;
         }catch(Throwable ignored){}
+    }
+
+    // API 26-32 has no platform receiver-flags overload. This receiver is still protected
+    // by WA Vault's signature permission; the suppression is deliberately scoped here.
+    @android.annotation.SuppressLint("UnspecifiedRegisterReceiverFlag")
+    private void registerUiReceiverPre33(IntentFilter filter) {
+        registerReceiver(dataChangedReceiver, filter, VaultUiNotifier.INTERNAL_PERMISSION, null);
     }
 
     private void scheduleVisibleDataRefresh(String kind){

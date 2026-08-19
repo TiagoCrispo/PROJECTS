@@ -46,7 +46,7 @@ final class DownloadsExporter {
             values.put(MediaStore.MediaColumns.MIME_TYPE, mime == null || mime.isEmpty() ? "application/octet-stream" : mime);
             values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/WA Vault");
             values.put(MediaStore.MediaColumns.IS_PENDING, 1);
-            created = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+            created = insertScopedDownload(resolver, values);
             if (created == null) return false;
             try (InputStream in = new FileInputStream(readable); OutputStream out = resolver.openOutputStream(created, "w")) {
                 if (out == null) throw new IllegalStateException("No output stream");
@@ -65,6 +65,11 @@ final class DownloadsExporter {
         } finally {
             if (readable != null && !readable.equals(stored)) try { readable.delete(); } catch (Throwable ignored) {}
         }
+    }
+
+    @android.annotation.TargetApi(Build.VERSION_CODES.Q)
+    private static Uri insertScopedDownload(ContentResolver resolver, ContentValues values) {
+        return resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
     }
 
     private static File uniqueFile(File dir,String name){File f=new File(dir,name);if(!f.exists())return f;int dot=name.lastIndexOf('.');String base=dot>0?name.substring(0,dot):name,ext=dot>0?name.substring(dot):"";for(int i=2;i<1000;i++){f=new File(dir,base+"_"+i+ext);if(!f.exists())return f;}return new File(dir,System.currentTimeMillis()+"_"+name);}
