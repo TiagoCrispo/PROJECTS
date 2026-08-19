@@ -24,9 +24,13 @@ def verify_version() -> None:
     gradle = read("app/build.gradle")
     require(re.search(r"\bversionCode\s*=\s*68\b", gradle) is not None, "versionCode must be 68")
     require("versionName = '6.8-native-dev'" in gradle, "versionName must be 6.8-native-dev")
-    require("-Xlint:all,-deprecation,-classfile" in gradle,
-            "source warning audit must isolate only compatibility deprecations and third-party classfile noise")
-    require("-Werror" in gradle, "Java source warnings must fail compilation")
+    require("-Xlint:all,-deprecation" in gradle,
+            "framework deprecations must stay isolated while classfile warnings remain audited")
+    require("-classfile" not in gradle,
+            "classfile warnings must not be globally suppressed")
+    require("-Werror" in gradle, "Java warnings must fail compilation")
+    require("compileOnly 'androidx.room:room-common:2.7.0'" in gradle,
+            "WorkManager Room annotation metadata must be present on the compile classpath")
     require("buildConfig = true" in gradle, "BuildConfig generation must remain enabled for synchronized User-Agent versioning")
 
     weather_exception = read("app/src/main/java/com/mendozameteo/x10/WeatherException.java")
@@ -197,7 +201,7 @@ def main() -> None:
     verify_wrapper_contract()
     verify_ci_contract()
     verify_no_signing_material()
-    print("RELEASE_CONTRACT_OK version=6.8-native-dev code=68 source_warnings_are_errors=true compatibility_deprecations_isolated=true third_party_classfile_noise_isolated=true wrapper=gradle-9.5.0 checksum_locked=true user_agent_synced=true widget=2x2 location_bound=true clock_skew_guard=true node24_ci=true background_location=false test_apk_artifact=true")
+    print("RELEASE_CONTRACT_OK version=6.8-native-dev code=68 warnings_are_errors=true compatibility_deprecations_isolated=true third_party_classfile_metadata_resolved=true wrapper=gradle-9.5.0 checksum_locked=true user_agent_synced=true widget=2x2 location_bound=true clock_skew_guard=true node24_ci=true background_location=false test_apk_artifact=true")
 
 
 if __name__ == "__main__":
