@@ -26,6 +26,16 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - name: Enable KVM acceleration
+        shell: bash
+        run: |
+          if [[ -e /dev/kvm ]]; then
+            sudo chmod 666 /dev/kvm
+            ls -l /dev/kvm
+          else
+            echo 'ERROR: /dev/kvm is unavailable on this runner.' >&2
+            exit 1
+          fi
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
       - uses: gradle/actions/setup-gradle@v4
