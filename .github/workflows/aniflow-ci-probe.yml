@@ -1,6 +1,8 @@
 name: AniFlow CI Orchestrator
 
 on:
+  issue_comment:
+    types: [created]
   schedule:
     - cron: "34 * * * *"
   workflow_dispatch:
@@ -16,6 +18,7 @@ concurrency:
 
 jobs:
   orchestrate:
+    if: github.event_name != 'issue_comment' || github.event.comment.body == 'RUN_ANIFLOW_FINAL'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -25,9 +28,9 @@ jobs:
         run: |
           set -euo pipefail
           gh api --method POST "repos/$GITHUB_REPOSITORY/issues/34/comments" \
-            -f body="ANIFLOW_ORCHESTRATOR_START run_id=$GITHUB_RUN_ID sha=$GITHUB_SHA" || true
+            -f body="ANIFLOW_ORCHESTRATOR_START run_id=$GITHUB_RUN_ID sha=$GITHUB_SHA trigger=$GITHUB_EVENT_NAME" || true
           API="repos/$GITHUB_REPOSITORY/contents/.ci/aniflow-orchestrator-status.txt"
-          TEXT="ANIFLOW_ORCHESTRATOR_START run_id=$GITHUB_RUN_ID sha=$GITHUB_SHA"
+          TEXT="ANIFLOW_ORCHESTRATOR_START run_id=$GITHUB_RUN_ID sha=$GITHUB_SHA trigger=$GITHUB_EVENT_NAME"
           CONTENT="$(printf '%s\n' "$TEXT" | base64 -w0)"
           CURRENT_SHA="$(gh api "$API" --jq .sha 2>/dev/null || true)"
           if [ -n "$CURRENT_SHA" ]; then
