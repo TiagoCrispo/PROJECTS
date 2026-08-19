@@ -3,10 +3,10 @@ package com.fer.wavault;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageInfo;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
-import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
@@ -15,8 +15,6 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.text.SimpleDateFormat;
-import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -36,8 +34,7 @@ public final class AcceptanceActivity extends Activity {
     private SharedPreferences prefs;
     private VaultDb db;
     private TextView state;
-    private final int bg=Color.rgb(7,10,13), card=Color.rgb(18,24,31), fg=Color.rgb(246,248,250),
-            muted=Color.rgb(154,166,178), green=Color.rgb(80,220,154), amber=Color.rgb(255,190,110), red=Color.rgb(255,115,115);
+    private final int bg=Color.rgb(7,10,13), card=Color.rgb(18,24,31), fg=Color.rgb(246,248,250), muted=Color.rgb(154,166,178);
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -58,7 +55,7 @@ public final class AcceptanceActivity extends Activity {
         scroll.addView(root);
 
         TextView title=text("WA Vault Test",26,fg,true); root.addView(title);
-        TextView sub=text("Aceptación física · v"+BuildConfig.VERSION_NAME+" ("+BuildConfig.VERSION_CODE+")",13,muted,false); root.addView(sub);
+        TextView sub=text("Aceptación física · v"+installedVersionName()+" ("+installedVersionCode()+")",13,muted,false); root.addView(sub);
         TextView privacy=text("No exporta contenido de mensajes. Solo conteos, deltas y códigos de eventos.",12,muted,false); privacy.setPadding(0,dp(6),0,dp(16)); root.addView(privacy);
 
         state=text("",13,fg,false); state.setBackgroundColor(card); state.setPadding(dp(14),dp(14),dp(14),dp(14)); root.addView(state,new LinearLayout.LayoutParams(-1,-2));
@@ -104,6 +101,20 @@ public final class AcceptanceActivity extends Activity {
 
     private int dp(int v){return Math.round(v*getResources().getDisplayMetrics().density);}
     private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_SHORT).show();}
+
+    private String installedVersionName(){
+        try{
+            PackageInfo pi=getPackageManager().getPackageInfo(getPackageName(),0);
+            return pi.versionName==null?"?":pi.versionName;
+        }catch(Throwable t){return "?";}
+    }
+
+    private long installedVersionCode(){
+        try{
+            PackageInfo pi=getPackageManager().getPackageInfo(getPackageName(),0);
+            return Build.VERSION.SDK_INT>=28?pi.getLongVersionCode():pi.versionCode;
+        }catch(Throwable t){return -1L;}
+    }
 
     private void saveSnapshot(String prefix){
         VaultDb.Stats s=db.getStats();
@@ -199,7 +210,7 @@ public final class AcceptanceActivity extends Activity {
         VaultDb.Stats s=db.getStats(); long start=prefs.getLong("started_at",0);
         StringBuilder x=new StringBuilder();
         x.append("WA_VAULT_REAL_DEVICE_ACCEPTANCE\n");
-        x.append("version=").append(BuildConfig.VERSION_NAME).append(" code=").append(BuildConfig.VERSION_CODE).append('\n');
+        x.append("version=").append(installedVersionName()).append(" code=").append(installedVersionCode()).append('\n');
         x.append("device=").append(Build.MANUFACTURER).append(' ').append(Build.MODEL).append(" sdk=").append(Build.VERSION.SDK_INT).append('\n');
         x.append("generated_at=").append(System.currentTimeMillis()).append('\n');
         x.append("started_at=").append(start).append('\n');
