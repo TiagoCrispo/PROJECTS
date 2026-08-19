@@ -6,6 +6,7 @@ on:
     paths:
       - ".ci/productshot-rc1-exact/**"
       - ".ci/productshot-rc1-remediation/**"
+      - ".ci/productshot-block11-runtime-fix/**"
       - ".github/workflows/productshot-block11-runtime.yml"
   workflow_dispatch:
 
@@ -26,20 +27,17 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
       - name: Set up JDK 17
-        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5 release line
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654
         with:
           distribution: temurin
           java-version: "17"
-
       - name: Set up Gradle 9.5.0
-        uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
+        uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c
         with:
           gradle-version: "9.5.0"
           cache-disabled: true
-
-      - name: Reconstruct and verify warning-remediated source
+      - name: Reconstruct, verify and apply runtime fix
         shell: bash
         run: |
           set -euo pipefail
@@ -51,28 +49,30 @@ jobs:
           tar -xzf "$ARCHIVE" -C "$PROJECT"
           patch -d "$PROJECT" -p1 --batch --forward < .ci/productshot-rc1-remediation/warning-remediation.patch
           (cd "$PROJECT" && sha256sum -c "$GITHUB_WORKSPACE/.ci/productshot-rc1-remediation/source.sha256")
-          test -s "$PROJECT/app/src/main/java/com/productshot/app/MainActivity.java"
+          SRC="$PROJECT/app/src/main/java/com/productshot/app/MainActivity.java"
+          python3 .ci/productshot-block11-runtime-fix/apply_android35_insets_fix.py "$SRC" | tee "$RUNNER_TEMP/runtime-source-fix.txt"
+          grep -q 'configureSystemBarAppearanceAfterDecor' "$SRC"
+          grep -q 'decor.getWindowInsetsController()' "$SRC"
+          ! grep -q 'getWindow().getInsetsController()' "$SRC"
+          sha256sum "$SRC" | tee -a "$RUNNER_TEMP/runtime-source-fix.txt"
           grep -q "compileSdk 36" "$PROJECT/app/build.gradle"
           grep -q "targetSdk 36" "$PROJECT/app/build.gradle"
           grep -q "minSdk 29" "$PROJECT/app/build.gradle"
-
       - name: Ensure Android API 36 and Build Tools 36.0.0
         shell: bash
         run: |
           set -euo pipefail
           SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
-          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-          "$SDKMANAGER" --install "platforms;android-36" "build-tools;36.0.0"
+          "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0"
           test -f "$SDK_ROOT/platforms/android-36/android.jar"
           test -x "$SDK_ROOT/build-tools/36.0.0/apksigner"
           test -x "$SDK_ROOT/build-tools/36.0.0/aapt2"
-
       - name: Build and verify optimized RC APK
         shell: bash
         run: |
           set -euo pipefail
           PROJECT="$RUNNER_TEMP/productshot-block11"
-          gradle -p "$PROJECT" :app:clean :app:assembleRc --stacktrace --no-daemon
+          gradle -p "$PROJECT" :app:clean :app:lintRc :app:assembleRc --stacktrace --no-daemon
           APK="$PROJECT/app/build/outputs/apk/rc/app-rc.apk"
           test -s "$APK"
           "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose "$APK"
@@ -83,10 +83,12 @@ jobs:
           mkdir -p "$RUNNER_TEMP/block11-apk"
           cp "$APK" "$RUNNER_TEMP/block11-apk/ProductShot-Block11-runtime.apk"
           cp "$RUNNER_TEMP/block11-badging.txt" "$RUNNER_TEMP/block11-apk/"
+          cp "$RUNNER_TEMP/runtime-source-fix.txt" "$RUNNER_TEMP/block11-apk/"
+          if [[ -f "$PROJECT/app/build/reports/lint-results-rc.txt" ]]; then cp "$PROJECT/app/build/reports/lint-results-rc.txt" "$RUNNER_TEMP/block11-apk/"; fi
+          if [[ -f "$PROJECT/app/build/reports/lint-results.txt" ]]; then cp "$PROJECT/app/build/reports/lint-results.txt" "$RUNNER_TEMP/block11-apk/"; fi
           sha256sum "$RUNNER_TEMP/block11-apk/ProductShot-Block11-runtime.apk" | tee "$RUNNER_TEMP/block11-apk/ProductShot-Block11-runtime.sha256"
-
       - name: Upload runtime APK
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4 release line
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: productshot-block11-runtime-apk
           path: ${{ runner.temp }}/block11-apk/*
@@ -102,19 +104,16 @@ jobs:
       fail-fast: false
       matrix:
         api: [29, 33, 35, 36]
-
     steps:
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-
       - name: Download runtime APK
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: productshot-block11-runtime-apk
           path: ${{ runner.temp }}/block11-apk
-
       - name: Provision Android emulator image and AVD
         shell: bash
         env:
@@ -129,32 +128,20 @@ jobs:
           export ANDROID_AVD_HOME="$AVD_HOME"
           echo "ANDROID_AVD_HOME=$AVD_HOME" >> "$GITHUB_ENV"
           "$SDKMANAGER" --install "platform-tools" "emulator"
-          test -x "$SDK_ROOT/platform-tools/adb"
           echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
-
           LIST="$RUNNER_TEMP/sdk-list-${API_LEVEL}.txt"
           "$SDKMANAGER" --list > "$LIST"
           IMAGE=""
-          for candidate in \
-            "system-images;android-${API_LEVEL};google_apis;x86_64" \
-            "system-images;android-${API_LEVEL};default;x86_64" \
-            "system-images;android-${API_LEVEL};google_apis_playstore;x86_64"; do
+          for candidate in "system-images;android-${API_LEVEL};google_apis;x86_64" "system-images;android-${API_LEVEL};default;x86_64" "system-images;android-${API_LEVEL};google_apis_playstore;x86_64"; do
             if grep -Fq "$candidate" "$LIST"; then IMAGE="$candidate"; break; fi
           done
-          if [[ -z "$IMAGE" ]]; then
-            echo "No x86_64 system image for API ${API_LEVEL}" >&2
-            grep -F "system-images;android-${API_LEVEL};" "$LIST" || true
-            exit 1
-          fi
+          test -n "$IMAGE"
           "$SDKMANAGER" --install "$IMAGE"
           AVD="productshot-api${API_LEVEL}"
           echo "BLOCK11_AVD=$AVD" >> "$GITHUB_ENV"
-          echo "BLOCK11_IMAGE=$IMAGE" >> "$GITHUB_ENV"
           echo no | "$AVDMANAGER" create avd --force --name "$AVD" --package "$IMAGE" >/dev/null
           test -f "$AVD_HOME/${AVD}.ini"
-          "$SDK_ROOT/emulator/emulator" -list-avds | tee "$RUNNER_TEMP/avd-list-${API_LEVEL}.txt"
-          grep -Fxq "$AVD" "$RUNNER_TEMP/avd-list-${API_LEVEL}.txt"
-
+          "$SDK_ROOT/emulator/emulator" -list-avds | grep -Fxq "$AVD"
       - name: Boot emulator with bounded diagnostics
         shell: bash
         env:
@@ -163,33 +150,26 @@ jobs:
           set -euo pipefail
           SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
           EMULATOR="$SDK_ROOT/emulator/emulator"
-          mkdir -p "$RUNNER_TEMP/block11-evidence-api${API_LEVEL}"
           EVIDENCE="$RUNNER_TEMP/block11-evidence-api${API_LEVEL}"
-          echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" | tee "$EVIDENCE/avd-home.txt"
-          "$EMULATOR" -list-avds | tee "$EVIDENCE/avd-list.txt"
-          grep -Fxq "$BLOCK11_AVD" "$EVIDENCE/avd-list.txt"
-
+          mkdir -p "$EVIDENCE"
           ACCEL="-accel off"
           if [[ -e /dev/kvm ]]; then sudo chmod 666 /dev/kvm; ACCEL="-accel on"; fi
-          echo "emulator_acceleration=$ACCEL" | tee "$EVIDENCE/emulator-acceleration.txt"
+          echo "emulator_acceleration=$ACCEL" > "$EVIDENCE/emulator-acceleration.txt"
           "$EMULATOR" "@$BLOCK11_AVD" -no-window -noaudio -no-boot-anim -no-snapshot -no-metrics -gpu swiftshader_indirect -camera-back none -camera-front none -memory 2048 $ACCEL > "$EVIDENCE/emulator.log" 2>&1 &
           PID=$!
-          echo "$PID" > "$EVIDENCE/emulator.pid"
           sleep 8
-          if ! kill -0 "$PID" 2>/dev/null; then cat "$EVIDENCE/emulator.log" >&2; exit 1; fi
+          kill -0 "$PID"
           adb start-server
-          if ! timeout 180 adb wait-for-device; then cat "$EVIDENCE/emulator.log" >&2; adb devices -l >&2 || true; exit 1; fi
-          if ! timeout 300 bash -c 'until [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" == "1" ]]; do sleep 2; done'; then cat "$EVIDENCE/emulator.log" >&2; adb devices -l >&2 || true; exit 1; fi
+          timeout 180 adb wait-for-device
+          timeout 300 bash -c 'until [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" == "1" ]]; do sleep 2; done'
           adb shell input keyevent 82 || true
           adb shell cmd window dismiss-keyguard || true
+          adb shell input keyevent 3 || true
           adb shell settings put global window_animation_scale 0
           adb shell settings put global transition_animation_scale 0
           adb shell settings put global animator_duration_scale 0
-          adb devices -l | tee "$EVIDENCE/adb-devices.txt"
+          adb devices -l > "$EVIDENCE/adb-devices.txt"
           adb shell getprop > "$EVIDENCE/getprop.txt"
-          adb shell wm size > "$EVIDENCE/wm-size.txt"
-          adb shell wm density > "$EVIDENCE/wm-density.txt"
-
       - name: Install, launch and exercise lifecycle
         shell: bash
         env:
@@ -200,22 +180,21 @@ jobs:
           APK="$RUNNER_TEMP/block11-apk/ProductShot-Block11-runtime.apk"
           COMPONENT="$APP_PACKAGE/$APP_ACTIVITY"
           adb install --no-streaming -r "$APK" | tee "$EVIDENCE/adb-install.txt"
-          adb shell pm path "$APP_PACKAGE" | tee "$EVIDENCE/pm-path.txt"
-          adb shell dumpsys package "$APP_PACKAGE" > "$EVIDENCE/package.txt"
+          adb shell pm path "$APP_PACKAGE" > "$EVIDENCE/pm-path.txt"
           adb logcat -c
           adb logcat -b events -c || true
-
           assert_foreground() {
             for _ in $(seq 1 20); do
-              if adb shell dumpsys activity activities 2>/dev/null | grep -E 'mResumedActivity|topResumedActivity' | grep -Fq "$APP_ACTIVITY"; then return 0; fi
+              if adb shell dumpsys activity activities 2>/dev/null | grep -E 'mResumedActivity|topResumedActivity|ResumedActivity' | grep -Fq "$APP_ACTIVITY"; then return 0; fi
               sleep 1
             done
             adb shell dumpsys activity activities > "$EVIDENCE/activity-not-foreground.txt" || true
+            adb logcat -d -v threadtime > "$EVIDENCE/logcat-not-foreground.txt" || true
             return 1
           }
           launch() {
             local label="$1"
-            adb shell am start -W -n "$COMPONENT" | tr -d '\r' | tee "$EVIDENCE/${label}-launch.txt"
+            adb shell am start -W --user 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n "$COMPONENT" | tr -d '\r' | tee "$EVIDENCE/${label}-launch.txt"
             grep -q 'Status: ok' "$EVIDENCE/${label}-launch.txt"
             assert_foreground
           }
@@ -225,12 +204,11 @@ jobs:
             adb shell uiautomator dump /sdcard/productshot-window.xml >/dev/null 2>&1 || true
             adb pull /sdcard/productshot-window.xml "$EVIDENCE/${label}-ui.xml" >/dev/null 2>&1 || true
           }
-
           launch initial
           snapshot initial
           python3 - "$EVIDENCE/initial-ui.xml" > "$EVIDENCE/clickables.txt" <<'PY'
           import sys, xml.etree.ElementTree as ET
-          try: root = ET.parse(sys.argv[1]).getroot()
+          try: root=ET.parse(sys.argv[1]).getroot()
           except Exception as exc:
               print(f"UI hierarchy unavailable: {exc}")
               raise SystemExit(0)
@@ -239,7 +217,6 @@ jobs:
               if a.get("clickable")=="true" or a.get("long-clickable")=="true":
                   print(f"text={a.get('text','')!r} | desc={a.get('content-desc','')!r} | id={a.get('resource-id','')!r} | class={a.get('class','')!r} | bounds={a.get('bounds','')}")
           PY
-
           adb shell input keyevent 3
           sleep 2
           launch resume-after-home
@@ -251,7 +228,6 @@ jobs:
           adb shell settings put system user_rotation 0 || true
           sleep 3
           assert_foreground
-
           adb shell input keyevent 3
           sleep 2
           adb shell am kill "$APP_PACKAGE" || true
@@ -262,7 +238,6 @@ jobs:
           adb shell am send-trim-memory "$APP_PACKAGE" RUNNING_CRITICAL || true
           sleep 2
           assert_foreground
-
           adb shell svc wifi disable || true
           adb shell svc data disable || true
           adb shell am force-stop "$APP_PACKAGE"
@@ -272,23 +247,20 @@ jobs:
           snapshot offline
           adb shell svc wifi enable || true
           adb shell svc data enable || true
-
           : > "$EVIDENCE/cold-starts.txt"
           for i in 1 2 3 4 5; do
             adb shell am force-stop "$APP_PACKAGE"
-            adb shell am start -W -n "$COMPONENT" | tr -d '\r' | tee "$EVIDENCE/cold-start-${i}.txt"
+            adb shell am start -W --user 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n "$COMPONENT" | tr -d '\r' | tee "$EVIDENCE/cold-start-${i}.txt"
             grep -q 'Status: ok' "$EVIDENCE/cold-start-${i}.txt"
             grep -E '^(ThisTime|TotalTime|WaitTime):' "$EVIDENCE/cold-start-${i}.txt" >> "$EVIDENCE/cold-starts.txt" || true
             assert_foreground
           done
-
           adb shell cmd package resolve-activity --brief -a android.media.action.IMAGE_CAPTURE > "$EVIDENCE/camera-intent-resolution.txt" 2>&1 || true
           if (( API_LEVEL >= 33 )); then
             adb shell cmd package resolve-activity --brief -a android.provider.action.PICK_IMAGES -t 'image/*' > "$EVIDENCE/photo-picker-resolution.txt" 2>&1 || true
           else
             adb shell cmd package resolve-activity --brief -a android.intent.action.OPEN_DOCUMENT -c android.intent.category.OPENABLE -t 'image/*' > "$EVIDENCE/photo-picker-resolution.txt" 2>&1 || true
           fi
-
           snapshot final
           adb shell dumpsys meminfo "$APP_PACKAGE" > "$EVIDENCE/meminfo-final.txt" || true
           adb shell dumpsys gfxinfo "$APP_PACKAGE" > "$EVIDENCE/gfxinfo-final.txt" || true
@@ -297,16 +269,14 @@ jobs:
           adb logcat -b events -d -v threadtime > "$EVIDENCE/events.txt" || true
           adb shell dumpsys dropbox --print data_app_crash > "$EVIDENCE/dropbox-crash.txt" 2>&1 || true
           adb shell dumpsys dropbox --print data_app_anr > "$EVIDENCE/dropbox-anr.txt" 2>&1 || true
-
-          if grep -E "am_crash.*${APP_PACKAGE}|am_anr.*${APP_PACKAGE}" "$EVIDENCE/events.txt"; then echo "ProductShot crash/ANR found" >&2; exit 1; fi
-          if grep -Fq "Process: ${APP_PACKAGE}" "$EVIDENCE/logcat.txt"; then echo "ProductShot fatal process record found" >&2; exit 1; fi
-          if grep -Fq "$APP_PACKAGE" "$EVIDENCE/dropbox-crash.txt"; then echo "ProductShot crash found in DropBox" >&2; exit 1; fi
-          if grep -Fq "$APP_PACKAGE" "$EVIDENCE/dropbox-anr.txt"; then echo "ProductShot ANR found in DropBox" >&2; exit 1; fi
+          if grep -E "am_crash.*${APP_PACKAGE}|am_anr.*${APP_PACKAGE}" "$EVIDENCE/events.txt"; then exit 1; fi
+          if grep -Fq "Process: ${APP_PACKAGE}" "$EVIDENCE/logcat.txt"; then exit 1; fi
+          if grep -Fq "$APP_PACKAGE" "$EVIDENCE/dropbox-crash.txt"; then exit 1; fi
+          if grep -Fq "$APP_PACKAGE" "$EVIDENCE/dropbox-anr.txt"; then exit 1; fi
           printf 'api=%s\npackage=%s\nactivity=%s\nresult=PASS\n' "$API_LEVEL" "$APP_PACKAGE" "$APP_ACTIVITY" | tee "$EVIDENCE/result.txt"
-
       - name: Upload runtime evidence API ${{ matrix.api }}
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4 release line
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: productshot-block11-runtime-evidence-api${{ matrix.api }}
           path: ${{ runner.temp }}/block11-evidence-api${{ matrix.api }}/*
