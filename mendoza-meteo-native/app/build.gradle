@@ -1,0 +1,56 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace = 'com.mendozameteo.x10'
+    compileSdk = 36
+
+    defaultConfig {
+        applicationId = 'com.mendozameteo.x10'
+        minSdk = 24
+        targetSdk = 36
+        versionCode = 68
+        versionName = '6.8-native-dev'
+    }
+
+    buildFeatures {
+        buildConfig = true
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled = false
+            shrinkResources = false
+        }
+        debug {
+            applicationIdSuffix = '.debug'
+            versionNameSuffix = '-debug'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        // Android 24-29 compatibility paths still require deprecated framework APIs.
+        // Keep every other javac warning fatal. WorkManager 2.11.2 references Room
+        // BINARY annotations, so room-common is supplied compile-only below instead
+        // of hiding classfile warnings globally.
+        options.compilerArgs += ['-Xlint:all,-deprecation', '-Werror']
+    }
+
+    lint {
+        abortOnError = true
+        checkReleaseBuilds = true
+    }
+}
+
+dependencies {
+    implementation 'androidx.work:work-runtime:2.11.2'
+    compileOnly 'androidx.room:room-common:2.7.0'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20260719'
+}
