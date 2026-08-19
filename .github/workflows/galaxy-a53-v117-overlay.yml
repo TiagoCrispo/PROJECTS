@@ -54,6 +54,27 @@ jobs:
             -d "$ROOT/build/classes" \
             "$ROOT/src/com/fer/a53performance/MainActivity.java"
 
+          # The original DEX family is renamed MainActivity -> MainActivitx in the
+          # final package. Patch the compile-only superclass reference before D8;
+          # both names are the same byte length, and D8 then creates a correctly
+          # sorted type/string table instead of hand-editing it afterward.
+          python3 - <<'PY'
+          from pathlib import Path
+          root = Path("projects/galaxy-a53-performance/v1.17-overlay/build/classes")
+          old = b"com/fer/a53performance/BaseActivity"
+          new = b"com/fer/a53performance/MainActivitx"
+          assert len(old) == len(new)
+          changed = 0
+          for path in root.rglob("*.class"):
+              data = path.read_bytes()
+              updated = data.replace(old, new)
+              if updated != data:
+                  path.write_bytes(updated)
+                  changed += 1
+          assert changed >= 1, "Superclass reference not found"
+          print("patched classfiles:", changed)
+          PY
+
           mapfile -t CLASS_FILES < <(find "$ROOT/build/classes" -name '*.class' -type f | sort)
           "$ANDROID_HOME/build-tools/35.0.0/d8" \
             --min-api 26 \
