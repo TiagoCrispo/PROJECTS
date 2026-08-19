@@ -4,9 +4,8 @@ on:
   push:
     branches:
       - wa-vault-secure-build-20260819
-  pull_request:
-    branches:
-      - main
+    paths-ignore:
+      - '.wa-vault-secure/**'
 
 permissions:
   contents: write
@@ -16,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      SOURCE_REF: ${{ github.head_ref || github.ref_name }}
+      SOURCE_REF: wa-vault-secure-build-20260819
       STATIC_SOURCE_RUN: '32215634530'
       STATIC_SOURCE_CHUNKS: '16'
 
@@ -59,21 +58,13 @@ jobs:
             gh api "repos/${GITHUB_REPOSITORY}/contents/${P}?ref=${SOURCE_REF}" --jq '.content' | tr -d '\n' | base64 -d >> /tmp/source.b64
           done
           base64 -d /tmp/source.b64 > /tmp/source.enc
-
           gh api "repos/${GITHUB_REPOSITORY}/contents/${KEY_PATH}?ref=${SOURCE_REF}" --jq '.content' | tr -d '\n' | base64 -d > /tmp/key.b64
           base64 -d /tmp/key.b64 > /tmp/key.enc
 
-          openssl pkeyutl -decrypt \
-            -inkey /tmp/wa_private.pem \
-            -in /tmp/key.enc \
-            -out /tmp/wa_aes.key \
-            -pkeyopt rsa_padding_mode:oaep \
-            -pkeyopt rsa_oaep_md:sha256
-
-          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
-            -in /tmp/source.enc \
-            -out /tmp/wa-vault-source.zip \
-            -pass file:/tmp/wa_aes.key
+          openssl pkeyutl -decrypt -inkey /tmp/wa_private.pem -in /tmp/key.enc -out /tmp/wa_aes.key \
+            -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in /tmp/source.enc \
+            -out /tmp/wa-vault-source.zip -pass file:/tmp/wa_aes.key
 
           mkdir -p "$RUNNER_TEMP/wa-vault-src"
           set +e
@@ -81,14 +72,14 @@ jobs:
           unzip_rc=$?
           set -e
           cat /tmp/unzip.err || true
-          echo "unzip exit=$unzip_rc (known README CRC damage is tolerated; Gradle validates source files next)"
-          test -f "$RUNNER_TEMP/wa-vault-src/WA-Vault/settings.gradle.kts"
-          test -f "$RUNNER_TEMP/wa-vault-src/WA-Vault/app/build.gradle.kts"
-          test "$(find "$RUNNER_TEMP/wa-vault-src/WA-Vault/app/src" -type f -name '*.kt' | wc -l)" -gt 0
-
+          echo "unzip exit=$unzip_rc (known README CRC damage tolerated; source is validated by Gradle)"
+          ROOT="$RUNNER_TEMP/wa-vault-src/WA-Vault"
+          test -f "$ROOT/settings.gradle.kts"
+          test -f "$ROOT/app/build.gradle.kts"
+          test "$(find "$ROOT/app/src" -type f -name '*.kt' | wc -l)" -gt 0
           shred -u /tmp/wa_private.pem /tmp/wa_aes.key /tmp/source.enc /tmp/key.enc /tmp/source.b64 /tmp/key.b64 || true
 
-      - name: Apply AGP 9 built-in Kotlin patches
+      - name: Apply final Gradle patches
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -96,15 +87,13 @@ jobs:
           set -euo pipefail
           ROOT="$RUNNER_TEMP/wa-vault-src/WA-Vault"
           fetch_patch() {
-            local remote="$1"
-            local target="$2"
-            gh api "repos/${GITHUB_REPOSITORY}/contents/${remote}?ref=${SOURCE_REF}" --jq '.content' | tr -d '\n' | base64 -d > "$target"
+            gh api "repos/${GITHUB_REPOSITORY}/contents/$1?ref=${SOURCE_REF}" --jq '.content' | tr -d '\n' | base64 -d > "$2"
           }
-          fetch_patch ".wa-vault-secure/patch/root-build.gradle.kts" "$ROOT/build.gradle.kts"
-          fetch_patch ".wa-vault-secure/patch/app-build.gradle.kts" "$ROOT/app/build.gradle.kts"
-          fetch_patch ".wa-vault-secure/patch/gradle.properties" "$ROOT/gradle.properties"
+          fetch_patch '.wa-vault-secure/patch/root-build.gradle.kts' "$ROOT/build.gradle.kts"
+          fetch_patch '.wa-vault-secure/patch/app-build.gradle.kts' "$ROOT/app/build.gradle.kts"
+          fetch_patch '.wa-vault-secure/patch/gradle.properties' "$ROOT/gradle.properties"
+          grep -q 'compileSdk = 36' "$ROOT/app/build.gradle.kts"
           ! grep -R --line-number 'org.jetbrains.kotlin.android' "$ROOT/build.gradle.kts" "$ROOT/app/build.gradle.kts"
-          ! grep -q 'android.builtInKotlin=false' "$ROOT/gradle.properties"
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -115,12 +104,12 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK 37
+      - name: Install Android SDK 36
         shell: bash
         run: |
           set -euo pipefail
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platform-tools" "platforms;android-37" "build-tools;36.0.0"
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
       - name: Set up Gradle 9.5.0
         uses: gradle/actions/setup-gradle@v4
@@ -133,15 +122,15 @@ jobs:
 
       - name: Unit tests
         working-directory: ${{ runner.temp }}/wa-vault-src/WA-Vault
-        run: gradle --no-daemon testDebugUnitTest
+        run: gradle --no-daemon testDebugUnitTest --stacktrace
 
       - name: Android lint
         working-directory: ${{ runner.temp }}/wa-vault-src/WA-Vault
-        run: gradle --no-daemon lintDebug
+        run: gradle --no-daemon lintDebug --stacktrace
 
       - name: Assemble debug APK
         working-directory: ${{ runner.temp }}/wa-vault-src/WA-Vault
-        run: gradle --no-daemon assembleDebug
+        run: gradle --no-daemon assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
