@@ -45,6 +45,10 @@ Final APK verification:
 
 The signed APK contains the same application ZIP entries and byte-identical entry payloads as the CI-generated unsigned R8 release; only the APK signing block differs.
 
+## Repository hygiene
+
+The temporary source bootstrap, temporary signing-tool export workflow and obsolete build-environment guide were removed after validation. Forge3D was removed from the public portfolio index and its project page was deleted before merge. The repository retains only the canonical WA Vault source, active regression tests and maintained documentation.
+
 ## Acceptance boundary
 
 The repository can assert build/reproducibility/signature verification. `PRODUCTION_VERIFIED` is intentionally withheld until installation, launch, logcat, force-stop/process-death, reboot and real WhatsApp deletion/media acceptance are executed on a physical Android device.
