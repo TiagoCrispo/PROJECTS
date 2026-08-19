@@ -22,14 +22,18 @@ def require(condition: bool, message: str) -> None:
 
 def verify_version() -> None:
     gradle = read("app/build.gradle")
-    require(re.search(r"\bversionCode\s*=\s*67\b", gradle) is not None, "versionCode must be 67")
-    require("versionName = '6.7-native-dev'" in gradle, "versionName must be 6.7-native-dev")
-    require("-Xlint:all,-deprecation" in gradle,
-            "framework deprecations must stay isolated while other javac warnings remain audited")
-    require("-Werror" in gradle, "Java warnings must fail compilation")
+    require(re.search(r"\bversionCode\s*=\s*68\b", gradle) is not None, "versionCode must be 68")
+    require("versionName = '6.8-native-dev'" in gradle, "versionName must be 6.8-native-dev")
+    require("-Xlint:all,-deprecation,-classfile" in gradle,
+            "source warning audit must isolate only compatibility deprecations and third-party classfile noise")
+    require("-Werror" in gradle, "Java source warnings must fail compilation")
     require("buildConfig = true" in gradle, "BuildConfig generation must remain enabled for synchronized User-Agent versioning")
 
+    weather_exception = read("app/src/main/java/com/mendozameteo/x10/WeatherException.java")
+    require("serialVersionUID" in weather_exception, "WeatherException must not emit serialization warnings")
+
     forbidden = (
+        "6.7-native-dev", "versionCode 67", "versionCode = 67", "v6.7",
         "6.6-native-dev", "versionCode 66", "versionCode = 66", "v6.6",
         "6.5-native-dev", "versionCode 65", "versionCode = 65", "v6.5",
         "6.4-native-dev", "versionCode 64", "versionCode = 64", "v6.4",
@@ -169,10 +173,10 @@ def verify_ci_contract() -> None:
     require("./gradlew" in workflow, "CI must build through the committed Gradle Wrapper")
     require("gradle-version:" not in workflow, "CI must not provision a separate global Gradle version")
     require("wrapper-bootstrap:" not in workflow, "one-shot wrapper bootstrap job must be removed")
-    require("versionCode='67'" in workflow, "APK CI contract must inspect versionCode 67")
-    require("versionName='6.7-native-dev'" in workflow, "release APK CI contract must inspect v6.7")
-    require("versionName='6.7-native-dev-debug'" in workflow, "debug APK CI contract must inspect v6.7 debug build")
-    require("MendozaMeteo-X10-v6.7-TEST" in workflow, "installable test artifact name must stay synchronized")
+    require("versionCode='68'" in workflow, "APK CI contract must inspect versionCode 68")
+    require("versionName='6.8-native-dev'" in workflow, "release APK CI contract must inspect v6.8")
+    require("versionName='6.8-native-dev-debug'" in workflow, "debug APK CI contract must inspect v6.8 debug build")
+    require("MendozaMeteo-X10-v6.8-TEST" in workflow, "installable test artifact name must stay synchronized")
     require(not (REPO / ".github/workflows/bootstrap-gradle-wrapper.yml").exists(),
             "temporary wrapper bootstrap workflow must be deleted")
 
@@ -193,7 +197,7 @@ def main() -> None:
     verify_wrapper_contract()
     verify_ci_contract()
     verify_no_signing_material()
-    print("RELEASE_CONTRACT_OK version=6.7-native-dev code=67 warnings_are_errors=true framework_deprecations_isolated=true wrapper=gradle-9.5.0 checksum_locked=true user_agent_synced=true widget=2x2 location_bound=true clock_skew_guard=true node24_ci=true background_location=false test_apk_artifact=true")
+    print("RELEASE_CONTRACT_OK version=6.8-native-dev code=68 source_warnings_are_errors=true compatibility_deprecations_isolated=true third_party_classfile_noise_isolated=true wrapper=gradle-9.5.0 checksum_locked=true user_agent_synced=true widget=2x2 location_bound=true clock_skew_guard=true node24_ci=true background_location=false test_apk_artifact=true")
 
 
 if __name__ == "__main__":
