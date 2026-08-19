@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - ".ci/productshot-rc1-exact/**"
+      - ".ci/productshot-rc1-clean/**"
       - ".github/workflows/productshot-rc1-real-build.yml"
   workflow_dispatch:
 
@@ -40,10 +40,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ARCHIVE="$RUNNER_TEMP/productshot-rc1-android.tar.gz"
+          ARCHIVE="$GITHUB_WORKSPACE/.ci/productshot-rc1-clean/android.tar.gz"
           PROJECT="$RUNNER_TEMP/productshot-rc1"
-          cat .ci/productshot-rc1-exact/android.tar.gz.b64.x* | tr -d '\r\n' | base64 -d > "$ARCHIVE"
-          echo "0108434bf6b1f4f37e745ac35878e909be4b42e8d38dfd27c3aedde698e2f573  $ARCHIVE" | sha256sum -c -
+          echo "930cfa0c2a9471e449e95e3f6628555fdd5392f482fd5be83c12bb05b6846022  $ARCHIVE" | sha256sum -c -
           mkdir -p "$PROJECT"
           tar -xzf "$ARCHIVE" -C "$PROJECT"
           test -s "$PROJECT/app/src/main/java/com/productshot/app/MainActivity.java"
@@ -53,6 +52,9 @@ jobs:
           grep -q "minSdk 29" "$PROJECT/app/build.gradle"
           grep -q 'android:authorities="${applicationId}.files"' "$PROJECT/app/src/main/AndroidManifest.xml"
           grep -q 'BuildConfig.APPLICATION_ID + ".files"' "$PROJECT/app/src/main/java/com/productshot/app/ShareFileProvider.java"
+          test -s "$PROJECT/app/src/main/res/xml/full_backup_rules.xml"
+          test -s "$PROJECT/app/src/main/res/xml/data_extraction_rules.xml"
+          grep -q '<monochrome' "$PROJECT/app/src/main/res/mipmap-anydpi/ic_launcher.xml"
 
       - name: Ensure Android API 36 and Build Tools 36.0.0
         shell: bash
@@ -109,6 +111,9 @@ jobs:
             cp "$PROJECT/app/build/reports/lint-results-rc.txt" "$OUT/"
           elif [[ -f "$PROJECT/app/build/reports/lint-results.txt" ]]; then
             cp "$PROJECT/app/build/reports/lint-results.txt" "$OUT/"
+          fi
+          if [[ -f "$PROJECT/app/build/reports/lint-results-rc.html" ]]; then
+            cp "$PROJECT/app/build/reports/lint-results-rc.html" "$OUT/"
           fi
 
       - name: Upload internal validation artifact
