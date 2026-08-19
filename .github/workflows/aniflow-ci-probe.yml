@@ -1,14 +1,44 @@
-name: AniFlow CI Probe
+name: AniFlow CI Orchestrator
 
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - "projects/aniflow/**"
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+concurrency:
+  group: aniflow-ci-orchestrator
+  cancel-in-progress: false
 
 jobs:
-  probe:
+  orchestrate:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
-      - run: echo "ANIFLOW_CI_PROBE_OK"
+      - name: Announce orchestrator
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST "repos/$GITHUB_REPOSITORY/issues/34/comments" \
+            -f body="ANIFLOW_ORCHESTRATOR_START run_id=$GITHUB_RUN_ID sha=$GITHUB_SHA"
+
+      - name: Dispatch final AniFlow gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          BEFORE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          gh workflow run aniflow-smoke.yml --repo "$GITHUB_REPOSITORY" --ref main
+          FINAL_RUN_ID=""
+          for attempt in $(seq 1 12); do
+            FINAL_RUN_ID="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow aniflow-smoke.yml --event workflow_dispatch --limit 10 --json databaseId,createdAt --jq '[.[] | select(.createdAt >= "'"$BEFORE"'")] | sort_by(.createdAt) | reverse | .[0].databaseId // empty')"
+            [ -n "$FINAL_RUN_ID" ] && break
+            sleep 5
+          done
+          test -n "$FINAL_RUN_ID"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/issues/34/comments" \
+            -f body="ANIFLOW_FINAL_DISPATCHED final_run_id=$FINAL_RUN_ID orchestrator_run_id=$GITHUB_RUN_ID"
