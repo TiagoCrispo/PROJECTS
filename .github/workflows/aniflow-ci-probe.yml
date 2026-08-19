@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   actions: write
   issues: write
 
@@ -23,8 +23,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           gh api --method POST "repos/$GITHUB_REPOSITORY/issues/34/comments" \
-            -f body="ANIFLOW_ORCHESTRATOR_START run_id=$GITHUB_RUN_ID sha=$GITHUB_SHA"
+            -f body="ANIFLOW_ORCHESTRATOR_START run_id=$GITHUB_RUN_ID sha=$GITHUB_SHA" || true
+          API="repos/$GITHUB_REPOSITORY/contents/.ci/aniflow-orchestrator-status.txt"
+          TEXT="ANIFLOW_ORCHESTRATOR_START run_id=$GITHUB_RUN_ID sha=$GITHUB_SHA"
+          CONTENT="$(printf '%s\n' "$TEXT" | base64 -w0)"
+          CURRENT_SHA="$(gh api "$API" --jq .sha 2>/dev/null || true)"
+          if [ -n "$CURRENT_SHA" ]; then
+            gh api --method PUT "$API" -f message="Update AniFlow orchestrator status" -f content="$CONTENT" -f sha="$CURRENT_SHA" -f branch="main" >/dev/null
+          else
+            gh api --method PUT "$API" -f message="Create AniFlow orchestrator status" -f content="$CONTENT" -f branch="main" >/dev/null
+          fi
 
       - name: Dispatch final AniFlow gate
         env:
@@ -39,5 +49,9 @@ jobs:
             sleep 5
           done
           test -n "$FINAL_RUN_ID"
-          gh api --method POST "repos/$GITHUB_REPOSITORY/issues/34/comments" \
-            -f body="ANIFLOW_FINAL_DISPATCHED final_run_id=$FINAL_RUN_ID orchestrator_run_id=$GITHUB_RUN_ID"
+          TEXT="ANIFLOW_FINAL_DISPATCHED final_run_id=$FINAL_RUN_ID orchestrator_run_id=$GITHUB_RUN_ID"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/issues/34/comments" -f body="$TEXT" || true
+          API="repos/$GITHUB_REPOSITORY/contents/.ci/aniflow-orchestrator-status.txt"
+          CONTENT="$(printf '%s\n' "$TEXT" | base64 -w0)"
+          CURRENT_SHA="$(gh api "$API" --jq .sha)"
+          gh api --method PUT "$API" -f message="Record AniFlow final run id" -f content="$CONTENT" -f sha="$CURRENT_SHA" -f branch="main" >/dev/null
