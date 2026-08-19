@@ -9,7 +9,7 @@ on:
       - main
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -19,16 +19,19 @@ jobs:
       SOURCE_REF: ${{ github.head_ref || github.ref_name }}
 
     steps:
-      - name: Generate ephemeral encryption key
+      - name: Generate and publish ephemeral public key
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out /tmp/wa_private.pem >/dev/null 2>&1
           openssl pkey -in /tmp/wa_private.pem -pubout -out /tmp/wa_public.pem
-          echo "WA_VAULT_PUBLIC_KEY_BEGIN"
-          base64 -w0 /tmp/wa_public.pem
-          echo
-          echo "WA_VAULT_PUBLIC_KEY_END"
+          PUB64=$(base64 -w0 /tmp/wa_public.pem)
+          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/.wa-vault-secure/public-${GITHUB_RUN_ID}.pem" \
+            -f message="chore: publish ephemeral WA Vault build key [skip ci]" \
+            -f content="$PUB64" \
+            -f branch="$SOURCE_REF" >/dev/null
 
       - name: Wait for encrypted project payload
         shell: bash
@@ -36,11 +39,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          SOURCE_PATH=".wa-vault-secure/source-${GITHUB_RUN_ID}.enc"
+          KEY_PATH=".wa-vault-secure/key-${GITHUB_RUN_ID}.enc"
           FOUND=0
-          for i in $(seq 1 120); do
-            if gh api "repos/${GITHUB_REPOSITORY}/contents/.wa-vault-secure/source.enc?ref=${SOURCE_REF}" >/tmp/source_meta.json 2>/dev/null; then
-              gh api "repos/${GITHUB_REPOSITORY}/contents/.wa-vault-secure/source.enc?ref=${SOURCE_REF}" --jq '.content' | tr -d '\n' | base64 -d > /tmp/source.enc
-              gh api "repos/${GITHUB_REPOSITORY}/contents/.wa-vault-secure/key.enc?ref=${SOURCE_REF}" --jq '.content' | tr -d '\n' | base64 -d > /tmp/key.enc
+          for i in $(seq 1 240); do
+            if gh api "repos/${GITHUB_REPOSITORY}/contents/${SOURCE_PATH}?ref=${SOURCE_REF}" >/tmp/source_meta.json 2>/dev/null; then
+              gh api "repos/${GITHUB_REPOSITORY}/contents/${SOURCE_PATH}?ref=${SOURCE_REF}" --jq '.content' | tr -d '\n' | base64 -d > /tmp/source.enc
+              gh api "repos/${GITHUB_REPOSITORY}/contents/${KEY_PATH}?ref=${SOURCE_REF}" --jq '.content' | tr -d '\n' | base64 -d > /tmp/key.enc
               FOUND=1
               break
             fi
