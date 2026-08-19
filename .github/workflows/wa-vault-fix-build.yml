@@ -30,11 +30,12 @@ jobs:
             -f content="$PUB64" \
             -f branch="$SOURCE_REF" >/dev/null
 
-      - name: Wait for encrypted source
+      - name: Wait for encrypted key and reconstruct source
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_REF: wa-vault-fix-build-20260819
+          PAYLOAD_ID: '32219925637'
         run: |
           set -euo pipefail
           READY=".wa-vault-fix/ready-${GITHUB_RUN_ID}.txt"
@@ -45,21 +46,31 @@ jobs:
           gh api "repos/${GITHUB_REPOSITORY}/contents/${READY}?ref=${SOURCE_REF}" >/dev/null
 
           KEY_PATH=".wa-vault-fix/key-${GITHUB_RUN_ID}.b64"
-          SOURCE_PATH=".wa-vault-fix/source-${GITHUB_RUN_ID}.b64"
           gh api "repos/${GITHUB_REPOSITORY}/contents/${KEY_PATH}?ref=${SOURCE_REF}" --jq '.content' | tr -d '\n' | base64 -d | base64 -d > /tmp/key.enc
-          gh api "repos/${GITHUB_REPOSITORY}/contents/${SOURCE_PATH}?ref=${SOURCE_REF}" --jq '.content' | tr -d '\n' | base64 -d | base64 -d > /tmp/source.enc
           test -s /tmp/key.enc
-          test -s /tmp/source.enc
+
+          : > /tmp/source.b64
+          idx=0
+          while true; do
+            chunk=$(printf ".wa-vault-fix/source-%s-%03d.b64" "$PAYLOAD_ID" "$idx")
+            if ! gh api "repos/${GITHUB_REPOSITORY}/contents/${chunk}?ref=${SOURCE_REF}" >/dev/null 2>&1; then break; fi
+            gh api "repos/${GITHUB_REPOSITORY}/contents/${chunk}?ref=${SOURCE_REF}" --jq '.content' | tr -d '\n' | base64 -d >> /tmp/source.b64
+            idx=$((idx+1))
+          done
+          test "$idx" -eq 11
+          test "$(wc -c < /tmp/source.b64)" -eq 100928
+          base64 -d /tmp/source.b64 > /tmp/source.enc
 
           openssl pkeyutl -decrypt -inkey /tmp/private.pem -in /tmp/key.enc -out /tmp/aes.key \
             -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256
           openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
             -in /tmp/source.enc -out /tmp/source.zip -pass file:/tmp/aes.key
+          unzip -t /tmp/source.zip >/dev/null
 
           mkdir -p "$RUNNER_TEMP/src"
           unzip -q /tmp/source.zip -d "$RUNNER_TEMP/src"
           test -f "$RUNNER_TEMP/src/WA-Vault/settings.gradle.kts"
-          shred -u /tmp/private.pem /tmp/aes.key /tmp/source.enc /tmp/key.enc || true
+          shred -u /tmp/private.pem /tmp/aes.key /tmp/source.enc /tmp/source.b64 /tmp/key.enc || true
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
