@@ -501,7 +501,7 @@ public class MainActivity extends MainActivitz {
         if (snap == null) {
             snap = captureSnapshot(app);
             if (snap == null) return new ApplyResult(false, "No pude confirmar el estado previo · NO se cambió nada");
-            saveSnapshot(app.pkg, snap);
+            if (!saveSnapshot(app.pkg, snap)) return new ApplyResult(false, "No pude persistir el snapshot · NO se cambió nada");
         }
 
         boolean ok;
@@ -644,12 +644,12 @@ public class MainActivity extends MainActivitz {
     private String val(String s) { return s == null ? "NC" : s; }
     private String boolVal(Boolean b) { return b == null ? "NC" : (b.booleanValue() ? "ON" : "OFF"); }
 
-    private void saveSnapshot(String pkg, Snapshot snap) {
-        bgPrefs.edit()
+    private boolean saveSnapshot(String pkg, Snapshot snap) {
+        return bgPrefs.edit()
                 .putString("snap.mode." + pkg, snap.appOpMode)
                 .putBoolean("snap.wl." + pkg, snap.whitelist)
                 .putBoolean("snap.bl." + pkg, snap.blacklist)
-                .apply();
+                .commit();
     }
 
     private Snapshot loadSnapshot(String pkg) {
