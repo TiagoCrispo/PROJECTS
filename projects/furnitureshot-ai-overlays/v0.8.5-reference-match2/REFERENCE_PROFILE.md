@@ -1,0 +1,1 @@
+SOURCE-IS-TRUTH catalog reference profile for v0.8.5. The source image owns all geometry and material identity; the development reference only informs neutral studio background, tonal density, highlight chroma restraint, luma-only microcontrast, composition breathing room and conservative grounding.
