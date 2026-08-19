@@ -1,6 +1,6 @@
 # Mendoza Meteo X10 — Notification subsystem
 
-Documentación vigente para `6.6-native-dev` (`versionCode 66`).
+Documentación vigente para `6.7-native-dev` (`versionCode 67`).
 
 ## Goal
 
@@ -60,4 +60,4 @@ The SMN origin currently returns HTTP 403 to GitHub-hosted runners, so CI record
 
 ## Release verification
 
-The project is built with the committed Gradle Wrapper 9.5.0. CI validates the wrapper checksum, runs unit tests, Lint and clean debug/release builds, and inspects the resulting release APK contract. Java compilation uses `-Werror` and Gradle uses `--warning-mode fail`, so a warning/deprecation cannot remain hidden behind a green release gate. Physical Samsung/One UI validation remains mandatory before generating/distributing the final APK.
+The project is built with the committed Gradle Wrapper 9.5.0. CI validates the wrapper checksum, runs unit tests, Lint and clean debug/release builds, inspects both APK contracts and publishes the signed debug APK as `MendozaMeteo-X10-v6.7-TEST`. Java compilation keeps non-deprecation warnings fatal with `-Werror`; Android framework deprecations needed by the API 24–29 compatibility layer are isolated temporarily. Gradle uses `--warning-mode fail`, so build/tooling warnings cannot remain hidden behind a green release gate. Physical Samsung/One UI validation remains mandatory before generating/distributing the final production APK.
