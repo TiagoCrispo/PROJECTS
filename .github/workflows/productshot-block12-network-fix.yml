@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - ".ci/productshot-block11-runtime-fix/apply_bounded_network_fix.py"
+      - ".ci/productshot-block11-runtime-fix/apply_android35_insets_fix.py"
       - ".github/workflows/productshot-block12-network-fix.yml"
   workflow_dispatch:
 
@@ -44,7 +44,6 @@ jobs:
           (cd "$PROJECT" && sha256sum -c "$GITHUB_WORKSPACE/.ci/productshot-rc1-remediation/source.sha256")
           SRC="$PROJECT/app/src/main/java/com/productshot/app/MainActivity.java"
           python3 .ci/productshot-block11-runtime-fix/apply_android35_insets_fix.py "$SRC" | tee "$RUNNER_TEMP/block12-source-fix.txt"
-          python3 .ci/productshot-block11-runtime-fix/apply_bounded_network_fix.py "$SRC" | tee -a "$RUNNER_TEMP/block12-source-fix.txt"
           grep -q 'MAX_CREATE_NETWORK_FAILURES = 3' "$SRC"
           grep -q 'DEFAULT_API_BASE.contains(".invalid")' "$SRC"
           grep -q 'networkFailures >= MAX_CREATE_NETWORK_FAILURES' "$SRC"
