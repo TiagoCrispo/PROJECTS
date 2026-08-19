@@ -20,6 +20,7 @@ jobs:
     timeout-minutes: 80
     env:
       ANIFLOW_ROOT: /tmp/aniflow-rc9
+      AVD_NAME: aniflow_api30
 
     steps:
       - name: Announce run
@@ -41,7 +42,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: "9.5.0", cache-read-only: true }
 
-      - name: Materialize RC8 and apply verified RC9 v3
+      - name: Materialize RC8 and apply verified RC9 v4
         shell: bash
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
@@ -53,8 +54,8 @@ jobs:
           unzip -q /tmp/aniflow-rc8-artifact/AniFlow-v1.0.7-rc8-source.zip -d "$ANIFLOW_ROOT"
           grep -q 'versionCode = 1000008' "$ANIFLOW_ROOT/app/build.gradle.kts"
           grep -q 'versionName = "1.0.7-rc8"' "$ANIFLOW_ROOT/app/build.gradle.kts"
-          cat .ci/rc9v3/part01.b64 .ci/rc9v3/part02.b64 .ci/rc9v3/part03.b64 | base64 -d | gzip -dc > /tmp/aniflow-rc9.patch
-          echo "8b554c769d730b00a4647da9dbbbfd29f16fe15e33d4b7bd4233e3fffac4231a  /tmp/aniflow-rc9.patch" | sha256sum -c -
+          cat .ci/rc9v4/part01.b64 | base64 -d | gzip -dc > /tmp/aniflow-rc9.patch
+          echo "03f194e7bb0990fcfab591233ad140ee8d1a36e795e3f3214da7f5f450609736  /tmp/aniflow-rc9.patch" | sha256sum -c -
           cd "$ANIFLOW_ROOT"
           patch -p1 --forward --batch < /tmp/aniflow-rc9.patch
           grep -q 'versionCode = 1000009' app/build.gradle.kts
@@ -66,6 +67,7 @@ jobs:
           grep -q 'BaselineProfileRule' benchmark/src/main/java/com/aniflow/benchmark/BaselineProfileGenerator.kt
           ! grep -q 'id("androidx.baselineprofile")' app/build.gradle.kts
           ! grep -q 'id("androidx.baselineprofile")' benchmark/build.gradle.kts
+          ! grep -q 'managedDevices\|ManagedVirtualDevice\|androidComponents' benchmark/build.gradle.kts
 
       - name: Regression guards Blocks 2-13
         shell: bash
@@ -88,17 +90,46 @@ jobs:
       - name: Gradle configuration + unit tests
         run: gradle -p "$ANIFLOW_ROOT" help :app:testDebugUnitTest --stacktrace --no-daemon
 
-      - name: Compile benchmark variants
-        run: gradle -p "$ANIFLOW_ROOT" :benchmark:assembleProfile :benchmark:assembleBenchmark --stacktrace --no-daemon
-
-      - name: Generate Baseline Profile manually on managed Pixel 6
+      - name: Discover benchmark tasks
         shell: bash
         run: |
           set -euo pipefail
-          PROFILE_TASK="$(gradle -p "$ANIFLOW_ROOT" -q :benchmark:tasks --all | awk '/^pixel6Api30.*ProfileAndroidTest([[:space:]]|$)/ {print $1; exit}')"
-          echo "PROFILE_TASK=$PROFILE_TASK"
-          test -n "$PROFILE_TASK"
-          gradle -p "$ANIFLOW_ROOT" ":benchmark:$PROFILE_TASK" --stacktrace --no-daemon -Pandroid.testInstrumentationRunnerArguments.class=com.aniflow.benchmark.BaselineProfileGenerator
+          gradle -p "$ANIFLOW_ROOT" -q :benchmark:tasks --all | tee /tmp/benchmark-tasks.txt
+          grep -E 'connected(Profile|Benchmark)AndroidTest' /tmp/benchmark-tasks.txt
+          grep -q '^connectedProfileAndroidTest' /tmp/benchmark-tasks.txt
+          grep -q '^connectedBenchmarkAndroidTest' /tmp/benchmark-tasks.txt
+
+      - name: Compile benchmark variants
+        run: gradle -p "$ANIFLOW_ROOT" :benchmark:assembleProfile :benchmark:assembleBenchmark --stacktrace --no-daemon
+
+      - name: Boot connected ATD
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo no | avdmanager create avd --force --name "$AVD_NAME" --package "system-images;android-30;aosp_atd;x86_64"
+          nohup emulator -avd "$AVD_NAME" \
+            -no-window -no-audio -no-boot-anim -no-snapshot -wipe-data \
+            -gpu swiftshader_indirect -camera-back none -camera-front none \
+            > /tmp/aniflow-emulator.log 2>&1 &
+          echo $! > /tmp/aniflow-emulator.pid
+          adb wait-for-device
+          timeout 240 bash -c 'until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = "1" ]; do sleep 2; done'
+          adb root || true
+          adb wait-for-device
+          timeout 120 bash -c 'until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = "1" ]; do sleep 2; done'
+          adb shell settings put global window_animation_scale 0 || true
+          adb shell settings put global transition_animation_scale 0 || true
+          adb shell settings put global animator_duration_scale 0 || true
+          adb shell input keyevent 82 || true
+          adb devices -l
+          adb shell getprop ro.build.version.sdk
+
+      - name: Generate Baseline Profile on connected ATD
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle -p "$ANIFLOW_ROOT" :benchmark:connectedProfileAndroidTest --stacktrace --no-daemon \
+            -Pandroid.testInstrumentationRunnerArguments.class=com.aniflow.benchmark.BaselineProfileGenerator
           GENERATED="$(find "$ANIFLOW_ROOT/benchmark/build/outputs" -type f -name '*baseline-prof.txt' -print | head -n 1)"
           echo "GENERATED_PROFILE=$GENERATED"
           test -n "$GENERATED"
@@ -111,15 +142,22 @@ jobs:
       - name: Build benchmark target with embedded profile
         run: gradle -p "$ANIFLOW_ROOT" :app:assembleBenchmark --stacktrace --no-daemon
 
-      - name: Run startup Macrobenchmarks
+      - name: Run startup Macrobenchmarks on connected ATD
         shell: bash
         run: |
           set -euo pipefail
-          BENCH_TASK="$(gradle -p "$ANIFLOW_ROOT" -q :benchmark:tasks --all | awk '/^pixel6Api30.*BenchmarkAndroidTest([[:space:]]|$)/ {print $1; exit}')"
-          echo "MACROBENCHMARK_TASK=$BENCH_TASK"
-          test -n "$BENCH_TASK"
-          gradle -p "$ANIFLOW_ROOT" ":benchmark:$BENCH_TASK" --stacktrace --no-daemon -Pandroid.testInstrumentationRunnerArguments.class=com.aniflow.benchmark.StartupBenchmarks
-          find "$ANIFLOW_ROOT/benchmark/build/outputs" -type f \( -name '*benchmarkData.json' -o -name '*.perfetto-trace' \) -print | head -n 20 || true
+          gradle -p "$ANIFLOW_ROOT" :benchmark:connectedBenchmarkAndroidTest --stacktrace --no-daemon \
+            -Pandroid.testInstrumentationRunnerArguments.class=com.aniflow.benchmark.StartupBenchmarks
+          find "$ANIFLOW_ROOT/benchmark/build/outputs" -type f \( -name '*benchmarkData.json' -o -name '*.perfetto-trace' \) -print | head -n 40 || true
+          find "$ANIFLOW_ROOT/benchmark/build/outputs" -type f -name '*benchmarkData.json' -print -exec cat {} \; > /tmp/startup-benchmark-evidence.txt || true
+          test -s /tmp/startup-benchmark-evidence.txt
+
+      - name: Stop connected ATD
+        if: always()
+        shell: bash
+        run: |
+          adb emu kill || true
+          test ! -f /tmp/aniflow-emulator.log || tail -n 120 /tmp/aniflow-emulator.log
 
       - name: Android lint
         run: gradle -p "$ANIFLOW_ROOT" :app:lintDebug --stacktrace --no-daemon
@@ -164,6 +202,7 @@ jobs:
           cp "$ANIFLOW_ROOT/app/build/outputs/apk/debug/app-debug.apk" "$OUT/AniFlow-v1.0.8-rc9-debug.apk"
           cp "$RUNNER_TEMP/apk-sha256.txt" "$RUNNER_TEMP/apk-badging.txt" "$RUNNER_TEMP/baseline-apk-entries.txt" "$OUT/"
           cp "$ANIFLOW_ROOT/app/src/main/baseline-prof.txt" "$OUT/baseline-prof.txt"
+          cp /tmp/startup-benchmark-evidence.txt "$OUT/startup-benchmark-evidence.txt"
           find "$ANIFLOW_ROOT/benchmark/build/outputs" -type f \( -name '*benchmarkData.json' -o -name '*.perfetto-trace' -o -name '*baseline-prof.txt' \) -exec cp --parents {} "$OUT/" \; || true
           test ! -f "$ANIFLOW_ROOT/app/build/reports/lint-results-debug.html" || cp "$ANIFLOW_ROOT/app/build/reports/lint-results-debug.html" "$OUT/"
 
