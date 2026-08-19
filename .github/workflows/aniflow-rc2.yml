@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: aniflow-rc2-build
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   android-rc2:
