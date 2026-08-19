@@ -2,7 +2,7 @@ name: AniFlow CI Orchestrator
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "34 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -31,9 +31,9 @@ jobs:
           CONTENT="$(printf '%s\n' "$TEXT" | base64 -w0)"
           CURRENT_SHA="$(gh api "$API" --jq .sha 2>/dev/null || true)"
           if [ -n "$CURRENT_SHA" ]; then
-            gh api --method PUT "$API" -f message="Update AniFlow orchestrator status" -f content="$CONTENT" -f sha="$CURRENT_SHA" -f branch="main" >/dev/null
+            gh api --method PUT "$API" -f message="Update AniFlow orchestrator status" -f content="$CONTENT" -f sha="$CURRENT_SHA" -f branch="main" >/dev/null || true
           else
-            gh api --method PUT "$API" -f message="Create AniFlow orchestrator status" -f content="$CONTENT" -f branch="main" >/dev/null
+            gh api --method PUT "$API" -f message="Create AniFlow orchestrator status" -f content="$CONTENT" -f branch="main" >/dev/null || true
           fi
 
       - name: Dispatch final AniFlow gate
@@ -53,5 +53,7 @@ jobs:
           gh api --method POST "repos/$GITHUB_REPOSITORY/issues/34/comments" -f body="$TEXT" || true
           API="repos/$GITHUB_REPOSITORY/contents/.ci/aniflow-orchestrator-status.txt"
           CONTENT="$(printf '%s\n' "$TEXT" | base64 -w0)"
-          CURRENT_SHA="$(gh api "$API" --jq .sha)"
-          gh api --method PUT "$API" -f message="Record AniFlow final run id" -f content="$CONTENT" -f sha="$CURRENT_SHA" -f branch="main" >/dev/null
+          CURRENT_SHA="$(gh api "$API" --jq .sha 2>/dev/null || true)"
+          if [ -n "$CURRENT_SHA" ]; then
+            gh api --method PUT "$API" -f message="Record AniFlow final run id" -f content="$CONTENT" -f sha="$CURRENT_SHA" -f branch="main" >/dev/null || true
+          fi
