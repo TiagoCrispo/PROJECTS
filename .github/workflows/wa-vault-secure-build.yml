@@ -88,6 +88,24 @@ jobs:
 
           shred -u /tmp/wa_private.pem /tmp/wa_aes.key /tmp/source.enc /tmp/key.enc /tmp/source.b64 /tmp/key.b64 || true
 
+      - name: Apply AGP 9 built-in Kotlin patches
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/wa-vault-src/WA-Vault"
+          fetch_patch() {
+            local remote="$1"
+            local target="$2"
+            gh api "repos/${GITHUB_REPOSITORY}/contents/${remote}?ref=${SOURCE_REF}" --jq '.content' | tr -d '\n' | base64 -d > "$target"
+          }
+          fetch_patch ".wa-vault-secure/patch/root-build.gradle.kts" "$ROOT/build.gradle.kts"
+          fetch_patch ".wa-vault-secure/patch/app-build.gradle.kts" "$ROOT/app/build.gradle.kts"
+          fetch_patch ".wa-vault-secure/patch/gradle.properties" "$ROOT/gradle.properties"
+          ! grep -R --line-number 'org.jetbrains.kotlin.android' "$ROOT/build.gradle.kts" "$ROOT/app/build.gradle.kts"
+          ! grep -q 'android.builtInKotlin=false' "$ROOT/gradle.properties"
+
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
