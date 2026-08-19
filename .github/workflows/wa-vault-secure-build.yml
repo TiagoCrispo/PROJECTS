@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - wa-vault-secure-build-20260819
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -12,6 +15,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      SOURCE_REF: ${{ github.head_ref || github.ref_name }}
 
     steps:
       - name: Generate ephemeral encryption key
@@ -33,9 +38,9 @@ jobs:
           set -euo pipefail
           FOUND=0
           for i in $(seq 1 120); do
-            if gh api "repos/${GITHUB_REPOSITORY}/contents/.wa-vault-secure/source.enc?ref=${GITHUB_REF_NAME}" >/tmp/source_meta.json 2>/dev/null; then
-              gh api "repos/${GITHUB_REPOSITORY}/contents/.wa-vault-secure/source.enc?ref=${GITHUB_REF_NAME}" --jq '.content' | tr -d '\n' | base64 -d > /tmp/source.enc
-              gh api "repos/${GITHUB_REPOSITORY}/contents/.wa-vault-secure/key.enc?ref=${GITHUB_REF_NAME}" --jq '.content' | tr -d '\n' | base64 -d > /tmp/key.enc
+            if gh api "repos/${GITHUB_REPOSITORY}/contents/.wa-vault-secure/source.enc?ref=${SOURCE_REF}" >/tmp/source_meta.json 2>/dev/null; then
+              gh api "repos/${GITHUB_REPOSITORY}/contents/.wa-vault-secure/source.enc?ref=${SOURCE_REF}" --jq '.content' | tr -d '\n' | base64 -d > /tmp/source.enc
+              gh api "repos/${GITHUB_REPOSITORY}/contents/.wa-vault-secure/key.enc?ref=${SOURCE_REF}" --jq '.content' | tr -d '\n' | base64 -d > /tmp/key.enc
               FOUND=1
               break
             fi
