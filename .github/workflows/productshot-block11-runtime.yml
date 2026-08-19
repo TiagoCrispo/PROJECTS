@@ -2,8 +2,7 @@ name: ProductShot Block 11 Android runtime matrix
 
 on:
   pull_request:
-    branches:
-      - main
+    branches: [main]
     paths:
       - ".ci/productshot-rc1-exact/**"
       - ".ci/productshot-rc1-remediation/**"
@@ -22,7 +21,6 @@ jobs:
     name: Build checksum-verified runtime APK
     runs-on: ubuntu-24.04
     timeout-minutes: 35
-
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -52,10 +50,7 @@ jobs:
           mkdir -p "$PROJECT"
           tar -xzf "$ARCHIVE" -C "$PROJECT"
           patch -d "$PROJECT" -p1 --batch --forward < .ci/productshot-rc1-remediation/warning-remediation.patch
-          (
-            cd "$PROJECT"
-            sha256sum -c "$GITHUB_WORKSPACE/.ci/productshot-rc1-remediation/source.sha256"
-          )
+          (cd "$PROJECT" && sha256sum -c "$GITHUB_WORKSPACE/.ci/productshot-rc1-remediation/source.sha256")
           test -s "$PROJECT/app/src/main/java/com/productshot/app/MainActivity.java"
           grep -q "compileSdk 36" "$PROJECT/app/build.gradle"
           grep -q "targetSdk 36" "$PROJECT/app/build.gradle"
@@ -66,10 +61,7 @@ jobs:
         run: |
           set -euo pipefail
           SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
-          test -n "$SDK_ROOT"
           SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-          if [[ ! -x "$SDKMANAGER" ]]; then SDKMANAGER="$(command -v sdkmanager || true)"; fi
-          test -x "$SDKMANAGER"
           "$SDKMANAGER" --install "platforms;android-36" "build-tools;36.0.0"
           test -f "$SDK_ROOT/platforms/android-36/android.jar"
           test -x "$SDK_ROOT/build-tools/36.0.0/apksigner"
@@ -105,7 +97,7 @@ jobs:
     name: Runtime API ${{ matrix.api }}
     needs: build-runtime-apk
     runs-on: ubuntu-24.04
-    timeout-minutes: 50
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -123,20 +115,19 @@ jobs:
           name: productshot-block11-runtime-apk
           path: ${{ runner.temp }}/block11-apk
 
-      - name: Provision Android emulator image
+      - name: Provision Android emulator image and AVD
         shell: bash
         env:
           API_LEVEL: ${{ matrix.api }}
         run: |
           set -euo pipefail
           SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
-          test -n "$SDK_ROOT"
           SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
           AVDMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/avdmanager"
-          if [[ ! -x "$SDKMANAGER" ]]; then SDKMANAGER="$(command -v sdkmanager || true)"; fi
-          if [[ ! -x "$AVDMANAGER" ]]; then AVDMANAGER="$(command -v avdmanager || true)"; fi
-          test -x "$SDKMANAGER"
-          test -x "$AVDMANAGER"
+          AVD_HOME="$RUNNER_TEMP/android-avd"
+          mkdir -p "$AVD_HOME"
+          export ANDROID_AVD_HOME="$AVD_HOME"
+          echo "ANDROID_AVD_HOME=$AVD_HOME" >> "$GITHUB_ENV"
           "$SDKMANAGER" --install "platform-tools" "emulator"
           test -x "$SDK_ROOT/platform-tools/adb"
           echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
@@ -148,23 +139,23 @@ jobs:
             "system-images;android-${API_LEVEL};google_apis;x86_64" \
             "system-images;android-${API_LEVEL};default;x86_64" \
             "system-images;android-${API_LEVEL};google_apis_playstore;x86_64"; do
-            if grep -Fq "$candidate" "$LIST"; then
-              IMAGE="$candidate"
-              break
-            fi
+            if grep -Fq "$candidate" "$LIST"; then IMAGE="$candidate"; break; fi
           done
           if [[ -z "$IMAGE" ]]; then
-            echo "No x86_64 emulator system image found for API ${API_LEVEL}" >&2
+            echo "No x86_64 system image for API ${API_LEVEL}" >&2
             grep -F "system-images;android-${API_LEVEL};" "$LIST" || true
             exit 1
           fi
-          echo "BLOCK11_IMAGE=$IMAGE" >> "$GITHUB_ENV"
           "$SDKMANAGER" --install "$IMAGE"
           AVD="productshot-api${API_LEVEL}"
           echo "BLOCK11_AVD=$AVD" >> "$GITHUB_ENV"
+          echo "BLOCK11_IMAGE=$IMAGE" >> "$GITHUB_ENV"
           echo no | "$AVDMANAGER" create avd --force --name "$AVD" --package "$IMAGE" >/dev/null
+          test -f "$AVD_HOME/${AVD}.ini"
+          "$SDK_ROOT/emulator/emulator" -list-avds | tee "$RUNNER_TEMP/avd-list-${API_LEVEL}.txt"
+          grep -Fxq "$AVD" "$RUNNER_TEMP/avd-list-${API_LEVEL}.txt"
 
-      - name: Boot emulator
+      - name: Boot emulator with bounded diagnostics
         shell: bash
         env:
           API_LEVEL: ${{ matrix.api }}
@@ -172,42 +163,32 @@ jobs:
           set -euo pipefail
           SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
           EMULATOR="$SDK_ROOT/emulator/emulator"
-          test -x "$EMULATOR"
-          command -v adb
           mkdir -p "$RUNNER_TEMP/block11-evidence-api${API_LEVEL}"
           EVIDENCE="$RUNNER_TEMP/block11-evidence-api${API_LEVEL}"
+          echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" | tee "$EVIDENCE/avd-home.txt"
+          "$EMULATOR" -list-avds | tee "$EVIDENCE/avd-list.txt"
+          grep -Fxq "$BLOCK11_AVD" "$EVIDENCE/avd-list.txt"
 
           ACCEL="-accel off"
-          if [[ -e /dev/kvm ]]; then
-            sudo chmod 666 /dev/kvm
-            ACCEL="-accel on"
-          fi
+          if [[ -e /dev/kvm ]]; then sudo chmod 666 /dev/kvm; ACCEL="-accel on"; fi
           echo "emulator_acceleration=$ACCEL" | tee "$EVIDENCE/emulator-acceleration.txt"
-          "$EMULATOR" "@$BLOCK11_AVD" \
-            -no-window \
-            -noaudio \
-            -no-boot-anim \
-            -no-snapshot \
-            -no-metrics \
-            -gpu swiftshader_indirect \
-            -camera-back none \
-            -camera-front none \
-            -memory 2048 \
-            $ACCEL \
-            > "$EVIDENCE/emulator.log" 2>&1 &
-          echo $! > "$EVIDENCE/emulator.pid"
-
-          adb wait-for-device
-          timeout 420 bash -c 'until [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" == "1" ]]; do sleep 2; done'
+          "$EMULATOR" "@$BLOCK11_AVD" -no-window -noaudio -no-boot-anim -no-snapshot -no-metrics -gpu swiftshader_indirect -camera-back none -camera-front none -memory 2048 $ACCEL > "$EVIDENCE/emulator.log" 2>&1 &
+          PID=$!
+          echo "$PID" > "$EVIDENCE/emulator.pid"
+          sleep 8
+          if ! kill -0 "$PID" 2>/dev/null; then cat "$EVIDENCE/emulator.log" >&2; exit 1; fi
+          adb start-server
+          if ! timeout 180 adb wait-for-device; then cat "$EVIDENCE/emulator.log" >&2; adb devices -l >&2 || true; exit 1; fi
+          if ! timeout 300 bash -c 'until [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" == "1" ]]; do sleep 2; done'; then cat "$EVIDENCE/emulator.log" >&2; adb devices -l >&2 || true; exit 1; fi
           adb shell input keyevent 82 || true
           adb shell cmd window dismiss-keyguard || true
           adb shell settings put global window_animation_scale 0
           adb shell settings put global transition_animation_scale 0
           adb shell settings put global animator_duration_scale 0
+          adb devices -l | tee "$EVIDENCE/adb-devices.txt"
           adb shell getprop > "$EVIDENCE/getprop.txt"
           adb shell wm size > "$EVIDENCE/wm-size.txt"
           adb shell wm density > "$EVIDENCE/wm-density.txt"
-          adb shell df -h > "$EVIDENCE/df.txt"
 
       - name: Install, launch and exercise lifecycle
         shell: bash
@@ -218,7 +199,6 @@ jobs:
           EVIDENCE="$RUNNER_TEMP/block11-evidence-api${API_LEVEL}"
           APK="$RUNNER_TEMP/block11-apk/ProductShot-Block11-runtime.apk"
           COMPONENT="$APP_PACKAGE/$APP_ACTIVITY"
-          test -s "$APK"
           adb install --no-streaming -r "$APK" | tee "$EVIDENCE/adb-install.txt"
           adb shell pm path "$APP_PACKAGE" | tee "$EVIDENCE/pm-path.txt"
           adb shell dumpsys package "$APP_PACKAGE" > "$EVIDENCE/package.txt"
@@ -227,22 +207,18 @@ jobs:
 
           assert_foreground() {
             for _ in $(seq 1 20); do
-              if adb shell dumpsys activity activities 2>/dev/null | grep -E 'mResumedActivity|topResumedActivity' | grep -Fq "$APP_ACTIVITY"; then
-                return 0
-              fi
+              if adb shell dumpsys activity activities 2>/dev/null | grep -E 'mResumedActivity|topResumedActivity' | grep -Fq "$APP_ACTIVITY"; then return 0; fi
               sleep 1
             done
             adb shell dumpsys activity activities > "$EVIDENCE/activity-not-foreground.txt" || true
             return 1
           }
-
           launch() {
             local label="$1"
             adb shell am start -W -n "$COMPONENT" | tr -d '\r' | tee "$EVIDENCE/${label}-launch.txt"
             grep -q 'Status: ok' "$EVIDENCE/${label}-launch.txt"
             assert_foreground
           }
-
           snapshot() {
             local label="$1"
             adb exec-out screencap -p > "$EVIDENCE/${label}.png" || true
@@ -252,31 +228,21 @@ jobs:
 
           launch initial
           snapshot initial
-
           python3 - "$EVIDENCE/initial-ui.xml" > "$EVIDENCE/clickables.txt" <<'PY'
           import sys, xml.etree.ElementTree as ET
-          path = sys.argv[1]
-          try:
-              root = ET.parse(path).getroot()
+          try: root = ET.parse(sys.argv[1]).getroot()
           except Exception as exc:
               print(f"UI hierarchy unavailable: {exc}")
               raise SystemExit(0)
           for n in root.iter("node"):
-              a = n.attrib
-              if a.get("clickable") == "true" or a.get("long-clickable") == "true":
-                  print(" | ".join([
-                      f"text={a.get('text','')!r}",
-                      f"desc={a.get('content-desc','')!r}",
-                      f"id={a.get('resource-id','')!r}",
-                      f"class={a.get('class','')!r}",
-                      f"bounds={a.get('bounds','')}",
-                  ]))
+              a=n.attrib
+              if a.get("clickable")=="true" or a.get("long-clickable")=="true":
+                  print(f"text={a.get('text','')!r} | desc={a.get('content-desc','')!r} | id={a.get('resource-id','')!r} | class={a.get('class','')!r} | bounds={a.get('bounds','')}")
           PY
 
           adb shell input keyevent 3
           sleep 2
           launch resume-after-home
-
           adb shell settings put system accelerometer_rotation 0 || true
           adb shell settings put system user_rotation 1 || true
           sleep 3
@@ -291,11 +257,8 @@ jobs:
           adb shell am kill "$APP_PACKAGE" || true
           sleep 2
           launch relaunch-after-am-kill
-
           adb shell am force-stop "$APP_PACKAGE"
-          sleep 1
           launch relaunch-after-force-stop
-
           adb shell am send-trim-memory "$APP_PACKAGE" RUNNING_CRITICAL || true
           sleep 2
           assert_foreground
@@ -304,7 +267,7 @@ jobs:
           adb shell svc data disable || true
           adb shell am force-stop "$APP_PACKAGE"
           launch offline-cold-start
-          sleep 3
+          sleep 2
           assert_foreground
           snapshot offline
           adb shell svc wifi enable || true
@@ -327,7 +290,6 @@ jobs:
           fi
 
           snapshot final
-          adb shell dumpsys activity activities > "$EVIDENCE/activity-final.txt" || true
           adb shell dumpsys meminfo "$APP_PACKAGE" > "$EVIDENCE/meminfo-final.txt" || true
           adb shell dumpsys gfxinfo "$APP_PACKAGE" > "$EVIDENCE/gfxinfo-final.txt" || true
           adb shell dumpsys activity exit-info "$APP_PACKAGE" > "$EVIDENCE/exit-info.txt" 2>&1 || true
@@ -336,23 +298,10 @@ jobs:
           adb shell dumpsys dropbox --print data_app_crash > "$EVIDENCE/dropbox-crash.txt" 2>&1 || true
           adb shell dumpsys dropbox --print data_app_anr > "$EVIDENCE/dropbox-anr.txt" 2>&1 || true
 
-          if grep -E "am_crash.*${APP_PACKAGE}|am_anr.*${APP_PACKAGE}" "$EVIDENCE/events.txt"; then
-            echo "ProductShot crash/ANR found in event log" >&2
-            exit 1
-          fi
-          if grep -Fq "Process: ${APP_PACKAGE}" "$EVIDENCE/logcat.txt"; then
-            echo "ProductShot fatal process record found in logcat" >&2
-            exit 1
-          fi
-          if grep -Fq "$APP_PACKAGE" "$EVIDENCE/dropbox-crash.txt"; then
-            echo "ProductShot crash found in DropBox" >&2
-            exit 1
-          fi
-          if grep -Fq "$APP_PACKAGE" "$EVIDENCE/dropbox-anr.txt"; then
-            echo "ProductShot ANR found in DropBox" >&2
-            exit 1
-          fi
-
+          if grep -E "am_crash.*${APP_PACKAGE}|am_anr.*${APP_PACKAGE}" "$EVIDENCE/events.txt"; then echo "ProductShot crash/ANR found" >&2; exit 1; fi
+          if grep -Fq "Process: ${APP_PACKAGE}" "$EVIDENCE/logcat.txt"; then echo "ProductShot fatal process record found" >&2; exit 1; fi
+          if grep -Fq "$APP_PACKAGE" "$EVIDENCE/dropbox-crash.txt"; then echo "ProductShot crash found in DropBox" >&2; exit 1; fi
+          if grep -Fq "$APP_PACKAGE" "$EVIDENCE/dropbox-anr.txt"; then echo "ProductShot ANR found in DropBox" >&2; exit 1; fi
           printf 'api=%s\npackage=%s\nactivity=%s\nresult=PASS\n' "$API_LEVEL" "$APP_PACKAGE" "$APP_ACTIVITY" | tee "$EVIDENCE/result.txt"
 
       - name: Upload runtime evidence API ${{ matrix.api }}
