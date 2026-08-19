@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - ".ci/productshot-rc1-clean/**"
+      - ".ci/productshot-rc1-clean-b64/**"
       - ".github/workflows/productshot-rc1-real-build.yml"
   workflow_dispatch:
 
@@ -40,8 +40,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ARCHIVE="$GITHUB_WORKSPACE/.ci/productshot-rc1-clean/android.tar.gz"
+          ARCHIVE="$RUNNER_TEMP/productshot-rc1-android.tar.gz"
           PROJECT="$RUNNER_TEMP/productshot-rc1"
+          cat .ci/productshot-rc1-clean-b64/part* | tr -d '\r\n' | base64 -d > "$ARCHIVE"
           echo "930cfa0c2a9471e449e95e3f6628555fdd5392f482fd5be83c12bb05b6846022  $ARCHIVE" | sha256sum -c -
           mkdir -p "$PROJECT"
           tar -xzf "$ARCHIVE" -C "$PROJECT"
