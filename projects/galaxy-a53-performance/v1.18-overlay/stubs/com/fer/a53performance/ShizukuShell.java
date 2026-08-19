@@ -4,9 +4,9 @@ public final class ShizukuShell {
     public static void request() { }
     public static Result run(String command) { return null; }
     public static final class Result {
-        public final int code = -1;
-        public final String err = "";
-        public final String out = "";
+        public int code;
+        public String err;
+        public String out;
         public boolean ok() { return false; }
     }
 }
