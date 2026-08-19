@@ -82,6 +82,7 @@ jobs:
               | tr -d '\n' | base64 -d > "$dest"
           done
 
+          mkdir -p "$PROJECT/app/build/diagnostics"
           shred -u /tmp/private.pem /tmp/aes.key /tmp/source.enc /tmp/source.b64 /tmp/key.enc || true
 
       - name: Set up JDK 17
@@ -93,11 +94,29 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install SDK 37
+      - name: Resolve and install Android 17 SDK
         shell: bash
         run: |
+          set -euo pipefail
+          DIAG="$RUNNER_TEMP/src/WA-Vault/app/build/diagnostics"
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager 'platform-tools' 'platforms;android-37' 'build-tools;37.0.0'
+          sdkmanager --update --channel=3 2>&1 | tee "$DIAG/sdkmanager-update.log" || true
+          sdkmanager --list --include_obsolete --channel=3 2>&1 | tee "$DIAG/sdkmanager-list.log"
+
+          PLATFORM=$(awk -F'|' '
+            /platforms;android-37(\.0)?[[:space:]]*\|/ {
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1); print $1
+            }' "$DIAG/sdkmanager-list.log" | sort -V | tail -1)
+          BUILD_TOOLS=$(awk -F'|' '
+            /build-tools;37\.[0-9]+\.[0-9]+[[:space:]]*\|/ {
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1); print $1
+            }' "$DIAG/sdkmanager-list.log" | sort -V | tail -1)
+
+          echo "Resolved platform: ${PLATFORM:-NONE}" | tee "$DIAG/sdkmanager-selected.log"
+          echo "Resolved build tools: ${BUILD_TOOLS:-NONE}" | tee -a "$DIAG/sdkmanager-selected.log"
+          test -n "$PLATFORM"
+          test -n "$BUILD_TOOLS"
+          sdkmanager --channel=3 "platform-tools" "$PLATFORM" "$BUILD_TOOLS" 2>&1 | tee "$DIAG/sdkmanager-install.log"
 
       - name: Set up Gradle 9.5.0
         uses: gradle/actions/setup-gradle@v4
@@ -109,7 +128,6 @@ jobs:
         shell: bash
         run: |
           set +e
-          mkdir -p app/build/diagnostics
           gradle --no-daemon help --stacktrace 2>&1 | tee app/build/diagnostics/gradle-help.log
           code=${PIPESTATUS[0]}
           exit "$code"
@@ -119,7 +137,6 @@ jobs:
         shell: bash
         run: |
           set +e
-          mkdir -p app/build/diagnostics
           gradle --no-daemon :app:testDebugUnitTest --stacktrace 2>&1 | tee app/build/diagnostics/unit-tests.log
           code=${PIPESTATUS[0]}
           exit "$code"
@@ -129,7 +146,6 @@ jobs:
         shell: bash
         run: |
           set +e
-          mkdir -p app/build/diagnostics
           gradle --no-daemon :app:lintDebug --stacktrace 2>&1 | tee app/build/diagnostics/lint.log
           code=${PIPESTATUS[0]}
           exit "$code"
@@ -139,7 +155,6 @@ jobs:
         shell: bash
         run: |
           set +e
-          mkdir -p app/build/diagnostics
           gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee app/build/diagnostics/assemble.log
           code=${PIPESTATUS[0]}
           exit "$code"
