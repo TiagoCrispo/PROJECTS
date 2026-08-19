@@ -13,7 +13,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
     steps:
       - name: Generate ephemeral key and publish public half
         shell: bash
@@ -38,25 +38,18 @@ jobs:
         run: |
           set -euo pipefail
           READY=".wa-vault-fix/ready-${GITHUB_RUN_ID}.txt"
-          for i in $(seq 1 180); do
+          for i in $(seq 1 900); do
             if gh api "repos/${GITHUB_REPOSITORY}/contents/${READY}?ref=${SOURCE_REF}" >/dev/null 2>&1; then break; fi
             sleep 2
           done
           gh api "repos/${GITHUB_REPOSITORY}/contents/${READY}?ref=${SOURCE_REF}" >/dev/null
 
           KEY_PATH=".wa-vault-fix/key-${GITHUB_RUN_ID}.b64"
+          SOURCE_PATH=".wa-vault-fix/source-${GITHUB_RUN_ID}.b64"
           gh api "repos/${GITHUB_REPOSITORY}/contents/${KEY_PATH}?ref=${SOURCE_REF}" --jq '.content' | tr -d '\n' | base64 -d | base64 -d > /tmp/key.enc
-
-          : > /tmp/source.b64
-          idx=0
-          while true; do
-            chunk=$(printf ".wa-vault-fix/source-%s-%03d.b64" "$GITHUB_RUN_ID" "$idx")
-            if ! gh api "repos/${GITHUB_REPOSITORY}/contents/${chunk}?ref=${SOURCE_REF}" >/dev/null 2>&1; then break; fi
-            gh api "repos/${GITHUB_REPOSITORY}/contents/${chunk}?ref=${SOURCE_REF}" --jq '.content' | tr -d '\n' | base64 -d >> /tmp/source.b64
-            idx=$((idx+1))
-          done
-          test "$idx" -gt 0
-          base64 -d /tmp/source.b64 > /tmp/source.enc
+          gh api "repos/${GITHUB_REPOSITORY}/contents/${SOURCE_PATH}?ref=${SOURCE_REF}" --jq '.content' | tr -d '\n' | base64 -d | base64 -d > /tmp/source.enc
+          test -s /tmp/key.enc
+          test -s /tmp/source.enc
 
           openssl pkeyutl -decrypt -inkey /tmp/private.pem -in /tmp/key.enc -out /tmp/aes.key \
             -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256
@@ -66,7 +59,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/src"
           unzip -q /tmp/source.zip -d "$RUNNER_TEMP/src"
           test -f "$RUNNER_TEMP/src/WA-Vault/settings.gradle.kts"
-          shred -u /tmp/private.pem /tmp/aes.key /tmp/source.enc /tmp/source.b64 /tmp/key.enc || true
+          shred -u /tmp/private.pem /tmp/aes.key /tmp/source.enc /tmp/key.enc || true
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
