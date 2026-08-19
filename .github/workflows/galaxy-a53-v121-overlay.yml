@@ -44,7 +44,7 @@ jobs:
           ROOT="projects/galaxy-a53-performance/v1.21-overlay"
           ANDROID_JAR="$ANDROID_HOME/platforms/android-35/android.jar"
           rm -rf "$ROOT/build"
-          mkdir -p "$ROOT/build/stubs" "$ROOT/build/classes" "$ROOT/build/dex"
+          mkdir -p "$ROOT/build/stubs" "$ROOT/build/classes" "$ROOT/build/dex" "$ROOT/build/tools"
 
           javac -source 8 -target 8 \
             -cp "$ANDROID_JAR" \
@@ -70,6 +70,10 @@ jobs:
           sha256sum "$ROOT/build/dex/classes.dex" | tee "$ROOT/build/overlay-sha256.txt"
           (cd "$ROOT/build/dex" && zip -9 ../Galaxy_A53_v1.21_ReadyMode_overlay.zip classes.dex)
 
+          cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" "$ROOT/build/tools/apksigner.jar"
+          cp "$ANDROID_HOME/build-tools/35.0.0/zipalign" "$ROOT/build/tools/zipalign"
+          chmod +x "$ROOT/build/tools/zipalign"
+
       - name: Upload overlay dex
         uses: actions/upload-artifact@v4
         with:
@@ -77,5 +81,7 @@ jobs:
           path: |
             projects/galaxy-a53-performance/v1.21-overlay/build/Galaxy_A53_v1.21_ReadyMode_overlay.zip
             projects/galaxy-a53-performance/v1.21-overlay/build/overlay-sha256.txt
+            projects/galaxy-a53-performance/v1.21-overlay/build/tools/apksigner.jar
+            projects/galaxy-a53-performance/v1.21-overlay/build/tools/zipalign
           if-no-files-found: error
           retention-days: 3
