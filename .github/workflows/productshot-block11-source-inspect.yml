@@ -38,4 +38,10 @@ jobs:
           nl -ba "$SRC" | sed -n '138,170p'
           echo '=== fixed content-view region ==='
           nl -ba "$SRC" | sed -n '242,260p'
+          echo '=== network/create/retry symbols ==='
+          grep -nEi 'Reintentando|reint|retry|schedule|network|createJob|create job|IOException|UnknownHost|progress|4%|4 %|postDelayed|API_BASE|BASE_URL' "$SRC" | head -n 240 || true
+          echo '=== network/create region 560-900 ==='
+          nl -ba "$SRC" | sed -n '560,900p'
+          echo '=== network/create region 900-1240 ==='
+          nl -ba "$SRC" | sed -n '900,1240p'
           sha256sum "$SRC"
