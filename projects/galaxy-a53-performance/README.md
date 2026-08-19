@@ -4,9 +4,9 @@ Android maintenance and performance utility built around the Samsung Galaxy A53 
 
 ## Current candidate
 
-**v1.20.0 — Galaxy Doctor 2.0 BETA** (`versionCode 43`)
+**v1.21.0 — Ready Mode BETA** (`versionCode 44`)
 
-The accepted runtime base is **v1.19.0 Gaming 2.0**. v1.20 adds a read-only diagnostics layer; it does not introduce new performance writes.
+The accepted runtime base is **v1.20.0 Galaxy Doctor 2.0**. v1.21 adds a read-only preflight and quick-navigation layer; it introduces no new performance writes.
 
 ## Current feature stack
 
@@ -14,7 +14,8 @@ The accepted runtime base is **v1.19.0 Gaming 2.0**. v1.20 adds a read-only diag
 - **v1.17 Gallery 2.0** — visual media cleanup, filters, multi-select, preview and Android system trash.
 - **v1.18 Background Center** — per-app UsageStats diagnostics and reversible `RUN_ANY_IN_BACKGROUND` / Data Saver policy handling with pre-change snapshots.
 - **v1.19 Gaming 2.0** — per-game reversible sessions for refresh-rate policy, power saver, Data Saver and optional user-selected background restrictions.
-- **v1.20 Galaxy Doctor 2.0** — read-only device dashboard for thermal state, battery, RAM, storage, refresh-rate read-back, permissions/capabilities and pending rollback state.
+- **v1.20 Galaxy Doctor 2.0** — read-only dashboard for thermal state, battery, RAM, storage, refresh-rate read-back, permissions/capabilities and pending rollback state.
+- **v1.21 Ready Mode** — read-only game preflight combining thermal status/headroom, battery, RAM, storage, refresh state, Data Saver, Shizuku, saved Gaming profile, active background rules and pending rollback state, with quick navigation to accepted feature layers.
 
 The versioned overlay directories are retained because they are executable source layers used by the current build chain. Obsolete release-note folders are intentionally removed so `release/` contains only the current candidate.
 
@@ -26,16 +27,15 @@ The versioned overlay directories are retained because they are executable sourc
 - state-changing features snapshot first, persist synchronously, apply, read back and preserve rollback if verification fails;
 - unsupported or unreadable state is reported as **NC**, never as a fake success;
 - new overlays are compiled with Android SDK 35 + `javac` + D8 through GitHub Actions;
+- final APKs are verified with the official Android `apksigner` tool;
 - APK signing/integrity checks are necessary but do not replace on-device ART/One UI testing.
 
-## Galaxy Doctor 2.0 data sources
+## Ready Mode contract
 
-Doctor uses Android framework signals rather than estimates: `ActivityManager.MemoryInfo` for available/total memory and `lowMemory`, `StatFs` for filesystem capacity, `PowerManager` for thermal status and power saver, the sticky battery broadcast for battery level/charging/battery temperature, Usage Access AppOps, All Files Access, WRITE_SETTINGS, notification status, display refresh rate and Shizuku read-back for min/peak refresh and Data Saver.
-
-Doctor itself is **read-only**. Its access buttons only open Android Settings or request Shizuku authorization.
+Ready Mode itself is read-only. It can launch the selected game without changing Android settings, or navigate to Gaming 2.0, Doctor 2.0, Background Center and Gallery 2.0. Any state-changing operation remains inside the previously accepted modules with their existing snapshot/read-back/rollback protections.
 
 ## Release status
 
-v1.20.0 has passed source compilation and static APK integration/signing validation. Physical A53 acceptance is still required before the pull request is merged and before the build is considered accepted.
+v1.21.0 has passed Android SDK compilation and static APK integration/signing validation. Physical A53 acceptance is still required before the pull request is merged and before the build is considered accepted.
 
-See [`release/v1.20.0/`](./release/v1.20.0/) for the current release notes, hashes and validation record.
+See [`release/v1.21.0/`](./release/v1.21.0/) for the current release notes, hashes and validation record.
