@@ -1,0 +1,14 @@
+name: AniFlow CI Probe
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "projects/aniflow/**"
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: echo "ANIFLOW_CI_PROBE_OK"
