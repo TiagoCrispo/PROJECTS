@@ -1,0 +1,159 @@
+name: AniFlow RC9 Startup Performance Gate
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+concurrency:
+  group: aniflow-rc9-final
+  cancel-in-progress: true
+
+jobs:
+  android-rc9-final:
+    if: github.event.issue.number == 37 && github.event.comment.body == 'RUN_ANIFLOW_RC9_FINAL'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    env:
+      ANIFLOW_ROOT: /tmp/aniflow-rc9
+
+    steps:
+      - name: Announce run
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: gh issue comment 37 --repo "$GITHUB_REPOSITORY" --body "ANIFLOW_RC9_STARTED run_id=${GITHUB_RUN_ID}"
+
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with: { distribution: temurin, java-version: "17" }
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK + emulator
+        run: |
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools" "emulator" "system-images;android-35;aosp;x86_64"
+          sudo chmod 666 /dev/kvm || true
+
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: "9.5.0", cache-read-only: true }
+
+      - name: Materialize RC8 and apply verified RC9
+        shell: bash
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          set -euo pipefail
+          rm -rf "$ANIFLOW_ROOT" /tmp/aniflow-rc8-artifact
+          mkdir -p "$ANIFLOW_ROOT" /tmp/aniflow-rc8-artifact
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/9375678214/zip" > /tmp/aniflow-rc8-artifact.zip
+          unzip -q /tmp/aniflow-rc8-artifact.zip -d /tmp/aniflow-rc8-artifact
+          unzip -q /tmp/aniflow-rc8-artifact/AniFlow-v1.0.7-rc8-source.zip -d "$ANIFLOW_ROOT"
+          grep -q 'versionCode = 1000008' "$ANIFLOW_ROOT/app/build.gradle.kts"
+          grep -q 'versionName = "1.0.7-rc8"' "$ANIFLOW_ROOT/app/build.gradle.kts"
+          cat .ci/rc9/part01.b64 .ci/rc9/part02.b64 .ci/rc9/part03.b64 .ci/rc9/part04.b64 | base64 -d | gzip -dc > /tmp/aniflow-rc9.patch
+          echo "8e34c6b1df59174bc4c584d8fb78d49026e595c0f28b56a7b1d1db7d5c080935  /tmp/aniflow-rc9.patch" | sha256sum -c -
+          cd "$ANIFLOW_ROOT"
+          patch -p1 --forward --batch < /tmp/aniflow-rc9.patch
+          grep -q 'versionCode = 1000009' app/build.gradle.kts
+          grep -q 'versionName = "1.0.8-rc9"' app/build.gradle.kts
+          grep -q 'id("androidx.baselineprofile")' app/build.gradle.kts
+          grep -q 'profileinstaller:profileinstaller:1.4.1' app/build.gradle.kts
+          grep -q 'StartupTimingMetric' benchmark/src/main/java/com/aniflow/benchmark/StartupBenchmarks.kt
+          grep -q 'BaselineProfileRule' benchmark/src/main/java/com/aniflow/benchmark/BaselineProfileGenerator.kt
+
+      - name: Regression guards Blocks 2-13
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$ANIFLOW_ROOT"
+          for gate in 2 3 4 5 6 7 8 9 10 11 12 13; do python3 "scripts/validate-block${gate}.py"; done
+
+      - name: Isolated Kotlin gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$ANIFLOW_ROOT"
+          bash scripts/validate-pure-kotlin.sh
+          bash scripts/validate-network-kotlin.sh
+          bash scripts/validate-data-kotlin.sh
+          bash scripts/validate-viewmodels-kotlin.sh
+          bash scripts/validate-ui-syntax.sh
+
+      - name: Gradle configuration + unit tests
+        run: gradle -p "$ANIFLOW_ROOT" help :app:testDebugUnitTest --stacktrace --no-daemon
+
+      - name: Compile benchmark module
+        run: gradle -p "$ANIFLOW_ROOT" :benchmark:assemble --stacktrace --no-daemon
+
+      - name: Generate Baseline Profile on managed Pixel 6
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle -p "$ANIFLOW_ROOT" :app:generateBaselineProfile --stacktrace --no-daemon
+          PROFILE="$(find "$ANIFLOW_ROOT/app/src" -type f -path '*/generated/baselineProfiles/*' -name 'baseline-prof.txt' -print -quit)"
+          test -n "$PROFILE"
+          test -s "$PROFILE"
+          echo "BASELINE_PROFILE=$PROFILE"
+          wc -l "$PROFILE"
+
+      - name: Run startup Macrobenchmarks
+        shell: bash
+        run: |
+          set -euo pipefail
+          TASK="$(gradle -p "$ANIFLOW_ROOT" -q :benchmark:tasks --all | awk '/^pixel6Api35.*AndroidTest([[:space:]]|$)/ && $1 !~ /Setup/ {print $1; exit}')"
+          echo "MACROBENCHMARK_TASK=$TASK"
+          test -n "$TASK"
+          gradle -p "$ANIFLOW_ROOT" ":benchmark:$TASK" --stacktrace --no-daemon \
+            -Pandroid.testInstrumentationRunnerArguments.class=com.aniflow.benchmark.StartupBenchmarks
+
+      - name: Android lint
+        run: gradle -p "$ANIFLOW_ROOT" :app:lintDebug --stacktrace --no-daemon
+
+      - name: Assemble debug and release
+        run: gradle -p "$ANIFLOW_ROOT" :app:assembleDebug :app:assembleRelease --stacktrace --no-daemon
+
+      - name: Sign and verify RC9
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOOLS="$ANDROID_HOME/build-tools/36.0.0"
+          UNSIGNED="$ANIFLOW_ROOT/app/build/outputs/apk/release/app-release-unsigned.apk"
+          KEYSTORE="$RUNNER_TEMP/aniflow-rc9-release.jks"
+          ALIGNED="$RUNNER_TEMP/AniFlow-v1.0.8-rc9-aligned.apk"
+          FINAL="$RUNNER_TEMP/AniFlow-v1.0.8-rc9.apk"
+          test -s "$UNSIGNED"
+          keytool -genkeypair -v -keystore "$KEYSTORE" -storepass aniflow-rc9-ci -keypass aniflow-rc9-ci -alias aniflow -keyalg RSA -keysize 3072 -validity 3650 -dname "CN=AniFlow Personal RC9, OU=Android, O=AniFlow, L=Mendoza, C=AR"
+          "$TOOLS/zipalign" -p -f 4 "$UNSIGNED" "$ALIGNED"
+          "$TOOLS/apksigner" sign --ks "$KEYSTORE" --ks-key-alias aniflow --ks-pass pass:aniflow-rc9-ci --key-pass pass:aniflow-rc9-ci --out "$FINAL" "$ALIGNED"
+          "$TOOLS/apksigner" verify --verbose --print-certs "$FINAL"
+          unzip -t "$FINAL" >/dev/null
+          "$TOOLS/aapt" dump badging "$FINAL" | tee "$RUNNER_TEMP/apk-badging.txt"
+          sha256sum "$FINAL" | tee "$RUNNER_TEMP/apk-sha256.txt"
+
+      - name: Package deliverables and performance evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/aniflow-rc9-deliverables"
+          mkdir -p "$OUT"
+          (cd "$ANIFLOW_ROOT" && zip -qr "$OUT/AniFlow-v1.0.8-rc9-source.zip" . -x '.gradle/*' '.idea/*' '.kotlin/*' 'app/build/*' '**/build/*')
+          cp "$RUNNER_TEMP/AniFlow-v1.0.8-rc9.apk" "$OUT/"
+          cp "$ANIFLOW_ROOT/app/build/outputs/apk/debug/app-debug.apk" "$OUT/AniFlow-v1.0.8-rc9-debug.apk"
+          cp "$RUNNER_TEMP/apk-sha256.txt" "$RUNNER_TEMP/apk-badging.txt" "$OUT/"
+          find "$ANIFLOW_ROOT" -type f \( -name '*benchmarkData.json' -o -name '*baseline-prof.txt' -o -name '*startup-prof.txt' \) -exec cp --parents {} "$OUT/" \; || true
+          test ! -f "$ANIFLOW_ROOT/app/build/reports/lint-results-debug.html" || cp "$ANIFLOW_ROOT/app/build/reports/lint-results-debug.html" "$OUT/"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AniFlow-v1.0.8-rc9-final
+          path: ${{ runner.temp }}/aniflow-rc9-deliverables/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Announce success
+        if: success()
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: gh issue comment 37 --repo "$GITHUB_REPOSITORY" --body "ANIFLOW_RC9_SUCCESS run_id=${GITHUB_RUN_ID}"
