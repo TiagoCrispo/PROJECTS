@@ -1,11 +1,11 @@
-# Mendoza Meteo X10 — Native v6.6
+# Mendoza Meteo X10 — Native v6.7
 
 Rebuild nativo del paquete `com.mendozameteo.x10`, sin parches DEX.
 
 - Android nativo Java, API 24–36.
 - Pantalla: 7 días → 24 h → ubicación/precaución → UTN Mendoza.
 - Widget real 2x2: temperatura actual + 7 días + máxima/mínima + % lluvia.
-- Widget v6.6 location-safe: no consulta GPS en background, usa la última ubicación persistida por foreground hasta 48 h, separa caché `local`/`utn` y rechaza caché de otra zona (>10 km).
+- Widget v6.7 location-safe: no consulta GPS en background, usa la última ubicación persistida por foreground hasta 48 h, separa caché `local`/`utn` y rechaza caché de otra zona (>10 km).
 - Open-Meteo mediante HTTPS con timeouts, validación, caché y fallback.
 - Freshness hardening: timestamps de forecast o ubicación absurdamente futuros se invalidan; solo se tolera un pequeño desfase de reloj de hasta 10 min.
 - Alertas oficiales separadas de heurísticas X10: SMN CAP/API + Contingencias Climáticas Mendoza.
@@ -20,13 +20,13 @@ Rebuild nativo del paquete `com.mendozameteo.x10`, sin parches DEX.
 - Señales X10 conservadoras para lluvia/tormenta y posible Zonda; nunca cambian el nivel de una alerta oficial.
 - Toolchain: AGP 9.3.1 + Gradle Wrapper 9.5.0 + JDK 17 + Build Tools 36.0.0.
 - Gradle Wrapper versionado y protegido con SHA-256 oficial de la distribución; clones y CI usan `./gradlew`, sin depender de un Gradle global.
-- User-Agent Android sincronizado automáticamente con `BuildConfig.VERSION_NAME`; el provider smoke deriva la versión directamente de `app/build.gradle`.
-- CI v6.6: provider smoke + official-source smoke + release contract + unit tests + Lint + debug/release build + zipalign + contrato APK.
-- CI Node 24: `actions/checkout@v7`, `android-actions/setup-android@v4`, `gradle/actions/setup-gradle@v6` con `cache-provider: basic`.
-- Warning-free gate: `javac -Werror` convierte warnings Java no suprimidos en fallo y Gradle usa `--warning-mode fail`, por lo que una deprecación de build/tooling ya no puede quedar escondida detrás de un CI verde.
+- User-Agent Android sincronizado automáticamente con `BuildConfig.VERSION_NAME`; BuildConfig está habilitado explícitamente y el provider smoke deriva la versión directamente de `app/build.gradle`.
+- CI v6.7: provider smoke + official-source smoke + release contract + unit tests + Lint + debug/release build + zipalign + contrato APK + publicación automática del APK TEST instalable.
+- CI Node 24: `actions/checkout@v7`, `android-actions/setup-android@v4`, `gradle/actions/setup-gradle@v6` con `cache-provider: basic` y `actions/upload-artifact@v7`.
+- Warning gate: los warnings Java no relacionados con deprecaciones siguen siendo fatales con `javac -Werror`; las deprecaciones de framework requeridas por compatibilidad API 24–29 quedan aisladas temporalmente. Gradle usa `--warning-mode fail`, por lo que las deprecaciones del build/tooling siguen bloqueando CI.
 - La ruta legacy de ubicación para API 24–29 está aislada explícitamente; Android 30+ usa `getCurrentLocation()`.
 - Sin analytics, sin WebView, sin claves API persistentes, sin material de firma en Git y sin tráfico HTTP claro.
 
-Versión de desarrollo actual: `6.6-native-dev` (`versionCode 66`).
+Versión de desarrollo actual: `6.7-native-dev` (`versionCode 67`).
 
-Antes del APK final queda obligatorio el smoke físico descrito en `RELEASE_HARDENING.md`, especialmente Samsung/One UI, widget 2x2 y acceso SMN desde una red real no bloqueada por datacenter.
+El workflow genera un APK **TEST** firmado con la clave debug de CI para instalación y prueba. Antes del APK final de producción queda obligatorio el smoke físico descrito en `RELEASE_HARDENING.md`, especialmente Samsung/One UI, widget 2x2 y acceso SMN desde una red real no bloqueada por datacenter.
