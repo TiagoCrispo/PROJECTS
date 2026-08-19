@@ -1,6 +1,6 @@
 # Mendoza Meteo X10 — Notification subsystem
 
-Documentación vigente para `6.7-native-dev` (`versionCode 67`).
+Documentación vigente para `6.8-native-dev` (`versionCode 68`).
 
 ## Goal
 
@@ -56,8 +56,8 @@ Official alerts are loaded, pruned and posted before the general forecast is fet
 
 WorkManager is deferred background work, not a real-time push transport. Doze/OEM battery policy can delay a run. Swiping the app away normally does not remove persisted WorkManager scheduling, while Android **Force stop** intentionally blocks scheduled/background execution until the app is launched again.
 
-The SMN origin currently returns HTTP 403 to GitHub-hosted runners, so CI records that restriction rather than pretending a live SMN payload passed. The registered official contract and live Mendoza provincial endpoint remain in the automated gate; physical-device/network validation remains a final release gate.
+The SMN origin can return HTTP 403 to GitHub-hosted runners, so CI records that restriction rather than pretending a live SMN payload passed. The registered official contract and live Mendoza provincial endpoint remain in the automated gate; physical-device/network validation remains a final release gate.
 
 ## Release verification
 
-The project is built with the committed Gradle Wrapper 9.5.0. CI validates the wrapper checksum, runs unit tests, Lint and clean debug/release builds, inspects both APK contracts and publishes the signed debug APK as `MendozaMeteo-X10-v6.7-TEST`. Java compilation keeps non-deprecation warnings fatal with `-Werror`; Android framework deprecations needed by the API 24–29 compatibility layer are isolated temporarily. Gradle uses `--warning-mode fail`, so build/tooling warnings cannot remain hidden behind a green release gate. Physical Samsung/One UI validation remains mandatory before generating/distributing the final production APK.
+The project is built with the committed Gradle Wrapper 9.5.0. CI validates the wrapper checksum, runs unit tests, Lint and clean debug/release builds, inspects both APK contracts and publishes the signed debug APK as `MendozaMeteo-X10-v6.8-TEST`. Java compilation keeps warnings from our source fatal with `-Werror`; Android framework deprecations needed by the API 24–29 compatibility layer and third-party `classfile` metadata noise are isolated explicitly. `WeatherException` carries `serialVersionUID`, so its own serialization warning is fixed rather than hidden. Gradle uses `--warning-mode fail`, so build/tooling warnings cannot remain hidden behind a green release gate. Physical Samsung/One UI validation remains mandatory before generating/distributing the final production APK.
