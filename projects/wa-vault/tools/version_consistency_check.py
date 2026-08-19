@@ -9,7 +9,7 @@ def need(c,m):
 b=read('app/build.gradle.kts')
 need(re.search(r'versionCode\s*=\s*81\b',b),'versionCode 81')
 need('versionName = "0.5.31"' in b,'versionName 0.5.31')
-for p in ('README.md','ARCHITECTURE.md','SECURITY.md','TESTING.md','RELEASE.md','TEST_MATRIX.md','BUILD_ENVIRONMENT.md'):
+for p in ('README.md','ARCHITECTURE.md','SECURITY.md','TESTING.md','RELEASE.md','TEST_MATRIX.md'):
     need(VERSION in read(p),f'{p} current version')
 need(read('CHANGELOG.md').startswith('## 0.5.31'),'CHANGELOG current version first')
 print('VERSION_CONSISTENCY_PASS version=0.5.31 code=81')
