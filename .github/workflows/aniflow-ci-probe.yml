@@ -12,26 +12,26 @@ permissions:
 
 jobs:
   orchestrate:
-    if: github.event_name != 'issue_comment' || github.event.comment.body == 'RUN_ANIFLOW_RC2_TRIGGER'
+    if: github.event_name != 'issue_comment' || github.event.comment.body == 'RUN_ANIFLOW_RC3_TRIGGER'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Dispatch RC2 build
+      - name: Dispatch RC3 build
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          BEFORE_ID="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow aniflow-rc2.yml --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
-          gh workflow run aniflow-rc2.yml --repo "$GITHUB_REPOSITORY" --ref main
-          RC2_RUN_ID=""
+          BEFORE_ID="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow aniflow-rc3.yml --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          gh workflow run aniflow-rc3.yml --repo "$GITHUB_REPOSITORY" --ref main
+          RC3_RUN_ID=""
           for attempt in $(seq 1 24); do
-            CANDIDATE="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow aniflow-rc2.yml --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+            CANDIDATE="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow aniflow-rc3.yml --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
             if [ -n "$CANDIDATE" ] && [ "$CANDIDATE" != "$BEFORE_ID" ]; then
-              RC2_RUN_ID="$CANDIDATE"
+              RC3_RUN_ID="$CANDIDATE"
               break
             fi
             sleep 5
           done
-          test -n "$RC2_RUN_ID"
+          test -n "$RC3_RUN_ID"
           gh api --method POST "repos/$GITHUB_REPOSITORY/issues/${{ github.event.issue.number }}/comments" \
-            -f body="ANIFLOW_RC2_DISPATCHED run_id=$RC2_RUN_ID previous_run_id=${BEFORE_ID:-none} orchestrator_run_id=$GITHUB_RUN_ID" || true
+            -f body="ANIFLOW_RC3_DISPATCHED run_id=$RC3_RUN_ID previous_run_id=${BEFORE_ID:-none} orchestrator_run_id=$GITHUB_RUN_ID" || true
