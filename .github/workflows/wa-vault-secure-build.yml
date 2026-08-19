@@ -1,9 +1,9 @@
 name: WA Vault Secure Temporary Build
 
 on:
-  push:
+  pull_request:
     branches:
-      - wa-vault-secure-build-20260819
+      - main
     paths-ignore:
       - '.wa-vault-secure/**'
 
