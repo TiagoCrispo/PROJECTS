@@ -27,9 +27,16 @@ jobs:
           SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
           SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
           AVDMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/avdmanager"
+          AVD_HOME="$RUNNER_TEMP/android-avd"
+          mkdir -p "$AVD_HOME"
+          export ANDROID_AVD_HOME="$AVD_HOME"
+          echo "ANDROID_AVD_HOME=$AVD_HOME" >> "$GITHUB_ENV"
           "$SDKMANAGER" --install "platform-tools" "emulator" "system-images;android-29;google_apis;x86_64"
           echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
           echo no | "$AVDMANAGER" create avd --force --name productshot-diag29 --package "system-images;android-29;google_apis;x86_64" >/dev/null
+          test -f "$AVD_HOME/productshot-diag29.ini"
+          "$SDK_ROOT/emulator/emulator" -list-avds | tee "$RUNNER_TEMP/avd-list.txt"
+          grep -Fxq productshot-diag29 "$RUNNER_TEMP/avd-list.txt"
 
       - name: Boot with bounded diagnostics
         shell: bash
@@ -38,6 +45,9 @@ jobs:
           SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
           mkdir -p "$RUNNER_TEMP/emu-diag"
           LOG="$RUNNER_TEMP/emu-diag/emulator.log"
+          echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" | tee "$RUNNER_TEMP/emu-diag/avd-home.txt"
+          "$SDK_ROOT/emulator/emulator" -list-avds | tee "$RUNNER_TEMP/emu-diag/avd-list.txt"
+          grep -Fxq productshot-diag29 "$RUNNER_TEMP/emu-diag/avd-list.txt"
           if [[ -e /dev/kvm ]]; then
             sudo chmod 666 /dev/kvm
             ACCEL="-accel on"
