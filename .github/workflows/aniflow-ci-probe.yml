@@ -1,4 +1,4 @@
-name: AniFlow CI Cleanup
+name: AniFlow CI Orchestrator
 
 on:
   issue_comment:
@@ -6,53 +6,28 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+  actions: write
   issues: write
 
 jobs:
-  cleanup:
-    if: github.event_name != 'issue_comment' || github.event.comment.body == 'CLEANUP_ANIFLOW_CI'
+  orchestrate:
+    if: github.event_name != 'issue_comment' || github.event.comment.body == 'RUN_ANIFLOW_RC2_TRIGGER'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Remove temporary schedule from final gate
+      - name: Dispatch RC2 build
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          API="repos/$GITHUB_REPOSITORY/contents/.github/workflows/aniflow-smoke.yml"
-          gh api "$API?ref=main" > /tmp/smoke.json
-          SMOKE_SHA="$(jq -r .sha /tmp/smoke.json)"
-          jq -r .content /tmp/smoke.json | tr -d '\n' | base64 -d > /tmp/aniflow-smoke.yml
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-          p = Path('/tmp/aniflow-smoke.yml')
-          s = p.read_text()
-          s2 = re.sub(r'(?m)^  schedule:\n    - cron: "\*/5 \* \* \* \*"\n', '', s, count=1)
-          if s2 == s:
-              raise SystemExit('temporary AniFlow schedule block not found')
-          p.write_text(s2)
-          PY
-          CONTENT="$(base64 -w0 /tmp/aniflow-smoke.yml)"
-          gh api --method PUT "$API" \
-            -f message="Disable temporary AniFlow CI schedule" \
-            -f content="$CONTENT" \
-            -f sha="$SMOKE_SHA" \
-            -f branch="main" >/dev/null
-
-      - name: Record cleanup success
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          API="repos/$GITHUB_REPOSITORY/contents/.ci/aniflow-cleanup-status.txt"
-          TEXT="ANIFLOW_CI_CLEANUP_OK run_id=$GITHUB_RUN_ID sha=$GITHUB_SHA"
-          CONTENT="$(printf '%s\n' "$TEXT" | base64 -w0)"
-          CURRENT_SHA="$(gh api "$API?ref=main" --jq .sha 2>/dev/null || true)"
-          if [ -n "$CURRENT_SHA" ]; then
-            gh api --method PUT "$API" -f message="Update AniFlow CI cleanup status" -f content="$CONTENT" -f sha="$CURRENT_SHA" -f branch="main" >/dev/null
-          else
-            gh api --method PUT "$API" -f message="Record AniFlow CI cleanup status" -f content="$CONTENT" -f branch="main" >/dev/null
-          fi
-          gh api --method POST "repos/$GITHUB_REPOSITORY/issues/34/comments" -f body="$TEXT" || true
+          gh workflow run aniflow-rc2.yml --repo "$GITHUB_REPOSITORY" --ref main
+          RC2_RUN_ID=""
+          for attempt in $(seq 1 18); do
+            RC2_RUN_ID="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow aniflow-rc2.yml --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+            [ -n "$RC2_RUN_ID" ] && break
+            sleep 5
+          done
+          test -n "$RC2_RUN_ID"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/issues/${{ github.event.issue.number }}/comments" \
+            -f body="ANIFLOW_RC2_DISPATCHED run_id=$RC2_RUN_ID orchestrator_run_id=$GITHUB_RUN_ID" || true
