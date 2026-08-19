@@ -23,7 +23,7 @@ Rebuild nativo del paquete `com.mendozameteo.x10`, sin parches DEX.
 - User-Agent Android sincronizado automáticamente con `BuildConfig.VERSION_NAME`; BuildConfig está habilitado explícitamente y el provider smoke deriva la versión directamente de `app/build.gradle`.
 - CI v6.8: provider smoke + official-source smoke + release contract + unit tests + Lint + debug/release build + zipalign + contrato APK + publicación automática del APK TEST instalable.
 - CI Node 24: `actions/checkout@v7`, `android-actions/setup-android@v4`, `gradle/actions/setup-gradle@v6` con `cache-provider: basic` y `actions/upload-artifact@v7`.
-- Warning gate: los warnings de nuestro código siguen siendo fatales con `javac -Werror`; se aíslan únicamente las deprecaciones de framework necesarias por compatibilidad API 24–29 y el ruido `classfile` de metadatos opcionales de dependencias. Gradle usa `--warning-mode fail`, por lo que las deprecaciones del build/tooling siguen bloqueando CI.
+- Warning gate: todos los warnings Java salvo deprecaciones de framework necesarias por compatibilidad API 24–29 siguen siendo fatales con `javac -Werror`. Los metadatos Room referenciados por WorkManager 2.11.2 se resuelven explícitamente con `compileOnly androidx.room:room-common:2.7.0`; los warnings `classfile` no se desactivan globalmente. Gradle usa `--warning-mode fail`.
 - `WeatherException` declara `serialVersionUID`, eliminando el warning de serialización propio detectado por el gate.
 - La ruta legacy de ubicación para API 24–29 está aislada explícitamente; Android 30+ usa `getCurrentLocation()`.
 - Sin analytics, sin WebView, sin claves API persistentes, sin material de firma en Git y sin tráfico HTTP claro.
