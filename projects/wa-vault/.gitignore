@@ -1,0 +1,41 @@
+# Gradle / Android build output
+.gradle/
+**/build/
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+
+# IDE / OS
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Runtime / validation output
+device-validation/
+*.log
+STATIC_VALIDATION_OUTPUT*.txt
+
+# Never commit installables or compiled artifacts
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+*.so
+
+# Never commit signing/private key material
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+*.der
+*.cer
+signing.properties
+keystore.properties
+
+# Temporary compatibility tests
+/tools/.compat_*.py
