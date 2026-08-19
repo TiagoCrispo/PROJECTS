@@ -1,0 +1,124 @@
+name: WA Vault Fix Validation Build
+
+on:
+  push:
+    branches:
+      - wa-vault-fix-build-20260819
+    paths:
+      - '.github/workflows/wa-vault-fix-build.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Generate ephemeral key and publish public half
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_REF: wa-vault-fix-build-20260819
+        run: |
+          set -euo pipefail
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out /tmp/private.pem >/dev/null 2>&1
+          openssl pkey -in /tmp/private.pem -pubout -out /tmp/public.pem
+          PUB64=$(base64 -w0 /tmp/public.pem)
+          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/.wa-vault-fix/public-${GITHUB_RUN_ID}.pem" \
+            -f message="chore: ephemeral WA Vault fix build key [skip ci]" \
+            -f content="$PUB64" \
+            -f branch="$SOURCE_REF" >/dev/null
+
+      - name: Wait for encrypted source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_REF: wa-vault-fix-build-20260819
+        run: |
+          set -euo pipefail
+          READY=".wa-vault-fix/ready-${GITHUB_RUN_ID}.txt"
+          for i in $(seq 1 180); do
+            if gh api "repos/${GITHUB_REPOSITORY}/contents/${READY}?ref=${SOURCE_REF}" >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          gh api "repos/${GITHUB_REPOSITORY}/contents/${READY}?ref=${SOURCE_REF}" >/dev/null
+
+          KEY_PATH=".wa-vault-fix/key-${GITHUB_RUN_ID}.b64"
+          gh api "repos/${GITHUB_REPOSITORY}/contents/${KEY_PATH}?ref=${SOURCE_REF}" --jq '.content' | tr -d '\n' | base64 -d | base64 -d > /tmp/key.enc
+
+          : > /tmp/source.b64
+          idx=0
+          while true; do
+            chunk=$(printf ".wa-vault-fix/source-%s-%03d.b64" "$GITHUB_RUN_ID" "$idx")
+            if ! gh api "repos/${GITHUB_REPOSITORY}/contents/${chunk}?ref=${SOURCE_REF}" >/dev/null 2>&1; then break; fi
+            gh api "repos/${GITHUB_REPOSITORY}/contents/${chunk}?ref=${SOURCE_REF}" --jq '.content' | tr -d '\n' | base64 -d >> /tmp/source.b64
+            idx=$((idx+1))
+          done
+          test "$idx" -gt 0
+          base64 -d /tmp/source.b64 > /tmp/source.enc
+
+          openssl pkeyutl -decrypt -inkey /tmp/private.pem -in /tmp/key.enc -out /tmp/aes.key \
+            -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+            -in /tmp/source.enc -out /tmp/source.zip -pass file:/tmp/aes.key
+
+          mkdir -p "$RUNNER_TEMP/src"
+          unzip -q /tmp/source.zip -d "$RUNNER_TEMP/src"
+          test -f "$RUNNER_TEMP/src/WA-Vault/settings.gradle.kts"
+          shred -u /tmp/private.pem /tmp/aes.key /tmp/source.enc /tmp/source.b64 /tmp/key.enc || true
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Set up Gradle 9.5.0
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+
+      - name: Gradle configuration
+        working-directory: ${{ runner.temp }}/src/WA-Vault
+        run: gradle --no-daemon help
+
+      - name: Unit tests
+        working-directory: ${{ runner.temp }}/src/WA-Vault
+        run: gradle --no-daemon :app:testDebugUnitTest
+
+      - name: Lint
+        working-directory: ${{ runner.temp }}/src/WA-Vault
+        run: gradle --no-daemon :app:lintDebug
+
+      - name: Assemble debug
+        working-directory: ${{ runner.temp }}/src/WA-Vault
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Upload internal validation APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: WA-Vault-fix-internal-apk
+          path: ${{ runner.temp }}/src/WA-Vault/app/build/outputs/apk/debug/*.apk
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: WA-Vault-fix-reports
+          path: |
+            ${{ runner.temp }}/src/WA-Vault/app/build/reports/**
+            ${{ runner.temp }}/src/WA-Vault/app/build/test-results/**
+          retention-days: 1
+          if-no-files-found: ignore
