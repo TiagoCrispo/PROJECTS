@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      ANIFLOW_ROOT: ${{ runner.temp }}/aniflow-src
+      ANIFLOW_ROOT: /tmp/aniflow-src
 
     steps:
       - name: Announce scheduled run
