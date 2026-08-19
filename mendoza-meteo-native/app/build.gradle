@@ -35,10 +35,11 @@ android {
     }
 
     tasks.withType(JavaCompile).configureEach {
-        // Keep source-level warnings fatal. Android 24-29 compatibility still
-        // requires deprecated framework APIs, while WorkManager 2.11.x exposes
-        // optional Room annotation metadata that javac reports as classfile noise.
-        options.compilerArgs += ['-Xlint:all,-deprecation,-classfile', '-Werror']
+        // Android 24-29 compatibility paths still require deprecated framework APIs.
+        // Keep every other javac warning fatal. WorkManager 2.11.2 references Room
+        // BINARY annotations, so room-common is supplied compile-only below instead
+        // of hiding classfile warnings globally.
+        options.compilerArgs += ['-Xlint:all,-deprecation', '-Werror']
     }
 
     lint {
@@ -49,6 +50,7 @@ android {
 
 dependencies {
     implementation 'androidx.work:work-runtime:2.11.2'
+    compileOnly 'androidx.room:room-common:2.7.0'
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.json:json:20260719'
 }
