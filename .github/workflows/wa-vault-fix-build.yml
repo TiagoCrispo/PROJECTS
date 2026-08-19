@@ -82,6 +82,11 @@ jobs:
               | tr -d '\n' | base64 -d > "$dest"
           done
 
+          TEST_DEST="$PROJECT/app/src/test/java/com/wavault/app/notification/WhatsAppNotificationParserTest.kt"
+          mkdir -p "$(dirname "$TEST_DEST")"
+          gh api "repos/${GITHUB_REPOSITORY}/contents/.wa-vault-fix/patch/WhatsAppNotificationParserTest.kt?ref=${SOURCE_REF}" --jq '.content' \
+            | tr -d '\n' | base64 -d > "$TEST_DEST"
+
           mkdir -p "$PROJECT/app/build/diagnostics"
           shred -u /tmp/private.pem /tmp/aes.key /tmp/source.enc /tmp/source.b64 /tmp/key.enc || true
 
@@ -102,16 +107,8 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager --update --channel=3 2>&1 | tee "$DIAG/sdkmanager-update.log" || true
           sdkmanager --list --include_obsolete --channel=3 2>&1 | tee "$DIAG/sdkmanager-list.log"
-
-          PLATFORM=$(awk -F'|' '
-            /platforms;android-37(\.0)?[[:space:]]*\|/ {
-              gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1); print $1
-            }' "$DIAG/sdkmanager-list.log" | sort -V | tail -1)
-          BUILD_TOOLS=$(awk -F'|' '
-            /build-tools;37\.[0-9]+\.[0-9]+[[:space:]]*\|/ {
-              gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1); print $1
-            }' "$DIAG/sdkmanager-list.log" | sort -V | tail -1)
-
+          PLATFORM=$(awk -F'|' '/platforms;android-37(\.0)?[[:space:]]*\|/ {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1); print $1}' "$DIAG/sdkmanager-list.log" | sort -V | tail -1)
+          BUILD_TOOLS=$(awk -F'|' '/build-tools;37\.[0-9]+\.[0-9]+[[:space:]]*\|/ {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1); print $1}' "$DIAG/sdkmanager-list.log" | sort -V | tail -1)
           echo "Resolved platform: ${PLATFORM:-NONE}" | tee "$DIAG/sdkmanager-selected.log"
           echo "Resolved build tools: ${BUILD_TOOLS:-NONE}" | tee -a "$DIAG/sdkmanager-selected.log"
           test -n "$PLATFORM"
