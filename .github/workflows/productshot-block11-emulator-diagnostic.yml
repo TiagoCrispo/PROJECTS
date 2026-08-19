@@ -1,0 +1,79 @@
+name: ProductShot Block 11 emulator boot diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/productshot-block11-emulator-diagnostic.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  api29-boot-diagnostic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Provision API 29 emulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          AVDMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/avdmanager"
+          "$SDKMANAGER" --install "platform-tools" "emulator" "system-images;android-29;google_apis;x86_64"
+          echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+          echo no | "$AVDMANAGER" create avd --force --name productshot-diag29 --package "system-images;android-29;google_apis;x86_64" >/dev/null
+
+      - name: Boot with bounded diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          mkdir -p "$RUNNER_TEMP/emu-diag"
+          LOG="$RUNNER_TEMP/emu-diag/emulator.log"
+          if [[ -e /dev/kvm ]]; then
+            sudo chmod 666 /dev/kvm
+            ACCEL="-accel on"
+          else
+            ACCEL="-accel off"
+          fi
+          "$SDK_ROOT/emulator/emulator" @productshot-diag29 -no-window -noaudio -no-boot-anim -no-snapshot -no-metrics -gpu swiftshader_indirect $ACCEL >"$LOG" 2>&1 &
+          PID=$!
+          echo "$PID" > "$RUNNER_TEMP/emu-diag/pid.txt"
+          sleep 8
+          if ! kill -0 "$PID" 2>/dev/null; then
+            echo "Emulator exited before adb registration" >&2
+            cat "$LOG" >&2
+            exit 1
+          fi
+          if ! timeout 180 adb wait-for-device; then
+            echo "adb never observed emulator" >&2
+            cat "$LOG" >&2
+            ps aux | grep -E 'emulator|qemu' | grep -v grep >&2 || true
+            exit 1
+          fi
+          if ! timeout 240 bash -c 'until [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" == "1" ]]; do sleep 2; done'; then
+            echo "Emulator registered but did not finish boot" >&2
+            cat "$LOG" >&2
+            adb devices -l >&2 || true
+            exit 1
+          fi
+          adb devices -l | tee "$RUNNER_TEMP/emu-diag/adb-devices.txt"
+          adb shell getprop ro.build.version.sdk | tee "$RUNNER_TEMP/emu-diag/api.txt"
+          adb exec-out screencap -p > "$RUNNER_TEMP/emu-diag/boot.png" || true
+
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4 release line
+        with:
+          name: productshot-block11-emulator-diagnostic-api29
+          path: ${{ runner.temp }}/emu-diag/*
+          if-no-files-found: warn
+          retention-days: 7
