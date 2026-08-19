@@ -10,8 +10,8 @@ android {
         applicationId = 'com.mendozameteo.x10'
         minSdk = 24
         targetSdk = 36
-        versionCode = 67
-        versionName = '6.7-native-dev'
+        versionCode = 68
+        versionName = '6.8-native-dev'
     }
 
     buildFeatures {
@@ -35,10 +35,10 @@ android {
     }
 
     tasks.withType(JavaCompile).configureEach {
-        // Android 24-29 compatibility paths still require deprecated framework APIs.
-        // Keep every other javac warning fatal while isolating framework deprecations
-        // until the compatibility layer is migrated to AndroidX WindowInsets APIs.
-        options.compilerArgs += ['-Xlint:all,-deprecation', '-Werror']
+        // Keep source-level warnings fatal. Android 24-29 compatibility still
+        // requires deprecated framework APIs, while WorkManager 2.11.x exposes
+        // optional Room annotation metadata that javac reports as classfile noise.
+        options.compilerArgs += ['-Xlint:all,-deprecation,-classfile', '-Werror']
     }
 
     lint {
