@@ -36,8 +36,20 @@ if "private void registerUiReceiverPre33" not in s:
     s = s.replace(anchor, helper + anchor, 1)
 main.write_text(s, encoding="utf-8")
 
+security_test = root / "tools/v0530_block6_security_android16_regression_test.py"
+s = security_test.read_text(encoding="utf-8")
+old = "need('registerReceiver(dataChangedReceiver,f,VaultUiNotifier.INTERNAL_PERMISSION,null)' in main, 'API26-32 internal receiver not permission-protected')"
+new = "need('registerUiReceiverPre33(f)' in main and 'registerReceiver(dataChangedReceiver, filter, VaultUiNotifier.INTERNAL_PERMISSION, null)' in main and '@android.annotation.SuppressLint(\"UnspecifiedRegisterReceiverFlag\")' in main, 'API26-32 internal receiver helper not permission-protected')"
+if old not in s and new not in s:
+    raise SystemExit("Android16 regression assertion point not found")
+if old in s:
+    s = s.replace(old, new, 1)
+security_test.write_text(s, encoding="utf-8")
+
 # Fail closed if either original lint trigger remains.
 assert "resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI" in downloads.read_text(encoding="utf-8")
 assert "created = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI" not in downloads.read_text(encoding="utf-8")
 assert "else registerReceiver(dataChangedReceiver,f,VaultUiNotifier.INTERNAL_PERMISSION,null);" not in main.read_text(encoding="utf-8")
+assert "registerUiReceiverPre33(f)" in main.read_text(encoding="utf-8")
+assert "API26-32 internal receiver helper not permission-protected" in security_test.read_text(encoding="utf-8")
 print("ANDROID_LINT_FIXES_APPLIED")
