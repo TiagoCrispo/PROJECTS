@@ -38,7 +38,6 @@ jobs:
           unzip -q /tmp/aniflow-rc7-artifact.zip -d /tmp/aniflow-rc7-artifact
           unzip -q /tmp/aniflow-rc7-artifact/AniFlow-v1.0.6-rc7-source.zip -d "$ANIFLOW_ROOT"
           grep -q 'versionName = "1.0.6-rc7"' "$ANIFLOW_ROOT/app/build.gradle.kts"
-          echo "5a0eefd8d21d55f4a8f493476592d9e1930147b5c32f22aa58fc414dbe152874  .ci/aniflow-rc8.patch.gz" | sha256sum -c -
           gzip -dc .ci/aniflow-rc8.patch.gz > /tmp/aniflow-rc8.patch
           echo "7f054a581c807c2bcec7b6bd3c4c38ed3dad7a5071bf72d6ad89f6ffd0d9a6fb  /tmp/aniflow-rc8.patch" | sha256sum -c -
           cd "$ANIFLOW_ROOT"
