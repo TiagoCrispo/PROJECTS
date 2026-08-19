@@ -1,4 +1,4 @@
-# Mendoza Meteo X10 v6.6 — Release hardening
+# Mendoza Meteo X10 v6.7 — Release hardening
 
 Este documento define el gate físico previo a generar el APK final. CI no sustituye estas pruebas porque Android/One UI, Doze, permisos, launcher y la red real del teléfono pueden comportarse distinto a un runner Linux.
 
@@ -13,9 +13,10 @@ Debe quedar verde en el mismo SHA que se pretenda liberar:
 - `lintRelease`.
 - `assembleDebug` y `assembleRelease` limpios.
 - Build reproducible mediante `./gradlew` del repositorio, nunca un Gradle global implícito.
-- `javac -Werror`: cualquier warning Java no suprimido falla el build.
+- `javac -Werror`: cualquier warning Java no relacionado con deprecaciones de framework aisladas por compatibilidad falla el build.
 - Gradle `--warning-mode fail`: cualquier warning/deprecación de Gradle falla el build.
-- `zipalign`, integridad ZIP y contrato del APK `versionCode 66` / `6.6-native-dev`.
+- `zipalign`, integridad ZIP y contrato del APK `versionCode 67` / `6.7-native-dev`.
+- APK TEST debug firmado por CI, `com.mendozameteo.x10.debug`, `6.7-native-dev-debug`, publicado automáticamente como artifact `MendozaMeteo-X10-v6.7-TEST`.
 
 ## Gate físico Samsung / One UI
 
@@ -78,4 +79,6 @@ Usar una instalación limpia para el test de release; no actualizar encima de un
 
 ## Criterio de aceptación
 
-No generar ni distribuir APK final mientras exista alguno de estos fallos: crash, widget que mezcle ubicaciones, dato expirado mostrado como fresco, alerta oficial duplicada por X10, notificación obsoleta que no se limpia, background location no solicitada explícitamente, tráfico HTTP claro, versión desincronizada, wrapper no verificable, warning Java no suprimido, warning/deprecación Gradle, deprecación propia no justificada o CI rojo.
+No generar ni distribuir APK final de producción mientras exista alguno de estos fallos: crash, widget que mezcle ubicaciones, dato expirado mostrado como fresco, alerta oficial duplicada por X10, notificación obsoleta que no se limpia, background location no solicitada explícitamente, tráfico HTTP claro, versión desincronizada, wrapper no verificable, warning Java no aislado, warning/deprecación Gradle, deprecación propia no justificada o CI rojo.
+
+El APK TEST sí puede generarse cuando el gate automático está verde; su objetivo es ejecutar precisamente el smoke físico anterior antes del firmado de producción.
