@@ -1,0 +1,170 @@
+name: AniFlow RC8 Provider QoE Gate
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+concurrency:
+  group: aniflow-rc8-final
+  cancel-in-progress: true
+
+jobs:
+  android-rc8-final:
+    if: github.event.issue.number == 37 && github.event.comment.body == 'RUN_ANIFLOW_RC8_FINAL'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      ANIFLOW_ROOT: /tmp/aniflow-rc8
+
+    steps:
+      - name: Announce run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue comment 37 --repo "$GITHUB_REPOSITORY" --body "ANIFLOW_RC8_STARTED run_id=${GITHUB_RUN_ID}"
+
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK 36
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+
+      - name: Gradle 9.5.0
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.5.0"
+          cache-read-only: true
+
+      - name: Materialize RC7 and apply RC8
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf "$ANIFLOW_ROOT" /tmp/aniflow-rc7-artifact
+          mkdir -p "$ANIFLOW_ROOT" /tmp/aniflow-rc7-artifact
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/9374085657/zip" > /tmp/aniflow-rc7-artifact.zip
+          unzip -q /tmp/aniflow-rc7-artifact.zip -d /tmp/aniflow-rc7-artifact
+          unzip -q /tmp/aniflow-rc7-artifact/AniFlow-v1.0.6-rc7-source.zip -d "$ANIFLOW_ROOT"
+          grep -q 'versionCode = 1000007' "$ANIFLOW_ROOT/app/build.gradle.kts"
+          grep -q 'versionName = "1.0.6-rc7"' "$ANIFLOW_ROOT/app/build.gradle.kts"
+          echo "60cd9be17ff53c7cd4608760beb44b7b7f284ff6e7fecf5553aaa65c5832c5f5  .ci/aniflow-rc8.patch.gz" | sha256sum -c -
+          gzip -dc .ci/aniflow-rc8.patch.gz > /tmp/aniflow-rc8.patch
+          echo "9cf6bef8883d66370cd7f9ab3f04fc4254355608c330b3a7c568ed59aa82d923  /tmp/aniflow-rc8.patch" | sha256sum -c -
+          cd "$ANIFLOW_ROOT"
+          patch -p1 --forward --batch < /tmp/aniflow-rc8.patch
+          grep -q 'versionCode = 1000008' app/build.gradle.kts
+          grep -q 'versionName = "1.0.7-rc8"' app/build.gradle.kts
+          grep -q 'object ProviderCapabilities' app/src/main/java/com/aniflow/app/domain/ProviderCapabilities.kt
+          grep -q 'ProviderPlaybackMode.EMBED_PLAYER' app/src/main/java/com/aniflow/app/domain/ProviderCapabilities.kt
+          grep -q 'enum class PlaybackFailureClass' app/src/main/java/com/aniflow/app/domain/PlaybackDiagnostics.kt
+          grep -q 'recordPlaybackReady' app/src/main/java/com/aniflow/app/feature/player/PlayerViewModel.kt
+          grep -q 'recordRebuffer' app/src/main/java/com/aniflow/app/feature/player/PlayerViewModel.kt
+          grep -q 'PlaybackFailureClassifier.fromMedia3ErrorCode' app/src/main/java/com/aniflow/app/feature/player/PlayerScreen.kt
+          ! grep -R -q 'Intent.ACTION_VIEW\|openExternalProvider\|OpenDocument\|Elegir vídeo\|Cambiar vídeo' app/src/main/java
+
+      - name: Regression guards Blocks 2-12
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$ANIFLOW_ROOT"
+          for gate in 2 3 4 5 6 7 8 9 10 11 12; do python3 "scripts/validate-block${gate}.py"; done
+
+      - name: Pure Kotlin checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$ANIFLOW_ROOT"
+          bash scripts/validate-pure-kotlin.sh
+          bash scripts/validate-network-kotlin.sh
+          bash scripts/validate-data-kotlin.sh
+          bash scripts/validate-viewmodels-kotlin.sh
+          bash scripts/validate-ui-syntax.sh
+
+      - name: One Piece E01 provider diagnostic
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/anilist-one-piece-query.json <<'JSON'
+          {"query":"query { Media(id: 21, type: ANIME) { id title { romaji english } streamingEpisodes { title url site } externalLinks { site url type language isDisabled } } }"}
+          JSON
+          curl --fail-with-body --silent --show-error \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json' \
+            -H 'User-Agent: AniFlow/1.0 Android CI' \
+            --data-binary @/tmp/anilist-one-piece-query.json \
+            https://graphql.anilist.co > /tmp/anilist-one-piece.json
+          jq -e '.data.Media.id == 21' /tmp/anilist-one-piece.json >/dev/null
+          echo "ONE_PIECE_EPISODE_1_LINKS=$(jq '[.data.Media.streamingEpisodes[]? | select((.title // "") | test("^Episode 1([^0-9]|$)"))] | length' /tmp/anilist-one-piece.json)"
+          echo "ONE_PIECE_STREAMING_PROVIDERS=$(jq '[.data.Media.externalLinks[]? | select(.type == "STREAMING" and (.isDisabled != true))] | length' /tmp/anilist-one-piece.json)"
+
+      - name: Gradle configuration
+        run: gradle -p "$ANIFLOW_ROOT" help --stacktrace --no-daemon
+
+      - name: Unit tests
+        run: gradle -p "$ANIFLOW_ROOT" :app:testDebugUnitTest --stacktrace --no-daemon
+
+      - name: Android lint
+        run: gradle -p "$ANIFLOW_ROOT" :app:lintDebug --stacktrace --no-daemon
+
+      - name: Assemble debug and release
+        run: gradle -p "$ANIFLOW_ROOT" :app:assembleDebug :app:assembleRelease --stacktrace --no-daemon
+
+      - name: Sign and verify RC8
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOOLS="$ANDROID_HOME/build-tools/36.0.0"
+          UNSIGNED="$ANIFLOW_ROOT/app/build/outputs/apk/release/app-release-unsigned.apk"
+          KEYSTORE="$RUNNER_TEMP/aniflow-rc8-release.jks"
+          ALIGNED="$RUNNER_TEMP/AniFlow-v1.0.7-rc8-aligned.apk"
+          FINAL="$RUNNER_TEMP/AniFlow-v1.0.7-rc8.apk"
+          test -s "$UNSIGNED"
+          keytool -genkeypair -v -keystore "$KEYSTORE" -storepass aniflow-rc8-ci -keypass aniflow-rc8-ci -alias aniflow -keyalg RSA -keysize 3072 -validity 3650 -dname "CN=AniFlow Personal RC8, OU=Android, O=AniFlow, L=Mendoza, C=AR"
+          "$TOOLS/zipalign" -p -f 4 "$UNSIGNED" "$ALIGNED"
+          "$TOOLS/apksigner" sign --ks "$KEYSTORE" --ks-key-alias aniflow --ks-pass pass:aniflow-rc8-ci --key-pass pass:aniflow-rc8-ci --out "$FINAL" "$ALIGNED"
+          "$TOOLS/apksigner" verify --verbose --print-certs "$FINAL"
+          unzip -t "$FINAL" >/dev/null
+          "$TOOLS/aapt" dump badging "$FINAL" | tee "$RUNNER_TEMP/apk-badging.txt"
+          sha256sum "$FINAL" | tee "$RUNNER_TEMP/apk-sha256.txt"
+
+      - name: Package deliverables
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/aniflow-rc8-deliverables"
+          mkdir -p "$OUT"
+          (cd "$ANIFLOW_ROOT" && zip -qr "$OUT/AniFlow-v1.0.7-rc8-source.zip" . -x '.gradle/*' '.idea/*' '.kotlin/*' 'app/build/*' '**/build/*')
+          cp "$RUNNER_TEMP/AniFlow-v1.0.7-rc8.apk" "$OUT/"
+          cp "$ANIFLOW_ROOT/app/build/outputs/apk/debug/app-debug.apk" "$OUT/AniFlow-v1.0.7-rc8-debug.apk"
+          cp "$RUNNER_TEMP/apk-sha256.txt" "$OUT/"
+          cp "$RUNNER_TEMP/apk-badging.txt" "$OUT/"
+          cp /tmp/anilist-one-piece.json "$OUT/anilist-one-piece-diagnostic.json"
+          if [ -f "$ANIFLOW_ROOT/app/build/reports/lint-results-debug.html" ]; then cp "$ANIFLOW_ROOT/app/build/reports/lint-results-debug.html" "$OUT/lint-results-debug.html"; fi
+
+      - name: Upload deliverables
+        uses: actions/upload-artifact@v4
+        with:
+          name: AniFlow-v1.0.7-rc8-final
+          path: ${{ runner.temp }}/aniflow-rc8-deliverables/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Announce success
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue comment 37 --repo "$GITHUB_REPOSITORY" --body "ANIFLOW_RC8_SUCCESS run_id=${GITHUB_RUN_ID}"
