@@ -5,7 +5,8 @@ on:
     branches:
       - main
     paths:
-      - ".ci/productshot-rc1-clean-b64/**"
+      - ".ci/productshot-rc1-exact/**"
+      - ".ci/productshot-rc1-remediation/**"
       - ".github/workflows/productshot-rc1-real-build.yml"
   workflow_dispatch:
 
@@ -36,18 +37,23 @@ jobs:
           gradle-version: "9.5.0"
           cache-disabled: true
 
-      - name: Reconstruct verified ProductShot source
+      - name: Reconstruct and verify warning-remediated ProductShot source
         shell: bash
         run: |
           set -euo pipefail
-          # The source archive is transported as text chunks and accepted only if its
-          # deterministic SHA-256 matches the locally audited warning-remediated tree.
-          ARCHIVE="$RUNNER_TEMP/productshot-rc1-android.tar.gz"
+          ARCHIVE="$RUNNER_TEMP/productshot-rc1-base.tar.gz"
           PROJECT="$RUNNER_TEMP/productshot-rc1"
-          cat .ci/productshot-rc1-clean-b64/part* | tr -d '\r\n' | base64 -d > "$ARCHIVE"
-          echo "930cfa0c2a9471e449e95e3f6628555fdd5392f482fd5be83c12bb05b6846022  $ARCHIVE" | sha256sum -c -
+          cat .ci/productshot-rc1-exact/android.tar.gz.b64.x* | tr -d '\r\n' | base64 -d > "$ARCHIVE"
+          echo "0108434bf6b1f4f37e745ac35878e909be4b42e8d38dfd27c3aedde698e2f573  $ARCHIVE" | sha256sum -c -
           mkdir -p "$PROJECT"
           tar -xzf "$ARCHIVE" -C "$PROJECT"
+          patch -d "$PROJECT" -p1 --batch --forward < .ci/productshot-rc1-remediation/warning-remediation.patch
+          (
+            cd "$PROJECT"
+            sha256sum -c "$GITHUB_WORKSPACE/.ci/productshot-rc1-remediation/source.sha256"
+          )
+          test ! -e "$PROJECT/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml"
+          test ! -e "$PROJECT/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml"
           test -s "$PROJECT/app/src/main/java/com/productshot/app/MainActivity.java"
           grep -q "com.android.application.*9.3.1" "$PROJECT/build.gradle"
           grep -q "compileSdk 36" "$PROJECT/app/build.gradle"
@@ -55,8 +61,6 @@ jobs:
           grep -q "minSdk 29" "$PROJECT/app/build.gradle"
           grep -q 'android:authorities="${applicationId}.files"' "$PROJECT/app/src/main/AndroidManifest.xml"
           grep -q 'BuildConfig.APPLICATION_ID + ".files"' "$PROJECT/app/src/main/java/com/productshot/app/ShareFileProvider.java"
-          test -s "$PROJECT/app/src/main/res/xml/full_backup_rules.xml"
-          test -s "$PROJECT/app/src/main/res/xml/data_extraction_rules.xml"
           grep -q '<monochrome' "$PROJECT/app/src/main/res/mipmap-anydpi/ic_launcher.xml"
 
       - name: Ensure Android API 36 and Build Tools 36.0.0
@@ -122,7 +126,7 @@ jobs:
       - name: Upload internal validation artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4 release line
         with:
-          name: ProductShot-v0.1.0-rc1-real-build
+          name: ProductShot-v0.1.0-rc1-real-build-warning-remediated
           path: ${{ runner.temp }}/productshot-rc1-deliverables/*
           if-no-files-found: error
           retention-days: 7
