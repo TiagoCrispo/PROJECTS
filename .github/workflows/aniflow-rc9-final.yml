@@ -35,7 +35,7 @@ jobs:
 
       - name: Install Android SDK + emulator
         run: |
-          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools" "emulator" "system-images;android-35;aosp;x86_64"
+          sdkmanager --channel=3 "platforms;android-36" "build-tools;36.0.0" "platform-tools" "emulator" "system-images;android-30;aosp_atd;x86_64"
           sudo chmod 666 /dev/kvm || true
 
       - uses: gradle/actions/setup-gradle@v4
@@ -53,8 +53,8 @@ jobs:
           unzip -q /tmp/aniflow-rc8-artifact/AniFlow-v1.0.7-rc8-source.zip -d "$ANIFLOW_ROOT"
           grep -q 'versionCode = 1000008' "$ANIFLOW_ROOT/app/build.gradle.kts"
           grep -q 'versionName = "1.0.7-rc8"' "$ANIFLOW_ROOT/app/build.gradle.kts"
-          cat .ci/rc9/part01.b64 .ci/rc9/part02.b64 .ci/rc9/part03.b64 .ci/rc9/part04.b64 | base64 -d | gzip -dc > /tmp/aniflow-rc9.patch
-          echo "8e34c6b1df59174bc4c584d8fb78d49026e595c0f28b56a7b1d1db7d5c080935  /tmp/aniflow-rc9.patch" | sha256sum -c -
+          cat .ci/rc9v2/part01.b64 .ci/rc9v2/part02.b64 .ci/rc9v2/part03.b64 | base64 -d | gzip -dc > /tmp/aniflow-rc9.patch
+          echo "0076e2a88f82d82b130f35a91ac257a275f3d85f9c238ba52b4b5928d9e968fc  /tmp/aniflow-rc9.patch" | sha256sum -c -
           cd "$ANIFLOW_ROOT"
           patch -p1 --forward --batch < /tmp/aniflow-rc9.patch
           grep -q 'versionCode = 1000009' app/build.gradle.kts
@@ -63,6 +63,8 @@ jobs:
           grep -q 'profileinstaller:profileinstaller:1.4.1' app/build.gradle.kts
           grep -q 'StartupTimingMetric' benchmark/src/main/java/com/aniflow/benchmark/StartupBenchmarks.kt
           grep -q 'BaselineProfileRule' benchmark/src/main/java/com/aniflow/benchmark/BaselineProfileGenerator.kt
+          grep -q 'apiLevel = 30' benchmark/build.gradle.kts
+          grep -q 'systemImageSource = "aosp-atd"' benchmark/build.gradle.kts
 
       - name: Regression guards Blocks 2-13
         shell: bash
@@ -103,7 +105,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TASK="$(gradle -p "$ANIFLOW_ROOT" -q :benchmark:tasks --all | awk '/^pixel6Api35.*AndroidTest([[:space:]]|$)/ && $1 !~ /Setup/ {print $1; exit}')"
+          TASK="$(gradle -p "$ANIFLOW_ROOT" -q :benchmark:tasks --all | awk '/^pixel6Api30.*AndroidTest([[:space:]]|$)/ && $1 !~ /Setup/ {print $1; exit}')"
           echo "MACROBENCHMARK_TASK=$TASK"
           test -n "$TASK"
           gradle -p "$ANIFLOW_ROOT" ":benchmark:$TASK" --stacktrace --no-daemon \
