@@ -57,17 +57,34 @@ jobs:
           (cd mendoza-meteo-native && ./gradlew --version)
       - name: Unit tests, lint and warning-clean builds
         run: (cd mendoza-meteo-native && ./gradlew clean testDebugUnitTest lintRelease assembleDebug assembleRelease --stacktrace --warning-mode fail)
-      - name: Inspect release output
+      - name: Inspect APK outputs
         run: |
-          APK=mendoza-meteo-native/app/build/outputs/apk/release/app-release-unsigned.apk
+          RELEASE_APK=mendoza-meteo-native/app/build/outputs/apk/release/app-release-unsigned.apk
+          DEBUG_APK=mendoza-meteo-native/app/build/outputs/apk/debug/app-debug.apk
           AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
-          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -p -v 4 "$APK"
-          BADGING="$($AAPT dump badging "$APK")"
-          echo "$BADGING" | grep -E "package:|sdkVersion:|targetSdkVersion:"
-          echo "$BADGING" | grep "versionCode='66'"
-          echo "$BADGING" | grep "versionName='6.6-native-dev'"
-          "$AAPT" dump permissions "$APK" | grep "android.permission.POST_NOTIFICATIONS"
-          ! "$AAPT" dump permissions "$APK" | grep -q "android.permission.ACCESS_BACKGROUND_LOCATION"
-          ! "$AAPT" dump permissions "$APK" | grep -q "android.permission.SCHEDULE_EXACT_ALARM"
-          "$AAPT" dump xmltree "$APK" AndroidManifest.xml | grep "com.mendozameteo.x10.LauncherActivity"
-          unzip -t "$APK"
+          ZIPALIGN="$ANDROID_HOME/build-tools/36.0.0/zipalign"
+
+          "$ZIPALIGN" -c -p -v 4 "$RELEASE_APK"
+          RELEASE_BADGING="$($AAPT dump badging "$RELEASE_APK")"
+          echo "$RELEASE_BADGING" | grep -E "package:|sdkVersion:|targetSdkVersion:"
+          echo "$RELEASE_BADGING" | grep "versionCode='67'"
+          echo "$RELEASE_BADGING" | grep "versionName='6.7-native-dev'"
+          "$AAPT" dump permissions "$RELEASE_APK" | grep "android.permission.POST_NOTIFICATIONS"
+          ! "$AAPT" dump permissions "$RELEASE_APK" | grep -q "android.permission.ACCESS_BACKGROUND_LOCATION"
+          ! "$AAPT" dump permissions "$RELEASE_APK" | grep -q "android.permission.SCHEDULE_EXACT_ALARM"
+          "$AAPT" dump xmltree "$RELEASE_APK" AndroidManifest.xml | grep "com.mendozameteo.x10.LauncherActivity"
+          unzip -t "$RELEASE_APK"
+
+          "$ZIPALIGN" -c -p -v 4 "$DEBUG_APK"
+          DEBUG_BADGING="$($AAPT dump badging "$DEBUG_APK")"
+          echo "$DEBUG_BADGING" | grep "name='com.mendozameteo.x10.debug'"
+          echo "$DEBUG_BADGING" | grep "versionCode='67'"
+          echo "$DEBUG_BADGING" | grep "versionName='6.7-native-dev-debug'"
+          unzip -t "$DEBUG_APK"
+      - name: Upload installable test APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: MendozaMeteo-X10-v6.7-TEST
+          path: mendoza-meteo-native/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
