@@ -17,7 +17,7 @@ jobs:
   android-rc9-final:
     if: github.event.issue.number == 37 && github.event.comment.body == 'RUN_ANIFLOW_RC9_FINAL'
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
+    timeout-minutes: 80
     env:
       ANIFLOW_ROOT: /tmp/aniflow-rc9
 
@@ -33,7 +33,7 @@ jobs:
 
       - uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK + emulator
+      - name: Install Android SDK + ATD
         run: |
           sdkmanager --channel=3 "platforms;android-36" "build-tools;36.0.0" "platform-tools" "emulator" "system-images;android-30;aosp_atd;x86_64"
           sudo chmod 666 /dev/kvm || true
@@ -41,7 +41,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: "9.5.0", cache-read-only: true }
 
-      - name: Materialize RC8 and apply verified RC9
+      - name: Materialize RC8 and apply verified RC9 v3
         shell: bash
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
@@ -53,18 +53,19 @@ jobs:
           unzip -q /tmp/aniflow-rc8-artifact/AniFlow-v1.0.7-rc8-source.zip -d "$ANIFLOW_ROOT"
           grep -q 'versionCode = 1000008' "$ANIFLOW_ROOT/app/build.gradle.kts"
           grep -q 'versionName = "1.0.7-rc8"' "$ANIFLOW_ROOT/app/build.gradle.kts"
-          cat .ci/rc9v2/part01.b64 .ci/rc9v2/part02.b64 .ci/rc9v2/part03.b64 | base64 -d | gzip -dc > /tmp/aniflow-rc9.patch
-          echo "0076e2a88f82d82b130f35a91ac257a275f3d85f9c238ba52b4b5928d9e968fc  /tmp/aniflow-rc9.patch" | sha256sum -c -
+          cat .ci/rc9v3/part01.b64 .ci/rc9v3/part02.b64 .ci/rc9v3/part03.b64 | base64 -d | gzip -dc > /tmp/aniflow-rc9.patch
+          echo "8b554c769d730b00a4647da9dbbbfd29f16fe15e33d4b7bd4233e3fffac4231a  /tmp/aniflow-rc9.patch" | sha256sum -c -
           cd "$ANIFLOW_ROOT"
           patch -p1 --forward --batch < /tmp/aniflow-rc9.patch
           grep -q 'versionCode = 1000009' app/build.gradle.kts
           grep -q 'versionName = "1.0.8-rc9"' app/build.gradle.kts
-          grep -q 'id("androidx.baselineprofile")' app/build.gradle.kts
           grep -q 'profileinstaller:profileinstaller:1.4.1' app/build.gradle.kts
+          grep -q 'create("profile")' app/build.gradle.kts
+          grep -q 'create("benchmark")' app/build.gradle.kts
           grep -q 'StartupTimingMetric' benchmark/src/main/java/com/aniflow/benchmark/StartupBenchmarks.kt
           grep -q 'BaselineProfileRule' benchmark/src/main/java/com/aniflow/benchmark/BaselineProfileGenerator.kt
-          grep -q 'apiLevel = 30' benchmark/build.gradle.kts
-          grep -q 'systemImageSource = "aosp-atd"' benchmark/build.gradle.kts
+          ! grep -q 'id("androidx.baselineprofile")' app/build.gradle.kts
+          ! grep -q 'id("androidx.baselineprofile")' benchmark/build.gradle.kts
 
       - name: Regression guards Blocks 2-13
         shell: bash
@@ -87,35 +88,53 @@ jobs:
       - name: Gradle configuration + unit tests
         run: gradle -p "$ANIFLOW_ROOT" help :app:testDebugUnitTest --stacktrace --no-daemon
 
-      - name: Compile benchmark module
-        run: gradle -p "$ANIFLOW_ROOT" :benchmark:assemble --stacktrace --no-daemon
+      - name: Compile benchmark variants
+        run: gradle -p "$ANIFLOW_ROOT" :benchmark:assembleProfile :benchmark:assembleBenchmark --stacktrace --no-daemon
 
-      - name: Generate Baseline Profile on managed Pixel 6
+      - name: Generate Baseline Profile manually on managed Pixel 6
         shell: bash
         run: |
           set -euo pipefail
-          gradle -p "$ANIFLOW_ROOT" :app:generateBaselineProfile --stacktrace --no-daemon
-          PROFILE="$(find "$ANIFLOW_ROOT/app/src" -type f -path '*/generated/baselineProfiles/*' -name 'baseline-prof.txt' -print -quit)"
-          test -n "$PROFILE"
-          test -s "$PROFILE"
-          echo "BASELINE_PROFILE=$PROFILE"
-          wc -l "$PROFILE"
+          PROFILE_TASK="$(gradle -p "$ANIFLOW_ROOT" -q :benchmark:tasks --all | awk '/^pixel6Api30.*ProfileAndroidTest([[:space:]]|$)/ {print $1; exit}')"
+          echo "PROFILE_TASK=$PROFILE_TASK"
+          test -n "$PROFILE_TASK"
+          gradle -p "$ANIFLOW_ROOT" ":benchmark:$PROFILE_TASK" --stacktrace --no-daemon -Pandroid.testInstrumentationRunnerArguments.class=com.aniflow.benchmark.BaselineProfileGenerator
+          GENERATED="$(find "$ANIFLOW_ROOT/benchmark/build/outputs" -type f -name '*baseline-prof.txt' -print | head -n 1)"
+          echo "GENERATED_PROFILE=$GENERATED"
+          test -n "$GENERATED"
+          test -s "$GENERATED"
+          cp "$GENERATED" "$ANIFLOW_ROOT/app/src/main/baseline-prof.txt"
+          test -s "$ANIFLOW_ROOT/app/src/main/baseline-prof.txt"
+          echo "BASELINE_PROFILE_RULES=$(wc -l < "$ANIFLOW_ROOT/app/src/main/baseline-prof.txt")"
+          head -n 5 "$ANIFLOW_ROOT/app/src/main/baseline-prof.txt"
+
+      - name: Build benchmark target with embedded profile
+        run: gradle -p "$ANIFLOW_ROOT" :app:assembleBenchmark --stacktrace --no-daemon
 
       - name: Run startup Macrobenchmarks
         shell: bash
         run: |
           set -euo pipefail
-          TASK="$(gradle -p "$ANIFLOW_ROOT" -q :benchmark:tasks --all | awk '/^pixel6Api30.*AndroidTest([[:space:]]|$)/ && $1 !~ /Setup/ {print $1; exit}')"
-          echo "MACROBENCHMARK_TASK=$TASK"
-          test -n "$TASK"
-          gradle -p "$ANIFLOW_ROOT" ":benchmark:$TASK" --stacktrace --no-daemon \
-            -Pandroid.testInstrumentationRunnerArguments.class=com.aniflow.benchmark.StartupBenchmarks
+          BENCH_TASK="$(gradle -p "$ANIFLOW_ROOT" -q :benchmark:tasks --all | awk '/^pixel6Api30.*BenchmarkAndroidTest([[:space:]]|$)/ {print $1; exit}')"
+          echo "MACROBENCHMARK_TASK=$BENCH_TASK"
+          test -n "$BENCH_TASK"
+          gradle -p "$ANIFLOW_ROOT" ":benchmark:$BENCH_TASK" --stacktrace --no-daemon -Pandroid.testInstrumentationRunnerArguments.class=com.aniflow.benchmark.StartupBenchmarks
+          find "$ANIFLOW_ROOT/benchmark/build/outputs" -type f \( -name '*benchmarkData.json' -o -name '*.perfetto-trace' \) -print | head -n 20 || true
 
       - name: Android lint
         run: gradle -p "$ANIFLOW_ROOT" :app:lintDebug --stacktrace --no-daemon
 
       - name: Assemble debug and release
         run: gradle -p "$ANIFLOW_ROOT" :app:assembleDebug :app:assembleRelease --stacktrace --no-daemon
+
+      - name: Verify release embeds Baseline Profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          UNSIGNED="$ANIFLOW_ROOT/app/build/outputs/apk/release/app-release-unsigned.apk"
+          test -s "$UNSIGNED"
+          unzip -l "$UNSIGNED" | grep -E 'assets/dexopt/baseline\.(prof|profm)' | tee "$RUNNER_TEMP/baseline-apk-entries.txt"
+          test "$(wc -l < "$RUNNER_TEMP/baseline-apk-entries.txt")" -ge 2
 
       - name: Sign and verify RC9
         shell: bash
@@ -126,7 +145,6 @@ jobs:
           KEYSTORE="$RUNNER_TEMP/aniflow-rc9-release.jks"
           ALIGNED="$RUNNER_TEMP/AniFlow-v1.0.8-rc9-aligned.apk"
           FINAL="$RUNNER_TEMP/AniFlow-v1.0.8-rc9.apk"
-          test -s "$UNSIGNED"
           keytool -genkeypair -v -keystore "$KEYSTORE" -storepass aniflow-rc9-ci -keypass aniflow-rc9-ci -alias aniflow -keyalg RSA -keysize 3072 -validity 3650 -dname "CN=AniFlow Personal RC9, OU=Android, O=AniFlow, L=Mendoza, C=AR"
           "$TOOLS/zipalign" -p -f 4 "$UNSIGNED" "$ALIGNED"
           "$TOOLS/apksigner" sign --ks "$KEYSTORE" --ks-key-alias aniflow --ks-pass pass:aniflow-rc9-ci --key-pass pass:aniflow-rc9-ci --out "$FINAL" "$ALIGNED"
@@ -144,8 +162,9 @@ jobs:
           (cd "$ANIFLOW_ROOT" && zip -qr "$OUT/AniFlow-v1.0.8-rc9-source.zip" . -x '.gradle/*' '.idea/*' '.kotlin/*' 'app/build/*' '**/build/*')
           cp "$RUNNER_TEMP/AniFlow-v1.0.8-rc9.apk" "$OUT/"
           cp "$ANIFLOW_ROOT/app/build/outputs/apk/debug/app-debug.apk" "$OUT/AniFlow-v1.0.8-rc9-debug.apk"
-          cp "$RUNNER_TEMP/apk-sha256.txt" "$RUNNER_TEMP/apk-badging.txt" "$OUT/"
-          find "$ANIFLOW_ROOT" -type f \( -name '*benchmarkData.json' -o -name '*baseline-prof.txt' -o -name '*startup-prof.txt' \) -exec cp --parents {} "$OUT/" \; || true
+          cp "$RUNNER_TEMP/apk-sha256.txt" "$RUNNER_TEMP/apk-badging.txt" "$RUNNER_TEMP/baseline-apk-entries.txt" "$OUT/"
+          cp "$ANIFLOW_ROOT/app/src/main/baseline-prof.txt" "$OUT/baseline-prof.txt"
+          find "$ANIFLOW_ROOT/benchmark/build/outputs" -type f \( -name '*benchmarkData.json' -o -name '*.perfetto-trace' -o -name '*baseline-prof.txt' \) -exec cp --parents {} "$OUT/" \; || true
           test ! -f "$ANIFLOW_ROOT/app/build/reports/lint-results-debug.html" || cp "$ANIFLOW_ROOT/app/build/reports/lint-results-debug.html" "$OUT/"
 
       - uses: actions/upload-artifact@v4
