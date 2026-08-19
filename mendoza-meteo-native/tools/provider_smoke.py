@@ -4,7 +4,7 @@ from pathlib import Path
 
 LAT=-32.89; LON=-68.84; TZ="America/Argentina/Mendoza"
 BUILD_GRADLE=(Path(__file__).resolve().parents[1]/"app/build.gradle").read_text(encoding="utf-8")
-VERSION_MATCH=re.search(r"versionName\s+'([^']+)'",BUILD_GRADLE)
+VERSION_MATCH=re.search(r"versionName\s*=\s*'([^']+)'",BUILD_GRADLE)
 if not VERSION_MATCH: raise RuntimeError("versionName missing from app/build.gradle")
 UA=f"MendozaMeteoX10-CI/{VERSION_MATCH.group(1)}"
 COMMON_CURRENT=["temperature_2m","apparent_temperature","relative_humidity_2m","dew_point_2m","precipitation","snowfall","weather_code","pressure_msl","cloud_cover","visibility","wind_speed_10m","wind_gusts_10m","wind_direction_10m"]
