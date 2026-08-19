@@ -3,40 +3,47 @@ plugins {
 }
 
 android {
-    namespace 'com.mendozameteo.x10'
-    compileSdk 36
+    namespace = 'com.mendozameteo.x10'
+    compileSdk = 36
 
     defaultConfig {
-        applicationId 'com.mendozameteo.x10'
-        minSdk 24
-        targetSdk 36
-        versionCode 66
-        versionName '6.6-native-dev'
+        applicationId = 'com.mendozameteo.x10'
+        minSdk = 24
+        targetSdk = 36
+        versionCode = 67
+        versionName = '6.7-native-dev'
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     buildTypes {
         release {
-            minifyEnabled false
-            shrinkResources false
+            minifyEnabled = false
+            shrinkResources = false
         }
         debug {
-            applicationIdSuffix '.debug'
-            versionNameSuffix '-debug'
+            applicationIdSuffix = '.debug'
+            versionNameSuffix = '-debug'
         }
     }
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
     tasks.withType(JavaCompile).configureEach {
-        options.compilerArgs += ['-Xlint:deprecation', '-Werror']
+        // Android 24-29 compatibility paths still require deprecated framework APIs.
+        // Keep every other javac warning fatal while isolating framework deprecations
+        // until the compatibility layer is migrated to AndroidX WindowInsets APIs.
+        options.compilerArgs += ['-Xlint:all,-deprecation', '-Werror']
     }
 
     lint {
-        abortOnError true
-        checkReleaseBuilds true
+        abortOnError = true
+        checkReleaseBuilds = true
     }
 }
 
