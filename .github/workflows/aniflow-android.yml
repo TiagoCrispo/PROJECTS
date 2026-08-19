@@ -17,6 +17,10 @@ on:
       - ".github/workflows/aniflow-android.yml"
   workflow_dispatch:
 
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   validate-build:
     runs-on: ubuntu-latest
@@ -25,11 +29,18 @@ jobs:
       ANIFLOW_ROOT: ${{ runner.temp }}/aniflow-src
 
     steps:
+      - name: Announce run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST "repos/$GITHUB_REPOSITORY/issues/34/comments" \
+            -f body="ANIFLOW_PUSH_V1_START run_id=$GITHUB_RUN_ID sha=$GITHUB_SHA event=$GITHUB_EVENT_NAME"
+
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -151,3 +162,12 @@ jobs:
           name: AniFlow-v1.0.0-rc1
           path: ${{ runner.temp }}/aniflow-deliverables/*
           if-no-files-found: error
+
+      - name: Publish result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          gh api --method POST "repos/$GITHUB_REPOSITORY/issues/34/comments" \
+            -f body="ANIFLOW_PUSH_V1_DONE run_id=$GITHUB_RUN_ID status=$JOB_STATUS artifact=AniFlow-v1.0.0-rc1"
