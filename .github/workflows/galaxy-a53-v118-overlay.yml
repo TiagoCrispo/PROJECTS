@@ -5,7 +5,14 @@ on:
     branches:
       - galaxy-a53-v1.18-background-center
     paths:
-      - projects/galaxy-a53-performance/v1.18-overlay/READY
+      - projects/galaxy-a53-performance/v1.18-overlay/**
+      - .github/workflows/galaxy-a53-v118-overlay.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - projects/galaxy-a53-performance/v1.18-overlay/**
+      - .github/workflows/galaxy-a53-v118-overlay.yml
   workflow_dispatch:
 
 permissions:
