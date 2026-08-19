@@ -1,0 +1,42 @@
+name: ProductShot Block 11 source crash inspection
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/productshot-block11-source-inspect.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-main-activity:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Reconstruct and print crash-adjacent source
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARCHIVE="$RUNNER_TEMP/base.tar.gz"
+          PROJECT="$RUNNER_TEMP/productshot"
+          cat .ci/productshot-rc1-exact/android.tar.gz.b64.x* | tr -d '\r\n' | base64 -d > "$ARCHIVE"
+          echo "0108434bf6b1f4f37e745ac35878e909be4b42e8d38dfd27c3aedde698e2f573  $ARCHIVE" | sha256sum -c -
+          mkdir -p "$PROJECT"
+          tar -xzf "$ARCHIVE" -C "$PROJECT"
+          patch -d "$PROJECT" -p1 --batch --forward < .ci/productshot-rc1-remediation/warning-remediation.patch
+          SRC="$PROJECT/app/src/main/java/com/productshot/app/MainActivity.java"
+          echo '=== window/insets references ==='
+          grep -n -E 'Insets|insets|Decor|decor|Window|window|setContentView|setDecorFitsSystemWindows' "$SRC" || true
+          echo '=== lines 210-275 ==='
+          nl -ba "$SRC" | sed -n '210,275p'
+          echo '=== onCreate region ==='
+          START="$(grep -n 'void onCreate' "$SRC" | head -1 | cut -d: -f1)"
+          test -n "$START"
+          END=$((START+120))
+          nl -ba "$SRC" | sed -n "${START},${END}p"
