@@ -1,0 +1,179 @@
+name: AniFlow RC2 Auto Source Build
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+concurrency:
+  group: aniflow-rc2-build
+  cancel-in-progress: false
+
+jobs:
+  android-rc2:
+    if: github.event_name != 'issue_comment' || github.event.comment.body == 'RUN_ANIFLOW_RC2'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    env:
+      ANIFLOW_ROOT: /tmp/aniflow-rc2
+
+    steps:
+      - name: Announce run
+        if: github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST "repos/$GITHUB_REPOSITORY/issues/${{ github.event.issue.number }}/comments" \
+            -f body="ANIFLOW_RC2_START run_id=$GITHUB_RUN_ID sha=$GITHUB_SHA" || true
+
+      - name: Checkout CI assets
+        uses: actions/checkout@v5
+
+      - name: JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+
+      - name: Gradle 9.5.0
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.5.0"
+          cache-read-only: true
+
+      - name: Materialize exact successful RC1 source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf "$ANIFLOW_ROOT" /tmp/aniflow-rc1-artifact
+          mkdir -p "$ANIFLOW_ROOT" /tmp/aniflow-rc1-artifact
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/9350429404/zip" > /tmp/aniflow-rc1-artifact.zip
+          unzip -q /tmp/aniflow-rc1-artifact.zip -d /tmp/aniflow-rc1-artifact
+          test -s /tmp/aniflow-rc1-artifact/AniFlow-v1.0.0-rc1-source.zip
+          unzip -q /tmp/aniflow-rc1-artifact/AniFlow-v1.0.0-rc1-source.zip -d "$ANIFLOW_ROOT"
+          test -s "$ANIFLOW_ROOT/settings.gradle.kts"
+          test -s "$ANIFLOW_ROOT/app/build.gradle.kts"
+          grep -q 'versionName = "1.0.0-rc1"' "$ANIFLOW_ROOT/app/build.gradle.kts"
+
+      - name: Apply RC2 automatic-source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d .ci/aniflow-rc2.patch.gz.b64 | gzip -d > /tmp/aniflow-rc2.patch
+          cd "$ANIFLOW_ROOT"
+          patch -p1 --forward --batch < /tmp/aniflow-rc2.patch
+          grep -q 'versionCode = 1000002' app/build.gradle.kts
+          grep -q 'versionName = "1.0.1-rc2"' app/build.gradle.kts
+          grep -q 'streamingEpisodes { title thumbnail url site }' app/src/main/java/com/aniflow/app/data/network/AniListApi.kt
+          grep -q 'watchUrl' app/src/main/java/com/aniflow/app/domain/Models.kt
+          grep -q 'officialProviders' app/src/main/java/com/aniflow/app/feature/player/PlayerViewModel.kt
+          grep -q 'Elige un servidor disponible' app/src/main/java/com/aniflow/app/feature/player/PlayerScreen.kt
+          ! grep -q 'Elegir vídeo' app/src/main/java/com/aniflow/app/feature/player/PlayerScreen.kt
+          ! grep -q 'OpenDocument' app/src/main/java/com/aniflow/app/feature/player/PlayerScreen.kt
+
+      - name: Regression guards Blocks 2-7
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$ANIFLOW_ROOT"
+          for gate in 2 3 4 5 6 7; do python3 "scripts/validate-block${gate}.py"; done
+
+      - name: Gradle configuration
+        run: gradle -p "$ANIFLOW_ROOT" help --stacktrace --no-daemon
+
+      - name: Unit tests
+        run: gradle -p "$ANIFLOW_ROOT" :app:testDebugUnitTest --stacktrace --no-daemon
+
+      - name: Android lint
+        shell: bash
+        run: |
+          set +e
+          gradle -p "$ANIFLOW_ROOT" :app:lintDebug --stacktrace --no-daemon
+          STATUS=$?
+          REPORT="$ANIFLOW_ROOT/app/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt"
+          if [ -f "$REPORT" ]; then
+            echo "===== FULL LINT REPORT ====="
+            cat "$REPORT"
+            echo "===== END LINT REPORT ====="
+          fi
+          exit "$STATUS"
+
+      - name: Assemble debug and release
+        run: gradle -p "$ANIFLOW_ROOT" :app:assembleDebug :app:assembleRelease --stacktrace --no-daemon
+
+      - name: Sign and verify RC2 release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOOLS="$ANDROID_HOME/build-tools/36.0.0"
+          UNSIGNED="$ANIFLOW_ROOT/app/build/outputs/apk/release/app-release-unsigned.apk"
+          KEYSTORE="$RUNNER_TEMP/aniflow-rc2-release.jks"
+          ALIGNED="$RUNNER_TEMP/AniFlow-v1.0.1-rc2-aligned.apk"
+          FINAL="$RUNNER_TEMP/AniFlow-v1.0.1-rc2.apk"
+          test -s "$UNSIGNED"
+          keytool -genkeypair -v \
+            -keystore "$KEYSTORE" \
+            -storepass aniflow-rc2-ci \
+            -keypass aniflow-rc2-ci \
+            -alias aniflow \
+            -keyalg RSA -keysize 3072 -validity 3650 \
+            -dname "CN=AniFlow Personal RC2, OU=Android, O=AniFlow, L=Mendoza, C=AR"
+          "$TOOLS/zipalign" -p -f 4 "$UNSIGNED" "$ALIGNED"
+          "$TOOLS/apksigner" sign \
+            --ks "$KEYSTORE" \
+            --ks-key-alias aniflow \
+            --ks-pass pass:aniflow-rc2-ci \
+            --key-pass pass:aniflow-rc2-ci \
+            --out "$FINAL" \
+            "$ALIGNED"
+          "$TOOLS/apksigner" verify --verbose --print-certs "$FINAL"
+          unzip -t "$FINAL" >/dev/null
+          unzip -l "$FINAL" | grep -q AndroidManifest.xml
+          unzip -l "$FINAL" | grep -q classes.dex
+          "$TOOLS/aapt" dump badging "$FINAL" | tee "$RUNNER_TEMP/apk-badging.txt"
+          sha256sum "$FINAL" | tee "$RUNNER_TEMP/apk-sha256.txt"
+
+      - name: Package RC2 deliverables
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/aniflow-rc2-deliverables"
+          mkdir -p "$OUT"
+          (cd "$ANIFLOW_ROOT" && zip -qr "$OUT/AniFlow-v1.0.1-rc2-source.zip" . -x '.gradle/*' '.idea/*' '.kotlin/*' 'app/build/*' '**/build/*')
+          cp "$RUNNER_TEMP/AniFlow-v1.0.1-rc2.apk" "$OUT/"
+          cp "$ANIFLOW_ROOT/app/build/outputs/apk/debug/app-debug.apk" "$OUT/AniFlow-v1.0.1-rc2-debug.apk"
+          cp "$RUNNER_TEMP/apk-sha256.txt" "$OUT/"
+          cp "$RUNNER_TEMP/apk-badging.txt" "$OUT/"
+          if [ -f "$ANIFLOW_ROOT/app/build/reports/lint-results-debug.html" ]; then
+            cp "$ANIFLOW_ROOT/app/build/reports/lint-results-debug.html" "$OUT/lint-results-debug.html"
+          fi
+
+      - name: Upload RC2 deliverables
+        uses: actions/upload-artifact@v4
+        with:
+          name: AniFlow-v1.0.1-rc2
+          path: ${{ runner.temp }}/aniflow-rc2-deliverables/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish result
+        if: always() && github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          gh api --method POST "repos/$GITHUB_REPOSITORY/issues/${{ github.event.issue.number }}/comments" \
+            -f body="ANIFLOW_RC2_DONE run_id=$GITHUB_RUN_ID status=$JOB_STATUS artifact=AniFlow-v1.0.1-rc2" || true
