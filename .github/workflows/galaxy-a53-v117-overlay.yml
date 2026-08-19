@@ -6,6 +6,12 @@ on:
       - galaxy-a53-v1.17-gallery2
     paths:
       - projects/galaxy-a53-performance/v1.17-overlay/READY
+  pull_request:
+    branches:
+      - main
+    paths:
+      - projects/galaxy-a53-performance/v1.17-overlay/**
+      - .github/workflows/galaxy-a53-v117-overlay.yml
   workflow_dispatch:
 
 permissions:
