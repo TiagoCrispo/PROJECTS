@@ -4,6 +4,7 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - ".ci/productshot-block11-runtime-fix/**"
       - ".github/workflows/productshot-block11-source-inspect.yml"
   workflow_dispatch:
 
@@ -19,7 +20,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - name: Reconstruct and print crash-adjacent source
+      - name: Reconstruct and apply deterministic runtime fix
         shell: bash
         run: |
           set -euo pipefail
@@ -30,13 +31,11 @@ jobs:
           mkdir -p "$PROJECT"
           tar -xzf "$ARCHIVE" -C "$PROJECT"
           patch -d "$PROJECT" -p1 --batch --forward < .ci/productshot-rc1-remediation/warning-remediation.patch
+          (cd "$PROJECT" && sha256sum -c "$GITHUB_WORKSPACE/.ci/productshot-rc1-remediation/source.sha256")
           SRC="$PROJECT/app/src/main/java/com/productshot/app/MainActivity.java"
-          echo '=== window/insets references ==='
-          grep -n -E 'Insets|insets|Decor|decor|Window|window|setContentView|setDecorFitsSystemWindows' "$SRC" || true
-          echo '=== lines 210-275 ==='
-          nl -ba "$SRC" | sed -n '210,275p'
-          echo '=== onCreate region ==='
-          START="$(grep -n 'void onCreate' "$SRC" | head -1 | cut -d: -f1)"
-          test -n "$START"
-          END=$((START+120))
-          nl -ba "$SRC" | sed -n "${START},${END}p"
+          python3 .ci/productshot-block11-runtime-fix/apply_android35_insets_fix.py "$SRC"
+          echo '=== fixed configureWindow region ==='
+          nl -ba "$SRC" | sed -n '138,170p'
+          echo '=== fixed content-view region ==='
+          nl -ba "$SRC" | sed -n '242,260p'
+          sha256sum "$SRC"
