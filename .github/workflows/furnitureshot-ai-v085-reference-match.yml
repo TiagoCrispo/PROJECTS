@@ -1,0 +1,134 @@
+name: FurnitureShot AI v0.8.5 reference match 2
+
+on:
+  pull_request:
+    paths:
+      - "projects/furnitureshot-ai-overlays/v0.8.5-reference-match2/**"
+      - ".github/workflows/furnitureshot-ai-v085-reference-match.yml"
+  workflow_dispatch:
+
+jobs:
+  build-debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+
+      - name: Assemble v0.8.5 source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILD_DIR="$RUNNER_TEMP/furnitureshot-ai-v085"
+          cp -a projects/furnitureshot-ai "$BUILD_DIR"
+          PROCESSING="$BUILD_DIR/app/src/main/java/com/tiagocrispo/furnitureshot/processing"
+          UI="$BUILD_DIR/app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt"
+          BETA22="projects/furnitureshot-ai-overlays/v0.7.1-beta22"
+          BETA23="projects/furnitureshot-ai-overlays/v0.7.2-beta23"
+
+          rm -f "$PROCESSING/HighFidelityEnhancementEngine.kt"
+          cp "$BETA22/LocalEnhancementEngine.kt" "$PROCESSING/LocalEnhancementEngine.kt"
+          cp "$BETA22/FinishPassEngine.kt" "$PROCESSING/FinishPassEngine.kt"
+          cp "$BETA22/PromptPolicy.kt" "$PROCESSING/PromptPolicy.kt"
+          python3 "$BETA23/transform_beta22_to_beta23.py" "$PROCESSING/LocalEnhancementEngine.kt"
+          cp "$BETA23/PromptPolicy.kt" "$PROCESSING/PromptPolicy.kt"
+
+          PATCH_B64="$RUNNER_TEMP/final.patch.b64"
+          PATCH_FILE="$RUNNER_TEMP/final.patch"
+          cat projects/furnitureshot-ai-overlays/v0.8.0-final/patch-b64/chunk*.txt > "$PATCH_B64"
+          base64 -d "$PATCH_B64" > "$PATCH_FILE"
+          patch --batch --forward -p1 -d "$BUILD_DIR" < "$PATCH_FILE"
+
+          python3 projects/furnitureshot-ai-overlays/v0.8.1-hotfix1/runtime_hotfix.py "$PROCESSING/LocalEnhancementEngine.kt"
+          python3 projects/furnitureshot-ai-overlays/v0.8.2-final-ui/ui_transform.py "$UI"
+          python3 projects/furnitureshot-ai-overlays/v0.8.3-final-clean-ui/clean_topbar.py "$UI"
+          python3 projects/furnitureshot-ai-overlays/v0.8.4-reference-match1/reference_match_v084.py \
+            "$PROCESSING/LocalEnhancementEngine.kt" "$PROCESSING/PromptPolicy.kt"
+          python3 projects/furnitureshot-ai-overlays/v0.8.5-reference-match2/reference_match_v085.py \
+            "$PROCESSING/LocalEnhancementEngine.kt" "$PROCESSING/PromptPolicy.kt"
+
+          python3 - "$BUILD_DIR/app/build.gradle.kts" <<'PY'
+          from pathlib import Path
+          import re, sys
+          path = Path(sys.argv[1])
+          text = path.read_text()
+          text = re.sub(r'versionCode\s*=\s*\d+', 'versionCode = 45', text)
+          text = re.sub(r'versionName\s*=\s*"[^"]+"', 'versionName = "0.8.5-reference-match2"', text)
+          path.write_text(text)
+          PY
+
+      - name: Runtime and reference-match2 guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/furnitureshot-ai-v085"
+          SRC="$ROOT/app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalEnhancementEngine.kt"
+          POLICY="$ROOT/app/src/main/java/com/tiagocrispo/furnitureshot/processing/PromptPolicy.kt"
+          UI="$ROOT/app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt"
+          grep -q "for (y in 3 until height - 3)" "$SRC"
+          grep -q "for (x in 3 until width - 3)" "$SRC"
+          grep -q "val targetLuma = 132f" "$SRC"
+          grep -q "SOURCE-ANCHORED LUMA MICROCONTRAST" "$SRC"
+          grep -q "REFERENCE MATCH 2" "$SRC"
+          grep -q "Color.rgb(248, 246, 242)" "$SRC"
+          grep -q "coerceIn(0.82f, 1.0f)" "$SRC"
+          grep -q "center \* 0.970f" "$SRC"
+          grep -q "detailStrength = 0.112f" "$POLICY"
+          grep -q "detectTransformGestures" "$UI"
+          grep -q 'Text("Cerrar", color = Color.White)' "$UI"
+          ! grep -q "Pellizca para ampliar" "$UI"
+          ! grep -q "drawOval" "$SRC"
+
+      - name: Build debug APK
+        run: gradle -p "$RUNNER_TEMP/furnitureshot-ai-v085" :app:assembleDebug --stacktrace --no-daemon
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/furnitureshot-ai-v085"
+          APK="$ROOT/app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          unzip -t "$APK" >/dev/null
+          unzip -l "$APK" | grep -q "AndroidManifest.xml"
+          unzip -l "$APK" | grep -q "classes.dex"
+          unzip -l "$APK" | grep -q "resources.arsc"
+          sha256sum "$APK" | tee "$ROOT/apk-sha256.txt"
+
+      - name: Package source
+        shell: bash
+        run: |
+          cd "$RUNNER_TEMP/furnitureshot-ai-v085"
+          zip -qr "$RUNNER_TEMP/FurnitureShotAI-v0.8.5-reference-match2-source.zip" . -x 'app/build/*' '.gradle/*' '.kotlin/*'
+
+      - name: Stage deliverables
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/v085-deliverables"
+          cp "$RUNNER_TEMP/furnitureshot-ai-v085/app/build/outputs/apk/debug/app-debug.apk" "$RUNNER_TEMP/v085-deliverables/FurnitureShotAI-v0.8.5-reference-match2.apk"
+          cp "$RUNNER_TEMP/FurnitureShotAI-v0.8.5-reference-match2-source.zip" "$RUNNER_TEMP/v085-deliverables/"
+          cp "$RUNNER_TEMP/furnitureshot-ai-v085/apk-sha256.txt" "$RUNNER_TEMP/v085-deliverables/"
+
+      - name: Upload v0.8.5 deliverables
+        uses: actions/upload-artifact@v4
+        with:
+          name: FurnitureShotAI-v0.8.5-reference-match2
+          path: ${{ runner.temp }}/v085-deliverables/*
+          if-no-files-found: error
