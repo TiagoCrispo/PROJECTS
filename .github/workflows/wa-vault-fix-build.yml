@@ -1,0 +1,168 @@
+name: WA Vault Fix Validation Build
+
+on:
+  push:
+    branches:
+      - wa-vault-fix-build-20260819
+    paths:
+      - '.github/workflows/wa-vault-fix-build.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Generate ephemeral key and publish public half
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_REF: wa-vault-fix-build-20260819
+        run: |
+          set -euo pipefail
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out /tmp/private.pem >/dev/null 2>&1
+          openssl pkey -in /tmp/private.pem -pubout -out /tmp/public.pem
+          PUB64=$(base64 -w0 /tmp/public.pem)
+          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/.wa-vault-fix/public-${GITHUB_RUN_ID}.pem" \
+            -f message="chore: ephemeral WA Vault fix build key [skip ci]" \
+            -f content="$PUB64" \
+            -f branch="$SOURCE_REF" >/dev/null
+
+      - name: Wait for encrypted key and reconstruct source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_REF: wa-vault-fix-build-20260819
+          PAYLOAD_ID: '32219925637'
+        run: |
+          set -euo pipefail
+          READY=".wa-vault-fix/ready-${GITHUB_RUN_ID}.txt"
+          for i in $(seq 1 900); do
+            if gh api "repos/${GITHUB_REPOSITORY}/contents/${READY}?ref=${SOURCE_REF}" >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          gh api "repos/${GITHUB_REPOSITORY}/contents/${READY}?ref=${SOURCE_REF}" >/dev/null
+          KEY_PATH=".wa-vault-fix/key-${GITHUB_RUN_ID}.b64"
+          gh api "repos/${GITHUB_REPOSITORY}/contents/${KEY_PATH}?ref=${SOURCE_REF}" --jq '.content' | tr -d '\n' | base64 -d | base64 -d > /tmp/key.enc
+          test -s /tmp/key.enc
+          : > /tmp/source.b64
+          idx=0
+          while true; do
+            chunk=$(printf ".wa-vault-fix/source-%s-%03d.b64" "$PAYLOAD_ID" "$idx")
+            if ! gh api "repos/${GITHUB_REPOSITORY}/contents/${chunk}?ref=${SOURCE_REF}" >/dev/null 2>&1; then break; fi
+            gh api "repos/${GITHUB_REPOSITORY}/contents/${chunk}?ref=${SOURCE_REF}" --jq '.content' | tr -d '\n' | base64 -d >> /tmp/source.b64
+            idx=$((idx+1))
+          done
+          test "$idx" -eq 11
+          test "$(wc -c < /tmp/source.b64)" -eq 100928
+          base64 -d /tmp/source.b64 > /tmp/source.enc
+          openssl pkeyutl -decrypt -inkey /tmp/private.pem -in /tmp/key.enc -out /tmp/aes.key \
+            -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+            -in /tmp/source.enc -out /tmp/source.zip -pass file:/tmp/aes.key
+          unzip -t /tmp/source.zip >/dev/null
+          mkdir -p "$RUNNER_TEMP/src"
+          unzip -q /tmp/source.zip -d "$RUNNER_TEMP/src"
+          PROJECT="$RUNNER_TEMP/src/WA-Vault"
+          test -f "$PROJECT/settings.gradle.kts"
+          for spec in \
+            "root-build.gradle.kts:$PROJECT/build.gradle.kts" \
+            "gradle.properties:$PROJECT/gradle.properties" \
+            "app-build.gradle.kts:$PROJECT/app/build.gradle.kts"; do
+            src="${spec%%:*}"
+            dest="${spec#*:}"
+            gh api "repos/${GITHUB_REPOSITORY}/contents/.wa-vault-fix/patch/${src}?ref=${SOURCE_REF}" --jq '.content' | tr -d '\n' | base64 -d > "$dest"
+          done
+          TEST_DEST="$PROJECT/app/src/test/java/com/wavault/app/notification/WhatsAppNotificationParserTest.kt"
+          mkdir -p "$(dirname "$TEST_DEST")"
+          gh api "repos/${GITHUB_REPOSITORY}/contents/.wa-vault-fix/patch/WhatsAppNotificationParserTest.kt?ref=${SOURCE_REF}" --jq '.content' | tr -d '\n' | base64 -d > "$TEST_DEST"
+          mkdir -p "$PROJECT/app/build/diagnostics"
+          shred -u /tmp/private.pem /tmp/aes.key /tmp/source.enc /tmp/source.b64 /tmp/key.enc || true
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Resolve and install Android 17 SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          DIAG="$RUNNER_TEMP/src/WA-Vault/app/build/diagnostics"
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --update --channel=3 2>&1 | tee "$DIAG/sdkmanager-update.log" || true
+          sdkmanager --list --include_obsolete --channel=3 2>&1 | tee "$DIAG/sdkmanager-list.log"
+          PLATFORM=$(awk -F'|' '/platforms;android-37(\.0)?[[:space:]]*\|/ {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1); print $1}' "$DIAG/sdkmanager-list.log" | sort -V | tail -1)
+          BUILD_TOOLS=$(awk -F'|' '/build-tools;37\.[0-9]+\.[0-9]+[[:space:]]*\|/ {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1); print $1}' "$DIAG/sdkmanager-list.log" | sort -V | tail -1)
+          echo "Resolved platform: ${PLATFORM:-NONE}" | tee "$DIAG/sdkmanager-selected.log"
+          echo "Resolved build tools: ${BUILD_TOOLS:-NONE}" | tee -a "$DIAG/sdkmanager-selected.log"
+          test -n "$PLATFORM"
+          test -n "$BUILD_TOOLS"
+          sdkmanager --channel=3 "platform-tools" "$PLATFORM" "$BUILD_TOOLS" 2>&1 | tee "$DIAG/sdkmanager-install.log"
+
+      - name: Set up Gradle 9.5.0
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+
+      - name: Gradle configuration
+        working-directory: ${{ runner.temp }}/src/WA-Vault
+        shell: bash
+        run: |
+          set +e
+          gradle --no-daemon help --stacktrace 2>&1 | tee app/build/diagnostics/gradle-help.log
+          code=${PIPESTATUS[0]}
+          exit "$code"
+
+      - name: Unit tests
+        working-directory: ${{ runner.temp }}/src/WA-Vault
+        shell: bash
+        run: |
+          set +e
+          gradle --no-daemon :app:testDebugUnitTest --stacktrace 2>&1 | tee app/build/diagnostics/unit-tests.log
+          code=${PIPESTATUS[0]}
+          exit "$code"
+
+      - name: Lint
+        working-directory: ${{ runner.temp }}/src/WA-Vault
+        shell: bash
+        run: |
+          set +e
+          gradle --no-daemon :app:lintDebug --stacktrace 2>&1 | tee app/build/diagnostics/lint.log
+          code=${PIPESTATUS[0]}
+          exit "$code"
+
+      - name: Assemble debug
+        working-directory: ${{ runner.temp }}/src/WA-Vault
+        shell: bash
+        run: |
+          set +e
+          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee app/build/diagnostics/assemble.log
+          code=${PIPESTATUS[0]}
+          exit "$code"
+
+      - name: Upload internal validation APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: WA-Vault-fix-internal-apk
+          path: ${{ runner.temp }}/src/WA-Vault/app/build/outputs/apk/debug/*.apk
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Upload reports and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: WA-Vault-fix-reports
+          path: |
+            ${{ runner.temp }}/src/WA-Vault/app/build/reports/**
+            ${{ runner.temp }}/src/WA-Vault/app/build/test-results/**
+            ${{ runner.temp }}/src/WA-Vault/app/build/diagnostics/**
+          retention-days: 1
+          if-no-files-found: ignore
