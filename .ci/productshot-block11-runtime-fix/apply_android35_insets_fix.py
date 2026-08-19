@@ -6,6 +6,7 @@ import pathlib
 import sys
 
 EXPECTED_BEFORE_SHA256 = "2003cc4bb5a368f1d962d20060096153e6bf574c9c2f7de7e3242045c8505367"
+EXPECTED_AFTER_SHA256 = "81c485397e29149aa70cc3937628d08bbb13135cce4e6125df62a335a5cabec3"
 
 OLD_WINDOW = '''    private void configureWindow() {
         if (Build.VERSION.SDK_INT < 35) {
@@ -82,9 +83,12 @@ def main() -> None:
     text = replace_exactly_once(text, OLD_WINDOW, NEW_WINDOW, "configureWindow")
     text = replace_exactly_once(text, OLD_CONTENT, NEW_CONTENT, "setContentView")
     out = text.encode("utf-8")
+    after = sha256(out)
+    if after != EXPECTED_AFTER_SHA256:
+        raise SystemExit(f"unexpected post-fix MainActivity.java: {after} != {EXPECTED_AFTER_SHA256}")
     path.write_bytes(out)
     print(f"before_sha256={before}")
-    print(f"after_sha256={sha256(out)}")
+    print(f"after_sha256={after}")
 
 
 if __name__ == "__main__":
