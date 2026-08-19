@@ -6,7 +6,18 @@ on:
       - main
     paths:
       - "projects/aniflow/**"
+  schedule:
+    - cron: "*/5 * * * *"
   workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+concurrency:
+  group: aniflow-final-autobuild
+  cancel-in-progress: false
 
 jobs:
   android-final:
@@ -16,6 +27,14 @@ jobs:
       ANIFLOW_ROOT: ${{ runner.temp }}/aniflow-src
 
     steps:
+      - name: Announce scheduled run
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST "repos/$GITHUB_REPOSITORY/issues/34/comments" \
+            -f body="ANIFLOW_AUTOBUILD_START run_id=$GITHUB_RUN_ID sha=$GITHUB_SHA"
+
       - name: Checkout
         uses: actions/checkout@v5
 
@@ -274,3 +293,12 @@ jobs:
           name: AniFlow-v1.0.0-rc1-final
           path: ${{ runner.temp }}/aniflow-deliverables/*
           if-no-files-found: error
+
+      - name: Publish scheduled result
+        if: always() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          gh api --method POST "repos/$GITHUB_REPOSITORY/issues/34/comments" \
+            -f body="ANIFLOW_AUTOBUILD_DONE run_id=$GITHUB_RUN_ID status=$JOB_STATUS artifact=AniFlow-v1.0.0-rc1-final"
