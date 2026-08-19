@@ -40,6 +40,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # The source archive is transported as text chunks and accepted only if its
+          # deterministic SHA-256 matches the locally audited warning-remediated tree.
           ARCHIVE="$RUNNER_TEMP/productshot-rc1-android.tar.gz"
           PROJECT="$RUNNER_TEMP/productshot-rc1"
           cat .ci/productshot-rc1-clean-b64/part* | tr -d '\r\n' | base64 -d > "$ARCHIVE"
