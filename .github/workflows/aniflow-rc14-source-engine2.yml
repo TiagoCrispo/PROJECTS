@@ -55,13 +55,16 @@ jobs:
           echo "a11f1589ab16276e3668636a8a937554d5b72c5701127cc9ba920c4951ee0182  /tmp/aniflow-rc14.patch.gz" | sha256sum -c -
           gzip -dc /tmp/aniflow-rc14.patch.gz > /tmp/aniflow-rc14.patch
           echo "a97db62475e4d0ec2afda0ddc0f811dd28f9a39716ac920e572cd9dae3bb7a5e  /tmp/aniflow-rc14.patch" | sha256sum -c -
+          echo "e89537b35b831d3a002219a0c4739b54e7fb45182f212cef35b6b960d17e8ea8  .ci/rc14v3-validator-fix.patch" | sha256sum -c -
           cd "$ANIFLOW_ROOT"
           patch -p1 --forward --batch < /tmp/aniflow-rc14.patch
+          patch -p1 --forward --batch < "$GITHUB_WORKSPACE/.ci/rc14v3-validator-fix.patch"
           grep -q 'versionCode = 1000014' app/build.gradle.kts
           grep -q 'versionName = "1.0.13-rc14"' app/build.gradle.kts
           test -f app/src/main/java/com/aniflow/app/domain/SourceEnginePolicy.kt
           test -f app/src/main/java/com/aniflow/app/data/repository/SourceHealthRegistry.kt
           test -f scripts/validate-block18.py
+          grep -q 'fun rankSources' scripts/validate-viewmodels-kotlin.sh
           python3 scripts/validate-block18.py
 
       - name: Regression guards Blocks 2-18
