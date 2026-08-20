@@ -51,7 +51,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          base64 -d .ci/aniflow-rc14-source-engine2.patch.gz.b64 > /tmp/aniflow-rc14.patch.gz
+          cat .ci/rc14v2/part00.b64 .ci/rc14v2/part01.b64 .ci/rc14v2/part02.b64 .ci/rc14v2/part03.b64 .ci/rc14v2/part04.b64 .ci/rc14v2/part05.b64 | base64 -d > /tmp/aniflow-rc14.patch.gz
           echo "a11f1589ab16276e3668636a8a937554d5b72c5701127cc9ba920c4951ee0182  /tmp/aniflow-rc14.patch.gz" | sha256sum -c -
           gzip -dc /tmp/aniflow-rc14.patch.gz > /tmp/aniflow-rc14.patch
           echo "a97db62475e4d0ec2afda0ddc0f811dd28f9a39716ac920e572cd9dae3bb7a5e  /tmp/aniflow-rc14.patch" | sha256sum -c -
