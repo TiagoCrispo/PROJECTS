@@ -68,7 +68,7 @@ jobs:
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
           python3 tools/aniflow_rc11_recovery.py "$ANIFLOW_ROOT"
-          python3 tools/aniflow_rc13_recovery_patch_v2.py "$ANIFLOW_ROOT"
+          python3 tools/aniflow_rc13_recovery_patch_v3.py "$ANIFLOW_ROOT"
           grep -q 'versionCode = 1000013' "$ANIFLOW_ROOT/app/build.gradle.kts"
           grep -q 'versionName = "1.0.12-rc13"' "$ANIFLOW_ROOT/app/build.gradle.kts"
           ! grep -R -q 'WebView(\|WebViewClient\|WebChromeClient\|\.loadUrl(\|evaluateJavascript(' "$ANIFLOW_ROOT/app/src/main/java"
