@@ -6,6 +6,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
 import android.graphics.Rect;
@@ -105,7 +106,9 @@ final class CatalogComposer {
         Rect src = new Rect(x, y, Math.min(cutout.getWidth(), x + cropW), Math.min(cutout.getHeight(), y + cropH));
         Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
         c.save();
-        c.clipRoundRect(dst, 28f, 28f);
+        Path clip = new Path();
+        clip.addRoundRect(dst, 28f, 28f, Path.Direction.CW);
+        c.clipPath(clip);
         float s = Math.max(dst.width() / src.width(), dst.height() / src.height());
         float w = src.width() * s;
         float h = src.height() * s;
