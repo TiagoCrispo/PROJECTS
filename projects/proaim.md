@@ -1,27 +1,36 @@
 # ProAim
 
-ProAim is a Windows utility focused on understanding and tuning the parts of a gaming PC that affect input feel, display behavior, hardware health and latency.
+**Current stable release: ProAim v26.7 — PROAIM-ULTIMATE-X50**
 
-## Current development snapshot
+ProAim is a native Windows 11 performance, latency and diagnostics utility built in Go for competitive gaming workflows, especially CS2 and VALORANT.
 
-**ProAim v26.0.2 — Hardware Truth & Diagnostics Fix**
+## Current direction
 
-This release keeps the v26.0.1 runtime-stability architecture and corrects hardware/driver interpretation discovered during real Windows testing.
+V26.7 moves the project beyond tweak packs. The application imports a Runtime Validator report, builds a local USER-PC baseline, ranks the most likely bottleneck, recommends what to fix first, and records controlled experiments with confidence and rollback evidence.
 
-### Current capabilities
+The core loop is:
 
-- Driver Center inventories exact active PnP-signed drivers where possible and compares against live official vendor information without inventing an update when a page cannot be verified.
-- Logitech G HUB detection uses registry, files and process fallbacks rather than one fragile exact display name.
-- Storage UI renders all detected physical disks and all lettered volumes instead of only the first disk / C:.
-- Windows Health surfaces DISM repairable and pending-reboot state; the repair path runs RestoreHealth + SFC only when repairable state is actually confirmed.
-- Process modes are explained in-product and protect Windows/security/audio-critical components and Memory Compression.
-- Power modes distinguish AUTO, COMPETITIVE and MAX; COMPETITIVE is not claimed to be universally faster and should be kept only when measurements justify it.
-- Mouse, display, benchmark and tuning workflows continue to prefer measurable evidence and reversible changes.
+`Validator ZIP -> USER-PC BASELINE -> diagnosis -> controlled A/B test -> regression gate -> KEEP/ROLLBACK -> repeated game profile`
+
+## Current capabilities
+
+- Input Feel analysis across Raw Input, USB/RF, polling, DPC/ISR, frame pacing, GPU state, display and network evidence.
+- PresentMon-based FPS, 1% low, 0.1% low, P95/P99 and repeated cap experiments.
+- Ethernet/Wi-Fi path, jitter, loss, loaded latency, bufferbloat and controlled NIC A/B.
+- NVIDIA latency guidance without undocumented/private NVAPI profile writes.
+- CPU/Power experiments with owned temporary plans, repeated samples and exact rollback.
+- Driver Lifecycle view: Validator BEFORE -> NOW -> official dated reference, followed by re-testing instead of assuming newer is faster.
+- WHY MOUSE FEELS BAD? root-cause ranking and WHAT SHOULD I FIX FIRST? prioritization.
+- Local experiment/evidence tree with no automatic telemetry upload.
 
 ## Safety principles
 
-ProAim does not use HPET/BCD forcing, REALTIME process priority, generic RAM purging, process injection, Defender/Firewall disabling or broad low-level tweak packs as a substitute for evidence. Diagnostics and fixes remain separate, and system mutations should be understandable and reversible.
+ProAim does not use HPET/BCD forcing, global timer-resolution packs, REALTIME priority, generic TCP/Nagle registry packs, MouseDataQueueSize/MouseTransmitTimeout writes, blanket checksum-offload disabling, RAM cleaners, mass service disabling, Defender/Firewall disabling, process injection or automatic BIOS writes.
+
+Experimental changes require snapshot, repeated evidence, regression checks and rollback.
 
 ## Release target
 
-Windows 11 x64, native Win32 GUI, Go/amd64 with CGO disabled.
+Windows 11 x64 · Go/amd64 · CGO disabled · native Win32 GUI · STABLE channel.
+
+Detailed release documentation is kept under [`projects/proaim/`](./proaim/README.md).
