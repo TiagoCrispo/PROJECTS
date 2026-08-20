@@ -181,3 +181,84 @@ jobs:
           path: ${{ runner.temp }}/productshot-local-evidence-${{ matrix.api }}/*
           if-no-files-found: warn
           retention-days: 7
+
+  inference:
+    name: Real on-device ISNet inference
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Download APK
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: productshot-local-ai-apks
+          path: ${{ runner.temp }}/productshot-local-apks
+
+      - name: Provision API 35 emulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          AVDMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/avdmanager"
+          AVD_HOME="$RUNNER_TEMP/android-avd-inference"
+          mkdir -p "$AVD_HOME"
+          export ANDROID_AVD_HOME="$AVD_HOME"
+          echo "ANDROID_AVD_HOME=$AVD_HOME" >> "$GITHUB_ENV"
+          "$SDKMANAGER" --install "platform-tools" "emulator" "system-images;android-35;google_apis;x86_64"
+          echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+          echo no | "$AVDMANAGER" create avd --force --name productshot-inference --package "system-images;android-35;google_apis;x86_64" >/dev/null
+
+      - name: Download model and execute ONNX inside Android
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          APK="$RUNNER_TEMP/productshot-local-apks/ProductShot-Local-alpha-debug.apk"
+          EVIDENCE="$RUNNER_TEMP/productshot-local-inference"
+          mkdir -p "$EVIDENCE"
+          ACCEL="-accel off"
+          if [[ -e /dev/kvm ]]; then sudo chmod 666 /dev/kvm; ACCEL="-accel on"; fi
+          "$SDK_ROOT/emulator/emulator" @productshot-inference -no-window -noaudio -no-boot-anim -no-snapshot -no-metrics -gpu swiftshader_indirect -camera-back none -camera-front none -memory 4096 $ACCEL > "$EVIDENCE/emulator.log" 2>&1 &
+          sleep 8
+          adb start-server
+          timeout 180 adb wait-for-device
+          timeout 300 bash -c 'until [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" == "1" ]]; do sleep 2; done'
+          adb shell input keyevent 82 || true
+          adb shell cmd window dismiss-keyguard || true
+          adb install --no-streaming -r "$APK"
+          adb logcat -c
+          adb shell am start -W -n com.productshot.local/.SmokeActivity | tee "$EVIDENCE/start.txt"
+          STATUS=""
+          for _ in $(seq 1 180); do
+            STATUS="$(adb shell run-as com.productshot.local cat files/smoke/status.txt 2>/dev/null | tr -d '\r' || true)"
+            if [[ "$STATUS" == PASS* || "$STATUS" == FAIL* ]]; then break; fi
+            sleep 2
+          done
+          printf '%s\n' "$STATUS" | tee "$EVIDENCE/status.txt"
+          [[ "$STATUS" == PASS* ]]
+          adb exec-out run-as com.productshot.local cat files/smoke/result.jpg > "$EVIDENCE/result.jpg"
+          test -s "$EVIDENCE/result.jpg"
+          python3 - "$EVIDENCE/result.jpg" <<'PY'
+          import sys
+          p=sys.argv[1]
+          b=open(p,'rb').read(3)
+          assert b == b'\xff\xd8\xff', b
+          PY
+          adb shell run-as com.productshot.local ls -lh files/models | tee "$EVIDENCE/models.txt"
+          adb logcat -d -v threadtime > "$EVIDENCE/logcat.txt"
+          if grep -E 'FATAL EXCEPTION|ANR in com\.productshot\.local' "$EVIDENCE/logcat.txt"; then exit 1; fi
+
+      - name: Upload inference evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: productshot-local-ai-inference
+          path: ${{ runner.temp }}/productshot-local-inference/*
+          if-no-files-found: warn
+          retention-days: 7
