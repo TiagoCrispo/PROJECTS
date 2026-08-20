@@ -2,6 +2,10 @@
 from pathlib import Path
 import sys
 
+root_arg = sys.argv[1] if len(sys.argv) > 1 else None
+if not root_arg:
+    raise SystemExit('RC13_V2_WRAPPER_FAIL: target root missing')
+
 original = Path(__file__).with_name('aniflow_rc13_recovery_patch.py')
 script = original.read_text()
 old = '''tracks_old = 'override fun onTracksChanged(tracks: Tracks) { tracksVersion++ }'
@@ -60,7 +64,6 @@ if 'actualVideoBitrate = measured?.bitrate' not in s:
         raise SystemExit('RC13_RECOVERY_FAIL: unmatched onTracksChanged braces')
 
     closing = _matching_method_brace(s, opening)
-    body = s[opening + 1:closing]
     # Preserve every RC10 callback statement and append only our measurement.
     indent = '                '
     telemetry = (
@@ -75,7 +78,24 @@ req('actualVideoBitrate = measured?.bitrate' in s, 'track telemetry listener mis
 if old not in script:
     raise SystemExit('RC13_V2_WRAPPER_FAIL: old telemetry patch block not found')
 script = script.replace(old, new, 1)
+
 # Execute the original transform with only the telemetry injector changed.
-sys.argv = [str(original), *sys.argv[1:]]
+sys.argv = [str(original), root_arg]
 namespace = {'__name__': '__main__', '__file__': str(original)}
 exec(compile(script, str(original), 'exec'), namespace, namespace)
+
+# Block 6 originally required the old instant autoplay call. PLAYER-X10 intentionally
+# replaces it with an 8-second countdown before calling onNext(nextTarget).
+block6 = Path(root_arg) / 'scripts/validate-block6.py'
+text = block6.read_text()
+old_guard = 'state.next?.let(onNext)'
+if old_guard in text:
+    text = text.replace(old_guard, 'onNext(nextTarget)')
+block6.write_text(text)
+
+# Verify we did not merely weaken the regression gate: the new runtime behavior must exist.
+player = (Path(root_arg) / 'app/src/main/java/com/aniflow/app/feature/player/PlayerScreen.kt').read_text()
+if 'Siguiente episodio en' not in player or 'onNext(nextTarget)' not in player:
+    raise SystemExit('RC13_V2_WRAPPER_FAIL: countdown autoplay contract missing')
+
+print('ANIFLOW_RC13_RECOVERY_V2_OK')
