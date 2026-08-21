@@ -53,8 +53,12 @@ jobs:
             "$GITHUB_WORKSPACE/.ci/rc22/parts/part-01" \
             "$GITHUB_WORKSPACE/.ci/rc22/fix/part-02-00" \
             "$GITHUB_WORKSPACE/.ci/rc22/fix/part-02-01" \
-            "$GITHUB_WORKSPACE/.ci/rc22/fix/part-02-02" \
-            "$GITHUB_WORKSPACE/.ci/rc22/fix/part-02-03" \
+            "$GITHUB_WORKSPACE/.ci/rc22/fix-small/p2-0" \
+            "$GITHUB_WORKSPACE/.ci/rc22/fix-small/p2-1" \
+            "$GITHUB_WORKSPACE/.ci/rc22/fix-small/p2-2" \
+            "$GITHUB_WORKSPACE/.ci/rc22/fix-small/p3-0" \
+            "$GITHUB_WORKSPACE/.ci/rc22/fix-small/p3-1" \
+            "$GITHUB_WORKSPACE/.ci/rc22/fix-small/p3-2" \
             "$GITHUB_WORKSPACE/.ci/rc22/parts/part-03" \
             "$GITHUB_WORKSPACE/.ci/rc22/parts/part-04" \
             "$GITHUB_WORKSPACE/.ci/rc22/parts/part-05" > /tmp/rc22.b64
