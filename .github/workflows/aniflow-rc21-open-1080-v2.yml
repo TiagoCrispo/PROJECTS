@@ -1,0 +1,168 @@
+name: AniFlow RC21 Open 1080 Gate V2
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+concurrency:
+  group: aniflow-rc21-open-1080-v2
+  cancel-in-progress: true
+
+jobs:
+  android-rc21-open-1080-v2:
+    if: github.event.issue.number == 37 && github.event.comment.body == 'RUN_ANIFLOW_RC21_OPEN_1080_V2'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    env:
+      ANIFLOW_ROOT: /tmp/aniflow-rc21-open-1080-v2
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Announce start
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue comment 37 --repo "$GITHUB_REPOSITORY" --body "ANIFLOW_RC21_OPEN_1080_V2_STARTED run_id=${GITHUB_RUN_ID}"
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+          cache-read-only: true
+
+      - name: Materialize verified RC17 base
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$ANIFLOW_ROOT" /tmp/rc17-artifact
+          mkdir -p "$ANIFLOW_ROOT" /tmp/rc17-artifact
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/9454593341/zip" > /tmp/rc17-artifact.zip
+          echo "5c6f820cdeec2fc5c3ef0e8b41bf30109e641e1aa7cb385afbf979bc57b7ac3c  /tmp/rc17-artifact.zip" | sha256sum -c -
+          unzip -q /tmp/rc17-artifact.zip -d /tmp/rc17-artifact
+          unzip -q /tmp/rc17-artifact/AniFlow-v1.0.16-rc17-source.zip -d "$ANIFLOW_ROOT"
+          grep -q 'versionCode = 1000017' "$ANIFLOW_ROOT/app/build.gradle.kts"
+          grep -q 'versionName = "1.0.16-rc17"' "$ANIFLOW_ROOT/app/build.gradle.kts"
+
+      - name: Reconstruct and apply verified RC21 patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .ci/rc21/parts/part-* > /tmp/aniflow-rc21.patch.b64
+          test "$(wc -c < /tmp/aniflow-rc21.patch.b64)" = "46872"
+          base64 -d /tmp/aniflow-rc21.patch.b64 > /tmp/aniflow-rc21.patch.gz
+          echo "3fb3cbd791c64044f456b131d04dcc7f2d94069d0922b7b5fe9a2472bdcfd889  /tmp/aniflow-rc21.patch.gz" | sha256sum -c -
+          gzip -dc /tmp/aniflow-rc21.patch.gz > /tmp/aniflow-rc21.patch
+          echo "495f31394da8ea022d37b4ae67bce8358e8901b46b5067bf294f91319cbef466  /tmp/aniflow-rc21.patch" | sha256sum -c -
+          cd "$ANIFLOW_ROOT"
+          patch -p1 --forward --batch < /tmp/aniflow-rc21.patch
+          grep -q 'versionCode = 1000021' app/build.gradle.kts
+          grep -q 'versionName = "1.0.20-rc21"' app/build.gradle.kts
+          grep -q 'Wikimedia Commons · Morevna 1080p' playback-catalog/api/demo.js
+          grep -q 'upload.wikimedia.org/wikipedia/commons' playback-catalog/api/demo.js
+
+      - name: RC21 source and catalog gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$ANIFLOW_ROOT"
+          python3 scripts/validate-block22.py
+          python3 scripts/validate-block23.py
+          python3 scripts/validate-block24.py
+          python3 scripts/validate-block25.py
+          python3 scripts/validate-block26.py
+          python3 scripts/validate-block27.py
+          bash scripts/validate-pure-kotlin.sh
+          bash scripts/validate-network-kotlin.sh
+          bash scripts/validate-data-kotlin.sh
+          bash scripts/validate-viewmodels-kotlin.sh
+          bash scripts/validate-catalog-client-kotlin.sh
+          bash scripts/validate-resolver-kotlin.sh
+          bash scripts/validate-ui-syntax.sh
+          cd playback-catalog
+          npm test
+          node scripts/validate-catalog.js
+
+      - name: Unit tests
+        run: gradle -p "$ANIFLOW_ROOT" help :app:testDebugUnitTest --stacktrace --no-daemon
+
+      - name: Android lint
+        run: gradle -p "$ANIFLOW_ROOT" :app:lintDebug --stacktrace --no-daemon
+
+      - name: Assemble debug and release
+        run: gradle -p "$ANIFLOW_ROOT" :app:assembleDebug :app:assembleRelease --stacktrace --no-daemon
+
+      - name: Sign and verify RC21
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOOLS="$ANDROID_HOME/build-tools/36.0.0"
+          UNSIGNED="$ANIFLOW_ROOT/app/build/outputs/apk/release/app-release-unsigned.apk"
+          DEBUG="$ANIFLOW_ROOT/app/build/outputs/apk/debug/app-debug.apk"
+          KEYSTORE="$RUNNER_TEMP/aniflow-rc21.jks"
+          ALIGNED="$RUNNER_TEMP/AniFlow-v1.0.20-rc21-aligned.apk"
+          FINAL="$RUNNER_TEMP/AniFlow-v1.0.20-rc21.apk"
+          test -s "$UNSIGNED"
+          test -s "$DEBUG"
+          keytool -genkeypair -v -keystore "$KEYSTORE" -storepass aniflow-rc21 -keypass aniflow-rc21 -alias aniflow -keyalg RSA -keysize 3072 -validity 3650 -dname "CN=AniFlow Personal RC21, OU=Android, O=AniFlow, L=Mendoza, C=AR"
+          "$TOOLS/zipalign" -p -f 4 "$UNSIGNED" "$ALIGNED"
+          "$TOOLS/apksigner" sign --ks "$KEYSTORE" --ks-key-alias aniflow --ks-pass pass:aniflow-rc21 --key-pass pass:aniflow-rc21 --out "$FINAL" "$ALIGNED"
+          "$TOOLS/apksigner" verify --verbose --print-certs "$FINAL" | tee "$RUNNER_TEMP/apksigner.txt"
+          unzip -t "$FINAL" >/dev/null
+          unzip -l "$FINAL" | grep -q AndroidManifest.xml
+          unzip -l "$FINAL" | grep -q classes.dex
+          "$TOOLS/aapt" dump badging "$FINAL" | tee "$RUNNER_TEMP/apk-badging.txt"
+          grep -q "package: name='com.aniflow.app'" "$RUNNER_TEMP/apk-badging.txt"
+          grep -q "targetSdkVersion:'36'" "$RUNNER_TEMP/apk-badging.txt"
+          sha256sum "$FINAL" "$DEBUG" | tee "$RUNNER_TEMP/apk-sha256.txt"
+
+      - name: Package deliverables
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/aniflow-rc21"
+          mkdir -p "$OUT"
+          (cd "$ANIFLOW_ROOT" && zip -qr "$OUT/AniFlow-v1.0.20-rc21-source.zip" . -x '.gradle/*' '.idea/*' '.kotlin/*' 'app/build/*' '**/build/*' 'benchmark/build/*' 'playback-catalog/node_modules/*')
+          cp "$RUNNER_TEMP/AniFlow-v1.0.20-rc21.apk" "$OUT/"
+          cp "$ANIFLOW_ROOT/app/build/outputs/apk/debug/app-debug.apk" "$OUT/AniFlow-v1.0.20-rc21-debug.apk"
+          cp "$RUNNER_TEMP/apk-sha256.txt" "$RUNNER_TEMP/apk-badging.txt" "$RUNNER_TEMP/apksigner.txt" "$OUT/"
+          test ! -f "$ANIFLOW_ROOT/app/build/reports/lint-results-debug.html" || cp "$ANIFLOW_ROOT/app/build/reports/lint-results-debug.html" "$OUT/"
+          printf '%s\n' 'RC21 uses open-licensed Morevna Episode 3 demo sources: Wikimedia Commons 1080p WebM first, Internet Archive MP4 fallback. Commercial catalog remains empty unless authorized sources are added.' > "$OUT/RC21-PLAYBACK-SOURCE.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AniFlow-v1.0.20-rc21-open-1080-final
+          path: ${{ runner.temp }}/aniflow-rc21/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Announce success
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue comment 37 --repo "$GITHUB_REPOSITORY" --body "ANIFLOW_RC21_OPEN_1080_V2_SUCCESS run_id=${GITHUB_RUN_ID} artifact=AniFlow-v1.0.20-rc21-open-1080-final"
+
+      - name: Announce failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue comment 37 --repo "$GITHUB_REPOSITORY" --body "ANIFLOW_RC21_OPEN_1080_V2_FAILED run_id=${GITHUB_RUN_ID}"
