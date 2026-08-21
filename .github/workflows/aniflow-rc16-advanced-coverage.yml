@@ -1,0 +1,142 @@
+name: AniFlow RC16 Advanced Episode Coverage Gate
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+concurrency:
+  group: aniflow-rc16-advanced-coverage
+  cancel-in-progress: true
+
+jobs:
+  android-rc16-advanced-coverage:
+    if: github.event.issue.number == 37 && github.event.comment.body == 'RUN_ANIFLOW_RC16_ADVANCED_COVERAGE'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    env:
+      ANIFLOW_ROOT: /tmp/aniflow-rc16-advanced-coverage
+
+    steps:
+      - uses: actions/checkout@v5
+      - name: Announce start
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: gh issue comment 37 --repo "$GITHUB_REPOSITORY" --body "ANIFLOW_RC16_ADVANCED_COVERAGE_STARTED run_id=${GITHUB_RUN_ID}"
+      - uses: actions/setup-java@v5
+        with: { distribution: temurin, java-version: "17" }
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: "9.5.0", cache-read-only: true }
+
+      - name: Materialize verified RC15
+        env: { GH_TOKEN: "${{ github.token }}" }
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$ANIFLOW_ROOT" /tmp/rc15-artifact
+          mkdir -p "$ANIFLOW_ROOT" /tmp/rc15-artifact
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/9427713247/zip" > /tmp/rc15-artifact.zip
+          echo "782e43544479996e2d041b57c90fcd2c41ad4fc338c183e8008f5014b934026d  /tmp/rc15-artifact.zip" | sha256sum -c -
+          unzip -q /tmp/rc15-artifact.zip -d /tmp/rc15-artifact
+          unzip -q /tmp/rc15-artifact/AniFlow-v1.0.14-rc15-source.zip -d "$ANIFLOW_ROOT"
+          grep -q 'versionCode = 1000015' "$ANIFLOW_ROOT/app/build.gradle.kts"
+          grep -q 'versionName = "1.0.14-rc15"' "$ANIFLOW_ROOT/app/build.gradle.kts"
+
+      - name: Apply verified RC16 advanced coverage patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d .ci/rc16/aniflow-rc16.patch.gz.b64 > /tmp/aniflow-rc16.patch.gz
+          echo "d3eac45e744d8c237df726cc0e252ce280bbb3899d96335a9ed9738f78961db5  /tmp/aniflow-rc16.patch.gz" | sha256sum -c -
+          gzip -dc /tmp/aniflow-rc16.patch.gz > /tmp/aniflow-rc16.patch
+          echo "63fb9575c92eccd06225c5d81af71ada59292069aa50cffcbe5d6efbab3313b5  /tmp/aniflow-rc16.patch" | sha256sum -c -
+          cd "$ANIFLOW_ROOT"
+          patch -p1 --forward --batch < /tmp/aniflow-rc16.patch
+          grep -q 'versionCode = 1000016' app/build.gradle.kts
+          grep -q 'versionName = "1.0.15-rc16"' app/build.gradle.kts
+          test -f app/src/main/java/com/aniflow/app/domain/EpisodeIdentity.kt
+          test -f app/src/test/java/com/aniflow/app/domain/EpisodeNumberingRulesTest.kt
+          test -f scripts/validate-block20.py
+          python3 scripts/validate-block20.py
+
+      - name: Regression guards Blocks 2-20
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$ANIFLOW_ROOT"
+          for gate in $(seq 2 20); do test -f "scripts/validate-block${gate}.py"; python3 "scripts/validate-block${gate}.py"; done
+          bash scripts/validate-pure-kotlin.sh
+          bash scripts/validate-network-kotlin.sh
+          bash scripts/validate-data-kotlin.sh
+          bash scripts/validate-viewmodels-kotlin.sh
+          bash scripts/validate-ui-syntax.sh
+
+      - name: Unit tests and benchmark compile
+        run: |
+          gradle -p "$ANIFLOW_ROOT" help :app:testDebugUnitTest --stacktrace --no-daemon
+          gradle -p "$ANIFLOW_ROOT" :benchmark:assembleProfile :benchmark:assembleBenchmark --stacktrace --no-daemon
+
+      - name: Android lint
+        shell: bash
+        run: |
+          set +e
+          gradle -p "$ANIFLOW_ROOT" :app:lintDebug --stacktrace --no-daemon
+          STATUS=$?
+          find "$ANIFLOW_ROOT/app/build" -iname 'lint-results*.txt' -o -iname 'lint-results*.html' | head -20 || true
+          exit "$STATUS"
+
+      - name: Assemble debug and release
+        run: gradle -p "$ANIFLOW_ROOT" :app:assembleDebug :app:assembleRelease --stacktrace --no-daemon
+
+      - name: Sign and verify RC16
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOOLS="$ANDROID_HOME/build-tools/36.0.0"
+          UNSIGNED="$ANIFLOW_ROOT/app/build/outputs/apk/release/app-release-unsigned.apk"
+          KEYSTORE="$RUNNER_TEMP/aniflow-rc16.jks"
+          ALIGNED="$RUNNER_TEMP/AniFlow-v1.0.15-rc16-aligned.apk"
+          FINAL="$RUNNER_TEMP/AniFlow-v1.0.15-rc16.apk"
+          test -s "$UNSIGNED"
+          keytool -genkeypair -v -keystore "$KEYSTORE" -storepass aniflow-rc16 -keypass aniflow-rc16 -alias aniflow -keyalg RSA -keysize 3072 -validity 3650 -dname "CN=AniFlow Personal RC16, OU=Android, O=AniFlow, L=Mendoza, C=AR"
+          "$TOOLS/zipalign" -p -f 4 "$UNSIGNED" "$ALIGNED"
+          "$TOOLS/apksigner" sign --ks "$KEYSTORE" --ks-key-alias aniflow --ks-pass pass:aniflow-rc16 --key-pass pass:aniflow-rc16 --out "$FINAL" "$ALIGNED"
+          "$TOOLS/apksigner" verify --verbose --print-certs "$FINAL"
+          unzip -t "$FINAL" >/dev/null
+          unzip -l "$FINAL" | grep -q AndroidManifest.xml
+          unzip -l "$FINAL" | grep -q classes.dex
+          "$TOOLS/aapt" dump badging "$FINAL" | tee "$RUNNER_TEMP/apk-badging.txt"
+          sha256sum "$FINAL" | tee "$RUNNER_TEMP/apk-sha256.txt"
+
+      - name: Package deliverables
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/aniflow-rc16"
+          mkdir -p "$OUT"
+          (cd "$ANIFLOW_ROOT" && zip -qr "$OUT/AniFlow-v1.0.15-rc16-source.zip" . -x '.gradle/*' '.idea/*' '.kotlin/*' 'app/build/*' '**/build/*' 'benchmark/build/*')
+          cp "$RUNNER_TEMP/AniFlow-v1.0.15-rc16.apk" "$OUT/"
+          cp "$ANIFLOW_ROOT/app/build/outputs/apk/debug/app-debug.apk" "$OUT/AniFlow-v1.0.15-rc16-debug.apk"
+          cp "$RUNNER_TEMP/apk-sha256.txt" "$RUNNER_TEMP/apk-badging.txt" "$OUT/"
+          test ! -f "$ANIFLOW_ROOT/app/build/reports/lint-results-debug.html" || cp "$ANIFLOW_ROOT/app/build/reports/lint-results-debug.html" "$OUT/"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AniFlow-v1.0.15-rc16-advanced-coverage-final
+          path: ${{ runner.temp }}/aniflow-rc16/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Announce success
+        if: success()
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: gh issue comment 37 --repo "$GITHUB_REPOSITORY" --body "ANIFLOW_RC16_ADVANCED_COVERAGE_SUCCESS run_id=${GITHUB_RUN_ID} artifact=AniFlow-v1.0.15-rc16-advanced-coverage-final"
+      - name: Announce failure
+        if: failure()
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: gh issue comment 37 --repo "$GITHUB_REPOSITORY" --body "ANIFLOW_RC16_ADVANCED_COVERAGE_FAILED run_id=${GITHUB_RUN_ID}"
