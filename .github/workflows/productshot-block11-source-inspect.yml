@@ -1,0 +1,47 @@
+name: ProductShot Block 11 source crash inspection
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".ci/productshot-block11-runtime-fix/**"
+      - ".github/workflows/productshot-block11-source-inspect.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-main-activity:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Reconstruct and apply deterministic runtime fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARCHIVE="$RUNNER_TEMP/base.tar.gz"
+          PROJECT="$RUNNER_TEMP/productshot"
+          cat .ci/productshot-rc1-exact/android.tar.gz.b64.x* | tr -d '\r\n' | base64 -d > "$ARCHIVE"
+          echo "0108434bf6b1f4f37e745ac35878e909be4b42e8d38dfd27c3aedde698e2f573  $ARCHIVE" | sha256sum -c -
+          mkdir -p "$PROJECT"
+          tar -xzf "$ARCHIVE" -C "$PROJECT"
+          patch -d "$PROJECT" -p1 --batch --forward < .ci/productshot-rc1-remediation/warning-remediation.patch
+          (cd "$PROJECT" && sha256sum -c "$GITHUB_WORKSPACE/.ci/productshot-rc1-remediation/source.sha256")
+          SRC="$PROJECT/app/src/main/java/com/productshot/app/MainActivity.java"
+          python3 .ci/productshot-block11-runtime-fix/apply_android35_insets_fix.py "$SRC"
+          echo '=== fixed configureWindow region ==='
+          nl -ba "$SRC" | sed -n '138,170p'
+          echo '=== fixed content-view region ==='
+          nl -ba "$SRC" | sed -n '242,260p'
+          echo '=== network/create/retry symbols ==='
+          grep -nEi 'Reintentando|reint|retry|schedule|network|createJob|create job|IOException|UnknownHost|progress|4%|4 %|postDelayed|API_BASE|BASE_URL' "$SRC" | head -n 240 || true
+          echo '=== network/create region 560-900 ==='
+          nl -ba "$SRC" | sed -n '560,900p'
+          echo '=== network/create region 900-1240 ==='
+          nl -ba "$SRC" | sed -n '900,1240p'
+          sha256sum "$SRC"

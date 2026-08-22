@@ -1,0 +1,126 @@
+name: ProductShot Block 11 API 35 launch diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/productshot-block11-api35-launch-diagnostic.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose-api35-launch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle 9.5.0
+        uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c
+        with:
+          gradle-version: "9.5.0"
+          cache-disabled: true
+
+      - name: Build checksum-verified RC
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARCHIVE="$RUNNER_TEMP/base.tar.gz"
+          PROJECT="$RUNNER_TEMP/productshot"
+          cat .ci/productshot-rc1-exact/android.tar.gz.b64.x* | tr -d '\r\n' | base64 -d > "$ARCHIVE"
+          echo "0108434bf6b1f4f37e745ac35878e909be4b42e8d38dfd27c3aedde698e2f573  $ARCHIVE" | sha256sum -c -
+          mkdir -p "$PROJECT"
+          tar -xzf "$ARCHIVE" -C "$PROJECT"
+          patch -d "$PROJECT" -p1 --batch --forward < .ci/productshot-rc1-remediation/warning-remediation.patch
+          (cd "$PROJECT" && sha256sum -c "$GITHUB_WORKSPACE/.ci/productshot-rc1-remediation/source.sha256")
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0" "platform-tools" "emulator" "system-images;android-35;google_apis;x86_64"
+          gradle -p "$PROJECT" :app:assembleRc --stacktrace --no-daemon
+          cp "$PROJECT/app/build/outputs/apk/rc/app-rc.apk" "$RUNNER_TEMP/productshot.apk"
+          echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+
+      - name: Boot API 35
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          AVD_HOME="$RUNNER_TEMP/android-avd"
+          mkdir -p "$AVD_HOME"
+          export ANDROID_AVD_HOME="$AVD_HOME"
+          echo "ANDROID_AVD_HOME=$AVD_HOME" >> "$GITHUB_ENV"
+          echo no | "$SDK_ROOT/cmdline-tools/latest/bin/avdmanager" create avd --force --name productshot-api35-diag --package "system-images;android-35;google_apis;x86_64" >/dev/null
+          "$SDK_ROOT/emulator/emulator" @productshot-api35-diag -no-window -noaudio -no-boot-anim -no-snapshot -no-metrics -gpu swiftshader_indirect -camera-back none -camera-front none -accel on > "$RUNNER_TEMP/emulator.log" 2>&1 &
+          adb start-server
+          timeout 180 adb wait-for-device
+          timeout 300 bash -c 'until [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" == "1" ]]; do sleep 2; done'
+          adb shell input keyevent 82 || true
+          adb shell cmd window dismiss-keyguard || true
+          adb shell input keyevent 3 || true
+          sleep 5
+
+      - name: Diagnose launch paths without early failure
+        shell: bash
+        run: |
+          set +e
+          OUT="$RUNNER_TEMP/api35-launch-diag"
+          mkdir -p "$OUT"
+          APK="$RUNNER_TEMP/productshot.apk"
+          PKG="com.productshot.app.rc"
+          ACT="com.productshot.app.MainActivity"
+          CMP="$PKG/$ACT"
+
+          adb install --no-streaming -r "$APK" > "$OUT/install.txt" 2>&1
+          sleep 4
+          adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER "$PKG" > "$OUT/resolve-launcher.txt" 2>&1
+          adb shell pm path "$PKG" > "$OUT/pm-path.txt" 2>&1
+          adb shell dumpsys package "$PKG" > "$OUT/package-before.txt" 2>&1
+          adb shell dumpsys user > "$OUT/users.txt" 2>&1
+          adb shell dumpsys window policy > "$OUT/window-policy-before.txt" 2>&1
+
+          adb logcat -c
+          adb logcat -b events -c
+          adb shell am start -W --user 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n "$CMP" > "$OUT/am-main.txt" 2>&1
+          sleep 4
+          adb shell pidof "$PKG" > "$OUT/pid-after-am.txt" 2>&1
+          adb shell dumpsys activity activities > "$OUT/activity-after-am.txt" 2>&1
+          adb shell dumpsys window windows > "$OUT/windows-after-am.txt" 2>&1
+          adb logcat -d -v threadtime > "$OUT/logcat-after-am.txt" 2>&1
+          adb logcat -b events -d -v threadtime > "$OUT/events-after-am.txt" 2>&1
+          adb shell dumpsys activity exit-info "$PKG" > "$OUT/exit-info-after-am.txt" 2>&1
+
+          adb shell am force-stop "$PKG"
+          adb logcat -c
+          adb logcat -b events -c
+          adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 > "$OUT/monkey.txt" 2>&1
+          sleep 4
+          adb shell pidof "$PKG" > "$OUT/pid-after-monkey.txt" 2>&1
+          adb shell dumpsys activity activities > "$OUT/activity-after-monkey.txt" 2>&1
+          adb shell dumpsys window windows > "$OUT/windows-after-monkey.txt" 2>&1
+          adb logcat -d -v threadtime > "$OUT/logcat-after-monkey.txt" 2>&1
+          adb logcat -b events -d -v threadtime > "$OUT/events-after-monkey.txt" 2>&1
+          adb shell dumpsys activity exit-info "$PKG" > "$OUT/exit-info-after-monkey.txt" 2>&1
+          adb shell dumpsys package "$PKG" > "$OUT/package-after.txt" 2>&1
+          adb exec-out screencap -p > "$OUT/screen.png" 2>/dev/null
+
+          printf 'am_pid=%s\nmonkey_pid=%s\n' "$(cat "$OUT/pid-after-am.txt")" "$(cat "$OUT/pid-after-monkey.txt")" | tee "$OUT/summary.txt"
+          exit 0
+
+      - name: Upload API 35 launch diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: productshot-block11-api35-launch-diagnostics
+          path: ${{ runner.temp }}/api35-launch-diag/*
+          if-no-files-found: warn
+          retention-days: 7
