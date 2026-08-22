@@ -28,9 +28,6 @@ jobs:
           set -euo pipefail
           cd projects/ProductShot/block8
 
-          # The transport chunks are only a repository-safe representation of one
-          # canonical source ZIP. Validate the exact expected chunk set, reconstruct
-          # the archive, then authenticate the assembled ZIP with its pinned SHA-256.
           expected=(
             source.b64.00 source.b64.01 source.b64.02 source.b64.03
             source.b64.04 source.b64.05 source.b64.06
@@ -45,10 +42,17 @@ jobs:
           fi
 
           mkdir -p "$RUNNER_TEMP/productshot-src"
-          cat "${expected[@]}" | base64 -d > "$RUNNER_TEMP/ProductShot-v0.9.8-source.zip"
-          echo "10601a51d25279711fefe276c6bc685424096677f8b78d072e11836f97047c0b  $RUNNER_TEMP/ProductShot-v0.9.8-source.zip" | sha256sum -c -
-          unzip -t "$RUNNER_TEMP/ProductShot-v0.9.8-source.zip"
-          unzip -q "$RUNNER_TEMP/ProductShot-v0.9.8-source.zip" -d "$RUNNER_TEMP/productshot-src"
+          ARCHIVE="$RUNNER_TEMP/ProductShot-v0.9.8-source.zip"
+          cat "${expected[@]}" | base64 -d > "$ARCHIVE"
+          ACTUAL_SHA256="$(sha256sum "$ARCHIVE" | awk '{print $1}')"
+          echo "actual_source_zip_sha256=$ACTUAL_SHA256"
+          unzip -t "$ARCHIVE"
+          EXPECTED_SHA256="10601a51d25279711fefe276c6bc685424096677f8b78d072e11836f97047c0b"
+          if [[ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]]; then
+            echo "Source ZIP checksum mismatch: expected=$EXPECTED_SHA256 actual=$ACTUAL_SHA256" >&2
+            exit 1
+          fi
+          unzip -q "$ARCHIVE" -d "$RUNNER_TEMP/productshot-src"
 
       - uses: actions/setup-java@v4
         with:
