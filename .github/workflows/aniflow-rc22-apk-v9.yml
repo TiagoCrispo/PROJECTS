@@ -1,0 +1,206 @@
+name: AniFlow RC22 APK V9
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+concurrency:
+  group: aniflow-rc22-apk-v9
+  cancel-in-progress: true
+
+jobs:
+  build-apk:
+    if: github.event.issue.number == 37 && github.event.comment.body == 'RUN_ANIFLOW_RC22_APK_V9'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      ROOT: /tmp/aniflow-rc22
+      OUT: /tmp/aniflow-rc22-out
+      VERSION: 1.0.21-rc22
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Announce start
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue comment 37 --repo "$GITHUB_REPOSITORY" --body "ANIFLOW_RC22_APK_V9_STARTED run_id=${GITHUB_RUN_ID}"
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+          cache-read-only: true
+
+      - name: Reconstruct verified RC22 + buildfixes 1-3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash "$GITHUB_WORKSPACE/.ci/rc22/reconstruct-buildfix3.sh"
+
+      - name: Source and playback-catalog gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$ROOT"
+          bash scripts/validate-local.sh
+          cd playback-catalog
+          npm test
+          npm run validate
+
+      - name: Unit tests, lint, debug and release assembly
+        run: gradle -p "$ROOT" :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease --stacktrace --no-daemon
+
+      - name: Verify tests and lint
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import glob, xml.etree.ElementTree as ET
+          files=glob.glob('/tmp/aniflow-rc22/app/build/test-results/testDebugUnitTest/TEST-*.xml')
+          if not files:
+              raise SystemExit('no junit xml files')
+          tests=failures=errors=skipped=0
+          for f in files:
+              r=ET.parse(f).getroot()
+              tests += int(r.attrib.get('tests',0))
+              failures += int(r.attrib.get('failures',0))
+              errors += int(r.attrib.get('errors',0))
+              skipped += int(r.attrib.get('skipped',0))
+          print(f'TEST_COUNTS tests={tests} failures={failures} errors={errors} skipped={skipped}')
+          if tests != 64 or failures or errors:
+              raise SystemExit(1)
+          PY
+          REPORT="$ROOT/app/build/reports/lint-results-debug.txt"
+          test -f "$REPORT"
+          ! grep -q ': Error:' "$REPORT"
+          ! grep -q '\[RequiresFeature\]' "$REPORT"
+          ! grep -q 'addWebMessageListener should only be called if the feature WEB_MESSAGE_LISTENER is present' "$REPORT"
+          ERRORS=$(grep -Ec '^[^ ].*:.*: Error:' "$REPORT" || true)
+          WARNINGS=$(grep -Ec '^[^ ].*:.*: Warning:' "$REPORT" || true)
+          echo "LINT_COUNTS errors=${ERRORS} warnings=${WARNINGS}"
+
+      - name: Sign, inspect and verify APKs
+        id: apk
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOOLS="$ANDROID_HOME/build-tools/36.0.0"
+          DEBUG="$ROOT/app/build/outputs/apk/debug/app-debug.apk"
+          UNSIGNED="$ROOT/app/build/outputs/apk/release/app-release-unsigned.apk"
+          KEYSTORE="$RUNNER_TEMP/aniflow-rc22-v9.jks"
+          ALIGNED="$RUNNER_TEMP/AniFlow-v${VERSION}-aligned.apk"
+          RELEASE="$RUNNER_TEMP/AniFlow-v${VERSION}.apk"
+          mkdir -p "$OUT"
+
+          test -s "$DEBUG"
+          test -s "$UNSIGNED"
+          unzip -t "$DEBUG" >/dev/null
+          unzip -t "$UNSIGNED" >/dev/null
+          unzip -l "$DEBUG" | grep -q 'AndroidManifest.xml'
+          unzip -l "$DEBUG" | grep -q 'classes.dex'
+          unzip -l "$UNSIGNED" | grep -q 'AndroidManifest.xml'
+          unzip -l "$UNSIGNED" | grep -q 'classes.dex'
+
+          PASS="$(openssl rand -hex 24)"
+          keytool -genkeypair -v \
+            -keystore "$KEYSTORE" \
+            -storepass "$PASS" \
+            -keypass "$PASS" \
+            -alias aniflow \
+            -keyalg RSA \
+            -keysize 4096 \
+            -validity 3650 \
+            -dname "CN=AniFlow RC22 Test Release, OU=Android, O=AniFlow, L=Mendoza, C=AR"
+
+          "$TOOLS/zipalign" -p -f 4 "$UNSIGNED" "$ALIGNED"
+          "$TOOLS/zipalign" -c -v 4 "$ALIGNED"
+          "$TOOLS/apksigner" sign \
+            --ks "$KEYSTORE" \
+            --ks-key-alias aniflow \
+            --ks-pass "pass:$PASS" \
+            --key-pass "pass:$PASS" \
+            --out "$RELEASE" \
+            "$ALIGNED"
+
+          "$TOOLS/apksigner" verify --verbose --print-certs "$DEBUG" | tee "$OUT/apksigner-debug.txt"
+          "$TOOLS/apksigner" verify --verbose --print-certs "$RELEASE" | tee "$OUT/apksigner-release.txt"
+          "$TOOLS/zipalign" -c -v 4 "$RELEASE"
+          unzip -t "$RELEASE" >/dev/null
+          unzip -l "$RELEASE" | grep -q 'AndroidManifest.xml'
+          unzip -l "$RELEASE" | grep -q 'classes.dex'
+
+          "$TOOLS/aapt" dump badging "$DEBUG" | tee "$OUT/badging-debug.txt"
+          "$TOOLS/aapt" dump badging "$RELEASE" | tee "$OUT/badging-release.txt"
+          for BADGING in "$OUT/badging-debug.txt" "$OUT/badging-release.txt"; do
+            grep -q "package: name='com.aniflow.app'" "$BADGING"
+            grep -q "versionCode='1000022'" "$BADGING"
+            grep -q "versionName='1.0.21-rc22'" "$BADGING"
+            grep -q "targetSdkVersion:'36'" "$BADGING"
+          done
+
+          cp "$DEBUG" "$OUT/AniFlow-v${VERSION}-debug.apk"
+          cp "$RELEASE" "$OUT/AniFlow-v${VERSION}-release-signed.apk"
+
+          sha256sum "$OUT/AniFlow-v${VERSION}-debug.apk" "$OUT/AniFlow-v${VERSION}-release-signed.apk" | tee "$OUT/SHA256SUMS.txt"
+          DEBUG_SHA=$(sha256sum "$OUT/AniFlow-v${VERSION}-debug.apk" | awk '{print $1}')
+          RELEASE_SHA=$(sha256sum "$OUT/AniFlow-v${VERSION}-release-signed.apk" | awk '{print $1}')
+          echo "debug_sha=$DEBUG_SHA" >> "$GITHUB_OUTPUT"
+          echo "release_sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Package source, catalog and reports
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd "$ROOT" && zip -qr "$OUT/AniFlow-v${VERSION}-source.zip" . \
+            -x '.gradle/*' '.idea/*' '.kotlin/*' 'app/build/*' '**/build/*' 'benchmark/build/*' 'playback-catalog/node_modules/*')
+          (cd "$ROOT/playback-catalog" && zip -qr "$OUT/AniFlow-v${VERSION}-playback-catalog.zip" . -x 'node_modules/*')
+          cp "$ROOT/app/build/reports/lint-results-debug.txt" "$OUT/"
+          test ! -f "$ROOT/app/build/reports/lint-results-debug.html" || cp "$ROOT/app/build/reports/lint-results-debug.html" "$OUT/"
+          cat > "$OUT/INSTALL.txt" <<'EOF'
+          AniFlow RC22 test packages
+
+          Recommended first install: AniFlow-v1.0.21-rc22-debug.apk
+
+          The release-signed APK uses an ephemeral CI test certificate generated only for this build. Android will reject an in-place update if an older AniFlow APK was signed with a different certificate; in that case uninstall the older AniFlow package first, then install this APK. App data is removed by uninstalling unless separately backed up.
+
+          Both APKs were checked with aapt, zipalign/unzip integrity checks, and apksigner in CI.
+          EOF
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AniFlow-v1.0.21-rc22-apk-v9
+          path: /tmp/aniflow-rc22-out/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Announce success
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEBUG_SHA: ${{ steps.apk.outputs.debug_sha }}
+          RELEASE_SHA: ${{ steps.apk.outputs.release_sha }}
+        run: gh issue comment 37 --repo "$GITHUB_REPOSITORY" --body "ANIFLOW_RC22_APK_V9_SUCCESS run_id=${GITHUB_RUN_ID} artifact=AniFlow-v1.0.21-rc22-apk-v9 tests=64/64 lint_errors=0 debug_sha256=${DEBUG_SHA} release_sha256=${RELEASE_SHA}"
+
+      - name: Announce failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue comment 37 --repo "$GITHUB_REPOSITORY" --body "ANIFLOW_RC22_APK_V9_FAILED run_id=${GITHUB_RUN_ID}"
