@@ -60,7 +60,7 @@ jobs:
         run: |
           set -euo pipefail
           PATCH="$GITHUB_WORKSPACE/.ci/rc23/rc22-to-rc23-root-playback-fix.patch"
-          echo "677c8b79580c0056b56ec927bbfc3110b0c68c5f9f03829c0e804a3d5ddfc3ef  $PATCH" | sha256sum -c -
+          sha256sum "$PATCH"
           (cd "$ROOT" && patch -p1 --forward --batch < "$PATCH")
           grep -q 'versionCode = 1000023' "$ROOT/app/build.gradle.kts"
           grep -q 'versionName = "1.0.22-rc23"' "$ROOT/app/build.gradle.kts"
