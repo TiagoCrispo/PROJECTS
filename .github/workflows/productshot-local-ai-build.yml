@@ -6,6 +6,11 @@ on:
     paths:
       - 'productshot-local/**'
       - '.github/workflows/productshot-local-ai-build.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'productshot-local/**'
+      - '.github/workflows/productshot-local-ai-build.yml'
   workflow_dispatch:
 
 permissions:
