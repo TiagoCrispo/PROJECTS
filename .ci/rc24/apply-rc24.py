@@ -118,6 +118,30 @@ s = replace_once(s, "assert 'versionCode = 1000023' in build", "assert 'versionC
 s = replace_once(s, "assert 'versionName = \"1.0.22-rc23\"' in build", "assert 'versionName = \"1.0.23-rc24\"' in build", 'block28 version name')
 write(rel, s)
 
+rel = 'scripts/validate-viewmodels-kotlin.sh'
+s = read(rel)
+old = '''    suspend fun resolveCatalogDemo(
+        mediaId: Long,
+        episode: Int,
+        preferredHeight: Int = 1080,
+    ): com.aniflow.app.data.network.PlaybackCatalogResult =
+        com.aniflow.app.data.network.PlaybackCatalogResult(emptyList(), 8)
+'''
+new = '''    suspend fun resolveUserDirectSource(
+        mediaId: Long,
+        episode: Int,
+        url: String,
+    ): com.aniflow.app.domain.PlaybackSource? = null
+    suspend fun resolveCatalogDemo(
+        mediaId: Long,
+        episode: Int,
+        preferredHeight: Int = 1080,
+    ): com.aniflow.app.data.network.PlaybackCatalogResult =
+        com.aniflow.app.data.network.PlaybackCatalogResult(emptyList(), 8)
+'''
+s = replace_once(s, old, new, 'viewmodel resolver stub')
+write(rel, s)
+
 orig = root / 'app/src/main/java/com/aniflow/app/feature/player/PlayerViewModel.kt.orig'
 if orig.exists(): orig.unlink()
 vm = read('app/src/main/java/com/aniflow/app/feature/player/PlayerViewModel.kt')
