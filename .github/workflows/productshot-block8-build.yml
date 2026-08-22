@@ -48,6 +48,10 @@ jobs:
           unzip -t "$ARCHIVE"
           unzip -q "$ARCHIVE" -d "$RUNNER_TEMP/productshot-src"
 
+      - name: Apply audited Block 8 Kotlin compile hotfix
+        shell: bash
+        run: python3 projects/ProductShot/block8/compile_hotfix.py "$RUNNER_TEMP/productshot-src"
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -86,6 +90,14 @@ jobs:
         working-directory: ${{ runner.temp }}/productshot-src
         run: sha256sum app/build/outputs/apk/debug/app-debug.apk | tee apk-debug.sha256
 
+      - name: Pack fixed source
+        if: success()
+        working-directory: ${{ runner.temp }}/productshot-src
+        shell: bash
+        run: |
+          zip -qr "$RUNNER_TEMP/ProductShot-v0.9.8-fixed-source.zip" .
+          sha256sum "$RUNNER_TEMP/ProductShot-v0.9.8-fixed-source.zip" > "$RUNNER_TEMP/ProductShot-v0.9.8-fixed-source.sha256"
+
       - name: Upload build diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -104,4 +116,14 @@ jobs:
           path: |
             ${{ runner.temp }}/productshot-src/app/build/outputs/apk/debug/app-debug.apk
             ${{ runner.temp }}/productshot-src/apk-debug.sha256
+          if-no-files-found: error
+
+      - name: Upload fixed source
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProductShot-v0.9.8-fixed-source
+          path: |
+            ${{ runner.temp }}/ProductShot-v0.9.8-fixed-source.zip
+            ${{ runner.temp }}/ProductShot-v0.9.8-fixed-source.sha256
           if-no-files-found: error
