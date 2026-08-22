@@ -1,0 +1,140 @@
+name: ProductShot Block 9 Android Build
+
+on:
+  push:
+    branches:
+      - productshot-block8-build
+    paths:
+      - "projects/ProductShot/block8/**"
+      - ".github/workflows/productshot-block8-build.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "projects/ProductShot/block8/**"
+      - ".github/workflows/productshot-block8-build.yml"
+  workflow_dispatch:
+
+jobs:
+  build-debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rebuild and verify clean ProductShot source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd projects/ProductShot/block8
+
+          expected=(
+            clean.b64.00 clean.b64.01 clean.b64.02 clean.b64.03
+            clean.b64.04 clean.b64.05 clean.b64.06
+          )
+          for part in "${expected[@]}"; do
+            test -s "$part" || { echo "Missing/empty clean transport chunk: $part" >&2; exit 1; }
+          done
+          mapfile -t actual < <(find . -maxdepth 1 -type f -name 'clean.b64.*' -printf '%f\n' | sort)
+          if [[ "${actual[*]}" != "${expected[*]}" ]]; then
+            printf 'Unexpected clean transport chunk set.\nExpected: %s\nActual: %s\n' "${expected[*]}" "${actual[*]}" >&2
+            exit 1
+          fi
+
+          mkdir -p "$RUNNER_TEMP/productshot-src"
+          ARCHIVE="$RUNNER_TEMP/ProductShot-v0.9.8-source.zip"
+          cat "${expected[@]}" | base64 -d > "$ARCHIVE"
+          echo "385f4e5f21cbca4194d891452969cfe44f40a667394caf799b688942745cf3ec  $ARCHIVE" | sha256sum -c -
+          unzip -t "$ARCHIVE"
+          unzip -q "$ARCHIVE" -d "$RUNNER_TEMP/productshot-src"
+
+      - name: Apply audited Block 8 Kotlin compile hotfix
+        shell: bash
+        run: python3 projects/ProductShot/block8/compile_hotfix.py "$RUNNER_TEMP/productshot-src"
+
+      - name: Apply Block 9 guided local install
+        working-directory: ${{ runner.temp }}/productshot-src
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch -p1 < "$GITHUB_WORKSPACE/projects/ProductShot/block8/block9-guided-local-install.patch"
+          grep -F 'versionCode = 55' app/build.gradle.kts
+          grep -F 'versionName = "0.9.9-guided-local-install"' app/build.gradle.kts
+          grep -F 'Ya tengo el ZIP del motor' app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt
+          grep -F '¿Qué archivo necesito?' app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+
+      - name: Static validation
+        working-directory: ${{ runner.temp }}/productshot-src
+        run: python3 scripts/static_validate.py .
+
+      - name: Runtime dependency report
+        working-directory: ${{ runner.temp }}/productshot-src
+        run: gradle --no-daemon :app:dependencies --configuration debugRuntimeClasspath > dependency-report.txt
+
+      - name: Build debug APK
+        working-directory: ${{ runner.temp }}/productshot-src
+        shell: bash
+        run: |
+          set +e
+          gradle --no-daemon --stacktrace :app:assembleDebug 2>&1 | tee build.log
+          status=${PIPESTATUS[0]}
+          exit "$status"
+
+      - name: APK checksum
+        if: success()
+        working-directory: ${{ runner.temp }}/productshot-src
+        run: sha256sum app/build/outputs/apk/debug/app-debug.apk | tee apk-debug.sha256
+
+      - name: Pack fixed source
+        if: success()
+        working-directory: ${{ runner.temp }}/productshot-src
+        shell: bash
+        run: |
+          zip -qr "$RUNNER_TEMP/ProductShot-v0.9.9-guided-local-install-source.zip" .
+          sha256sum "$RUNNER_TEMP/ProductShot-v0.9.9-guided-local-install-source.zip" > "$RUNNER_TEMP/ProductShot-v0.9.9-guided-local-install-source.sha256"
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProductShot-v0.9.9-build-diagnostics
+          path: |
+            ${{ runner.temp }}/productshot-src/build.log
+            ${{ runner.temp }}/productshot-src/dependency-report.txt
+          if-no-files-found: warn
+
+      - name: Upload debug APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProductShot-v0.9.9-debug
+          path: |
+            ${{ runner.temp }}/productshot-src/app/build/outputs/apk/debug/app-debug.apk
+            ${{ runner.temp }}/productshot-src/apk-debug.sha256
+          if-no-files-found: error
+
+      - name: Upload fixed source
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProductShot-v0.9.9-fixed-source
+          path: |
+            ${{ runner.temp }}/ProductShot-v0.9.9-guided-local-install-source.zip
+            ${{ runner.temp }}/ProductShot-v0.9.9-guided-local-install-source.sha256
+          if-no-files-found: error
