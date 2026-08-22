@@ -13,55 +13,81 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+/** Debug-only CI entry point. It performs the real local model download and ONNX inference. */
 public final class SmokeActivity extends Activity {
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
 
-    @Override public void onCreate(Bundle state) {
+    @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
         worker.execute(this::runSmoke);
     }
 
     private void runSmoke() {
         File dir = new File(getFilesDir(), "smoke");
-        if (!dir.isDirectory()) dir.mkdirs();
+        if (!dir.isDirectory() && !dir.mkdirs()) {
+            finishSafely();
+            return;
+        }
         File status = new File(dir, "status.txt");
         File resultFile = new File(dir, "result.jpg");
+        status.delete();
+        resultFile.delete();
+
+        Bitmap source = null;
+        Bitmap result = null;
         try {
-            if (status.exists()) status.delete();
-            if (resultFile.exists()) resultFile.delete();
-            Bitmap source = syntheticProduct();
-            Bitmap result = new LocalProductPipeline(this).run(source, (pct, msg) -> {});
+            source = syntheticProduct();
+            result = new LocalProductPipeline(this).run(source, (pct, msg) -> { });
             if (result.getWidth() != 1536 || result.getHeight() != 1024) {
                 throw new IllegalStateException("unexpected result dimensions " + result.getWidth() + "x" + result.getHeight());
             }
             try (FileOutputStream out = new FileOutputStream(resultFile)) {
-                if (!result.compress(Bitmap.CompressFormat.JPEG, 92, out)) throw new IllegalStateException("jpeg compress failed");
+                if (!result.compress(Bitmap.CompressFormat.JPEG, 94, out)) {
+                    throw new IllegalStateException("jpeg compress failed");
+                }
                 out.getFD().sync();
             }
-            source.recycle();
-            result.recycle();
-            write(status, "PASS\n");
+            if (!resultFile.isFile() || resultFile.length() < 1024) {
+                throw new IllegalStateException("result jpeg missing or too small");
+            }
+            write(status, "PASS 1536x1024 bytes=" + resultFile.length() + "\n");
         } catch (Throwable t) {
-            write(status, "FAIL " + t.getClass().getName() + ": " + String.valueOf(t.getMessage()) + "\n");
+            resultFile.delete();
+            String message = String.valueOf(t.getMessage()).replace('\n', ' ').replace('\r', ' ');
+            write(status, "FAIL " + t.getClass().getName() + ": " + message + "\n");
         } finally {
-            runOnUiThread(this::finish);
+            if (source != null && !source.isRecycled()) source.recycle();
+            if (result != null && !result.isRecycled()) result.recycle();
+            finishSafely();
         }
     }
 
+    private void finishSafely() {
+        runOnUiThread(this::finish);
+    }
+
     private static Bitmap syntheticProduct() {
-        Bitmap bitmap = Bitmap.createBitmap(768, 576, Bitmap.Config.ARGB_8888);
+        Bitmap bitmap = Bitmap.createBitmap(1024, 768, Bitmap.Config.ARGB_8888);
         Canvas c = new Canvas(bitmap);
-        c.drawColor(Color.rgb(224, 220, 214));
-        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-        p.setColor(Color.rgb(105, 72, 48));
-        c.drawRoundRect(145, 185, 625, 300, 18, 18, p);
-        p.setColor(Color.rgb(72, 48, 34));
-        c.drawRect(180, 292, 225, 495, p);
-        c.drawRect(545, 292, 590, 495, p);
-        Paint detail = new Paint(Paint.ANTI_ALIAS_FLAG);
-        detail.setColor(Color.rgb(140, 98, 64));
-        detail.setStrokeWidth(6f);
-        for (int y = 205; y < 285; y += 18) c.drawLine(175, y, 595, y + 4, detail);
+        c.drawColor(Color.rgb(232, 228, 221));
+
+        Paint shadow = new Paint(Paint.ANTI_ALIAS_FLAG);
+        shadow.setColor(Color.argb(40, 0, 0, 0));
+        c.drawOval(170, 620, 850, 686, shadow);
+
+        Paint wood = new Paint(Paint.ANTI_ALIAS_FLAG);
+        wood.setColor(Color.rgb(145, 91, 52));
+        c.drawRoundRect(180, 220, 844, 382, 22, 22, wood);
+
+        Paint darkWood = new Paint(Paint.ANTI_ALIAS_FLAG);
+        darkWood.setColor(Color.rgb(102, 64, 39));
+        c.drawRect(210, 365, 814, 406, darkWood);
+        c.drawRoundRect(226, 397, 282, 640, 10, 10, darkWood);
+        c.drawRoundRect(742, 397, 798, 640, 10, 10, darkWood);
+
+        for (int x = 286; x <= 730; x += 34) {
+            c.drawRoundRect(x, 553, x + 22, 615, 5, 5, wood);
+        }
         return bitmap;
     }
 
@@ -69,7 +95,7 @@ public final class SmokeActivity extends Activity {
         try (FileOutputStream out = new FileOutputStream(file)) {
             out.write(text.getBytes(StandardCharsets.UTF_8));
             out.getFD().sync();
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) { }
     }
 
     @Override protected void onDestroy() {
