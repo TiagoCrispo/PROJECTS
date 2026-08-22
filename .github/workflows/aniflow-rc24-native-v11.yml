@@ -1,0 +1,210 @@
+name: AniFlow RC24 Native Playback V11
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+concurrency:
+  group: aniflow-rc24-native-v11
+  cancel-in-progress: true
+
+jobs:
+  build-apk:
+    if: github.event.issue.number == 37 && github.event.comment.body == 'RUN_ANIFLOW_RC24_NATIVE_V11'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      ROOT: /tmp/aniflow-rc24
+      OUT: /tmp/aniflow-rc24-out
+      VERSION: 1.0.23-rc24
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Announce start
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue comment 37 --repo "$GITHUB_REPOSITORY" --body "ANIFLOW_RC24_NATIVE_V11_STARTED run_id=${GITHUB_RUN_ID}"
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+          cache-read-only: true
+
+      - name: Restore verified RC23 source artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$ROOT" /tmp/rc23-artifact /tmp/rc23-artifact.zip
+          mkdir -p "$ROOT" /tmp/rc23-artifact
+          gh api repos/TiagoCrispo/PROJECTS/actions/artifacts/9471968657/zip > /tmp/rc23-artifact.zip
+          echo 'fa6dcc13ad59ee78b1bfcb217c32a94bf58f79b1fc941b0e68de0873b46649e4  /tmp/rc23-artifact.zip' | sha256sum -c -
+          unzip -q /tmp/rc23-artifact.zip -d /tmp/rc23-artifact
+          echo 'ffd0237830607339fcb8cd2cb58f27a2d6377e82889e2610641aebd810a87a39  /tmp/rc23-artifact/AniFlow-v1.0.22-rc23-source.zip' | sha256sum -c -
+          unzip -q /tmp/rc23-artifact/AniFlow-v1.0.22-rc23-source.zip -d "$ROOT"
+          grep -q 'versionCode = 1000023' "$ROOT/app/build.gradle.kts"
+          grep -q 'versionName = "1.0.22-rc23"' "$ROOT/app/build.gradle.kts"
+          echo RC23_SOURCE_RESTORE_OK
+
+      - name: Apply RC24 native playback transform
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum "$GITHUB_WORKSPACE/.ci/rc24/apply-rc24.py"
+          ROOT="$ROOT" python3 "$GITHUB_WORKSPACE/.ci/rc24/apply-rc24.py"
+          grep -q 'versionCode = 1000024' "$ROOT/app/build.gradle.kts"
+          grep -q 'versionName = "1.0.23-rc24"' "$ROOT/app/build.gradle.kts"
+          ! grep -Rqi 'PROBAR CATÁLOGO · MOREVNA' "$ROOT/app/src/main/java"
+          ! grep -Rqi 'useCatalogDemo' "$ROOT/app/src/main/java"
+          grep -Rq 'resolveUserDirectSource' "$ROOT/app/src/main/java"
+          grep -Rq 'officialPlayerRequested' "$ROOT/app/src/main/java"
+          echo RC24_NATIVE_TRANSFORM_OK
+
+      - name: Verify direct-media transport contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://storage.googleapis.com/exoplayer-test-media-0/BigBuckBunny_320x180.mp4'
+          curl -L --fail --silent --show-error --max-time 20 --range 0-8191 -A 'AniFlow-RC24-CI/1.0' -D /tmp/direct.headers -o /tmp/direct.bin "$URL"
+          test -s /tmp/direct.bin
+          tr -d '\r' < /tmp/direct.headers | grep -Eiq '^content-type: video/mp4([;[:space:]]|$)'
+          echo "DIRECT_MEDIA_TRANSPORT_OK bytes=$(wc -c < /tmp/direct.bin)"
+
+      - name: Source and catalog gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$ROOT"
+          find scripts -maxdepth 1 -type f -name '*.sh' -exec chmod +x {} +
+          bash scripts/validate-ui-syntax.sh
+          python3 scripts/validate-block26.py
+          python3 scripts/validate-block27.py
+          python3 scripts/validate-block28.py
+          bash scripts/validate-local.sh
+          cd playback-catalog
+          npm test
+          npm run validate
+
+      - name: Unit tests, lint, debug and release assembly
+        run: gradle -p "$ROOT" :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease --stacktrace --no-daemon
+
+      - name: Verify tests and lint
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import glob, xml.etree.ElementTree as ET
+          files=glob.glob('/tmp/aniflow-rc24/app/build/test-results/testDebugUnitTest/TEST-*.xml')
+          if not files: raise SystemExit('no junit xml files')
+          tests=failures=errors=skipped=0
+          for f in files:
+              r=ET.parse(f).getroot()
+              tests += int(r.attrib.get('tests',0)); failures += int(r.attrib.get('failures',0)); errors += int(r.attrib.get('errors',0)); skipped += int(r.attrib.get('skipped',0))
+          print(f'TEST_COUNTS tests={tests} failures={failures} errors={errors} skipped={skipped}')
+          if tests != 64 or failures or errors: raise SystemExit(1)
+          PY
+          REPORT="$ROOT/app/build/reports/lint-results-debug.txt"
+          test -f "$REPORT"
+          ! grep -q ': Error:' "$REPORT"
+          ! grep -q '\[RequiresFeature\]' "$REPORT"
+          ERRORS=$(grep -Ec '^[^ ].*:.*: Error:' "$REPORT" || true)
+          WARNINGS=$(grep -Ec '^[^ ].*:.*: Warning:' "$REPORT" || true)
+          echo "LINT_COUNTS errors=${ERRORS} warnings=${WARNINGS}"
+
+      - name: Sign, inspect and verify APKs
+        id: apk
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOOLS="$ANDROID_HOME/build-tools/36.0.0"
+          DEBUG="$ROOT/app/build/outputs/apk/debug/app-debug.apk"
+          UNSIGNED="$ROOT/app/build/outputs/apk/release/app-release-unsigned.apk"
+          KEYSTORE="$RUNNER_TEMP/aniflow-rc24-v11.jks"
+          ALIGNED="$RUNNER_TEMP/AniFlow-v${VERSION}-aligned.apk"
+          RELEASE="$RUNNER_TEMP/AniFlow-v${VERSION}.apk"
+          mkdir -p "$OUT"
+          test -s "$DEBUG"; test -s "$UNSIGNED"
+          unzip -t "$DEBUG" >/dev/null; unzip -t "$UNSIGNED" >/dev/null
+          unzip -l "$DEBUG" | grep -q 'AndroidManifest.xml'; unzip -l "$DEBUG" | grep -q 'classes.dex'
+          PASS="$(openssl rand -hex 24)"
+          keytool -genkeypair -v -keystore "$KEYSTORE" -storepass "$PASS" -keypass "$PASS" -alias aniflow -keyalg RSA -keysize 4096 -validity 3650 -dname "CN=AniFlow RC24 Test Release, OU=Android, O=AniFlow, L=Mendoza, C=AR"
+          "$TOOLS/zipalign" -p -f 4 "$UNSIGNED" "$ALIGNED"
+          "$TOOLS/apksigner" sign --ks "$KEYSTORE" --ks-key-alias aniflow --ks-pass "pass:$PASS" --key-pass "pass:$PASS" --out "$RELEASE" "$ALIGNED"
+          "$TOOLS/apksigner" verify --verbose --print-certs "$DEBUG" | tee "$OUT/apksigner-debug.txt"
+          "$TOOLS/apksigner" verify --verbose --print-certs "$RELEASE" | tee "$OUT/apksigner-release.txt"
+          "$TOOLS/zipalign" -c -v 4 "$RELEASE"
+          unzip -t "$RELEASE" >/dev/null
+          "$TOOLS/aapt" dump badging "$DEBUG" | tee "$OUT/badging-debug.txt"
+          "$TOOLS/aapt" dump badging "$RELEASE" | tee "$OUT/badging-release.txt"
+          grep -q "package: name='com.aniflow.app.debug'" "$OUT/badging-debug.txt"
+          grep -q "versionCode='1000024'" "$OUT/badging-debug.txt"
+          grep -q "versionName='1.0.23-rc24-debug'" "$OUT/badging-debug.txt"
+          grep -q "targetSdkVersion:'36'" "$OUT/badging-debug.txt"
+          grep -q "package: name='com.aniflow.app'" "$OUT/badging-release.txt"
+          grep -q "versionCode='1000024'" "$OUT/badging-release.txt"
+          grep -q "versionName='1.0.23-rc24'" "$OUT/badging-release.txt"
+          grep -q "targetSdkVersion:'36'" "$OUT/badging-release.txt"
+          cp "$DEBUG" "$OUT/AniFlow-v${VERSION}-debug.apk"
+          cp "$RELEASE" "$OUT/AniFlow-v${VERSION}-release-signed.apk"
+          sha256sum "$OUT/AniFlow-v${VERSION}-debug.apk" "$OUT/AniFlow-v${VERSION}-release-signed.apk" | tee "$OUT/SHA256SUMS.txt"
+          echo "debug_sha=$(sha256sum "$OUT/AniFlow-v${VERSION}-debug.apk" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          echo "release_sha=$(sha256sum "$OUT/AniFlow-v${VERSION}-release-signed.apk" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Package source and reports
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd "$ROOT" && zip -qr "$OUT/AniFlow-v${VERSION}-source.zip" . -x '.gradle/*' '.idea/*' '.kotlin/*' 'app/build/*' '**/build/*' 'benchmark/build/*' 'playback-catalog/node_modules/*')
+          cp "$ROOT/app/build/reports/lint-results-debug.txt" "$OUT/"
+          cat > "$OUT/INSTALL.txt" <<'EOF'
+          AniFlow RC24 native playback cleanup
+
+          Recommended device test: AniFlow-v1.0.23-rc24-debug.apk
+          Debug package: com.aniflow.app.debug
+
+          RC24 removes the user-facing Morevna demo substitution. Native Media3 playback is the default. Official embedded playback is never activated automatically. When no native source exists, AniFlow shows an honest unavailable state and can optionally accept an authorized direct HTTPS HLS/DASH/MP4/WebM URL; the URL is probed as direct media before playback and is never scraped from a web page.
+
+          The release-signed APK uses an ephemeral CI test certificate.
+          EOF
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AniFlow-v1.0.23-rc24-native-v11
+          path: /tmp/aniflow-rc24-out/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Announce success
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEBUG_SHA: ${{ steps.apk.outputs.debug_sha }}
+          RELEASE_SHA: ${{ steps.apk.outputs.release_sha }}
+        run: gh issue comment 37 --repo "$GITHUB_REPOSITORY" --body "ANIFLOW_RC24_NATIVE_V11_SUCCESS run_id=${GITHUB_RUN_ID} artifact=AniFlow-v1.0.23-rc24-native-v11 tests=64/64 lint_errors=0 debug_sha256=${DEBUG_SHA} release_sha256=${RELEASE_SHA}"
+
+      - name: Announce failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue comment 37 --repo "$GITHUB_REPOSITORY" --body "ANIFLOW_RC24_NATIVE_V11_FAILED run_id=${GITHUB_RUN_ID}"
