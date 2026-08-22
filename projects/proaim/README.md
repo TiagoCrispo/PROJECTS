@@ -18,6 +18,7 @@ The project does not treat popular tweaks as improvements. V26.7 uses a feedback
 - **Driver Lifecycle:** BEFORE Validator -> NOW -> official dated reference, followed by re-testing.
 - **Recommendation Engine:** `WHY MOUSE FEELS BAD?` and `WHAT SHOULD I FIX FIRST?`.
 - **Experiment Engine:** local evidence ledger with baseline, after, delta, samples, confidence, decision and rollback metadata.
+- **Validator Feedback Loop:** imports bounded Validator ZIP evidence and converts it into a timestamped USER-PC baseline.
 
 ## Safety model
 
@@ -32,7 +33,20 @@ Experimental settings require snapshots, multiple samples, regression checks and
 - Release date: **2026-08-20**
 - Target: **Windows 11 x64**
 - Build: **Go/amd64, CGO disabled, Windows GUI subsystem**
+- Source: **54 Go files / 31,685 lines**
 - EXE SHA-256: `9cc38e4c591f9b5da69b2002da9609d8aff5256b7a25eb82c98842385f69bcec`
 - Stable ZIP SHA-256: `9783112234bb7eeb8383a35adc716b9b23624a719e22532cc59c2fd067a38945`
+- Source archive SHA-256: `9a32b8f4ce3c5249fde368192127e8dde5c9d39eff36eb6f23a2b83c9aea187a`
 
-See [CHANGELOG.md](./CHANGELOG.md) and [VALIDATION.md](./VALIDATION.md).
+## Documentation
+
+- [CHANGELOG](./CHANGELOG.md)
+- [VALIDATION](./VALIDATION.md)
+- [ACCEPTANCE CRITERIA](./ACCEPTANCE_CRITERIA.md)
+- [USER-PC BASELINE](./USER_PC_BASELINE.md)
+- [SOURCE INDEX](./SOURCE_INDEX.md)
+- [RELEASE HASHES](./RELEASE_HASHES.md)
+
+## Runtime boundary
+
+Cross-build/package integrity is certifiable outside Windows. Physical Raw Input, USB/RF behavior, real NIC reset/property semantics, Wi-Fi RF, DPC/ISR under gameplay and PresentMon after current driver changes remain target-PC acceptance items. Missing evidence is **N/D**, never a fabricated PASS.
