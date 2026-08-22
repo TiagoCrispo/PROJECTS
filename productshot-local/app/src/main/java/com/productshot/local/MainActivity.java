@@ -1,11 +1,11 @@
 package com.productshot.local;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.ImageDecoder;
 import android.net.Uri;
@@ -25,12 +25,15 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.io.InputStream;
+import androidx.core.content.FileProvider;
+
+import java.io.File;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public final class MainActivity extends Activity {
     private static final int REQ_PICK = 1001;
+    private static final int REQ_CAMERA = 1002;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
 
     private LinearLayout root;
@@ -40,9 +43,13 @@ public final class MainActivity extends Activity {
     private ProgressBar progress;
     private Button primary;
     private Button save;
+    private Button share;
     private Button again;
     private Bitmap sourceBitmap;
     private Bitmap resultBitmap;
+    private Uri savedResultUri;
+    private Uri cameraUri;
+    private File cameraFile;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -90,7 +97,7 @@ public final class MainActivity extends Activity {
         root.addView(title, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8));
 
         TextView subtitle = new TextView(this);
-        subtitle.setText("Catálogo profesional · IA local · sin límites");
+        subtitle.setText("Catálogo profesional · IA local · sin límite interno");
         subtitle.setTextSize(15);
         subtitle.setTextColor(Color.rgb(91,84,78));
         subtitle.setGravity(Gravity.CENTER);
@@ -130,6 +137,10 @@ public final class MainActivity extends Activity {
         save.setOnClickListener(v -> saveResult());
         root.addView(save, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 0, 10));
 
+        share = button("Compartir");
+        share.setOnClickListener(v -> shareResult());
+        root.addView(share, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 0, 10));
+
         again = button("Crear otra");
         again.setOnClickListener(v -> reset());
         root.addView(again, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0));
@@ -157,6 +168,15 @@ public final class MainActivity extends Activity {
     }
 
     private void choosePhoto() {
+        new AlertDialog.Builder(this)
+                .setTitle("Elegir foto")
+                .setItems(new CharSequence[]{"Galería", "Cámara"}, (dialog, which) -> {
+                    if (which == 0) openGallery(); else openCamera();
+                })
+                .show();
+    }
+
+    private void openGallery() {
         Intent intent;
         if (Build.VERSION.SDK_INT >= 33) {
             intent = new Intent(MediaStore.ACTION_PICK_IMAGES);
@@ -169,18 +189,46 @@ public final class MainActivity extends Activity {
         startActivityForResult(intent, REQ_PICK);
     }
 
+    private void openCamera() {
+        try {
+            File dir = new File(getCacheDir(), "camera");
+            if (!dir.isDirectory() && !dir.mkdirs()) throw new IllegalStateException("camera dir");
+            cleanupCameraFile();
+            cameraFile = File.createTempFile("productshot-", ".jpg", dir);
+            cameraUri = FileProvider.getUriForFile(this, "com.productshot.local.files", cameraFile);
+            Intent intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+            intent.putExtra(MediaStore.EXTRA_OUTPUT, cameraUri);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            if (intent.resolveActivity(getPackageManager()) == null) throw new IllegalStateException("camera unavailable");
+            startActivityForResult(intent, REQ_CAMERA);
+        } catch (Exception e) {
+            cleanupCameraFile();
+            Toast.makeText(this, "No pude abrir la cámara", Toast.LENGTH_SHORT).show();
+        }
+    }
+
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != REQ_PICK || resultCode != RESULT_OK || data == null || data.getData() == null) return;
-        Uri uri = data.getData();
+        if (resultCode != RESULT_OK) {
+            if (requestCode == REQ_CAMERA) cleanupCameraFile();
+            return;
+        }
+        Uri uri = null;
+        if (requestCode == REQ_PICK && data != null) uri = data.getData();
+        if (requestCode == REQ_CAMERA) uri = cameraUri;
+        if (uri == null) return;
         try {
             Bitmap loaded = decode(uri, 2048);
             recycleSource();
+            recycleResult();
+            savedResultUri = null;
             sourceBitmap = loaded;
             preview.setImageBitmap(sourceBitmap);
             showReady();
         } catch (Exception e) {
             showError("No pude abrir esa foto");
+        } finally {
+            if (requestCode == REQ_CAMERA) cleanupCameraFile();
         }
     }
 
@@ -201,6 +249,7 @@ public final class MainActivity extends Activity {
         if (sourceBitmap == null) return;
         primary.setEnabled(false);
         save.setVisibility(View.GONE);
+        share.setVisibility(View.GONE);
         again.setVisibility(View.GONE);
         progress.setVisibility(View.VISIBLE);
         percent.setVisibility(View.VISIBLE);
@@ -213,39 +262,70 @@ public final class MainActivity extends Activity {
                 runOnUiThread(() -> {
                     recycleResult();
                     resultBitmap = result;
+                    savedResultUri = null;
                     preview.setImageBitmap(resultBitmap);
                     showSuccess();
                 });
             } catch (Exception e) {
                 input.recycle();
-                runOnUiThread(() -> showError("La IA local no pudo terminar. Toca Crear foto para reintentar."));
+                runOnUiThread(() -> showError("La IA local no pudo terminar. En el primer uso necesita Internet para descargar el modelo."));
             }
         });
     }
 
     private void saveResult() {
         if (resultBitmap == null) return;
-        Uri uri = null;
-        try {
-            ContentResolver resolver = getContentResolver();
-            ContentValues values = new ContentValues();
-            values.put(MediaStore.Images.Media.DISPLAY_NAME, "ProductShot_" + System.currentTimeMillis() + ".jpg");
-            values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
-            values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/ProductShot");
-            values.put(MediaStore.Images.Media.IS_PENDING, 1);
-            uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
-            if (uri == null) throw new IllegalStateException("insert");
-            try (java.io.OutputStream out = resolver.openOutputStream(uri, "w")) {
-                if (out == null || !resultBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)) throw new IllegalStateException("write");
+        worker.execute(() -> {
+            try {
+                Uri uri = savedResultUri != null ? savedResultUri : writeResultToGallery();
+                savedResultUri = uri;
+                runOnUiThread(() -> Toast.makeText(this, "Guardado en Pictures/ProductShot", Toast.LENGTH_SHORT).show());
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(this, "No pude guardar el resultado", Toast.LENGTH_SHORT).show());
             }
-            ContentValues done = new ContentValues();
-            done.put(MediaStore.Images.Media.IS_PENDING, 0);
-            resolver.update(uri, done, null, null);
-            Toast.makeText(this, "Guardado en Pictures/ProductShot", Toast.LENGTH_SHORT).show();
-        } catch (Exception e) {
-            if (uri != null) getContentResolver().delete(uri, null, null);
-            Toast.makeText(this, "No pude guardar el resultado", Toast.LENGTH_SHORT).show();
+        });
+    }
+
+    private void shareResult() {
+        if (resultBitmap == null) return;
+        worker.execute(() -> {
+            try {
+                Uri uri = savedResultUri != null ? savedResultUri : writeResultToGallery();
+                savedResultUri = uri;
+                runOnUiThread(() -> {
+                    Intent send = new Intent(Intent.ACTION_SEND);
+                    send.setType("image/jpeg");
+                    send.putExtra(Intent.EXTRA_STREAM, uri);
+                    send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    startActivity(Intent.createChooser(send, "Compartir ProductShot"));
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(this, "No pude preparar la imagen para compartir", Toast.LENGTH_SHORT).show());
+            }
+        });
+    }
+
+    private Uri writeResultToGallery() throws Exception {
+        if (resultBitmap == null) throw new IllegalStateException("no result");
+        ContentResolver resolver = getContentResolver();
+        ContentValues values = new ContentValues();
+        values.put(MediaStore.Images.Media.DISPLAY_NAME, "ProductShot_" + System.currentTimeMillis() + ".jpg");
+        values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+        values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/ProductShot");
+        values.put(MediaStore.Images.Media.IS_PENDING, 1);
+        Uri uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+        if (uri == null) throw new IllegalStateException("insert");
+        boolean ok = false;
+        try (java.io.OutputStream out = resolver.openOutputStream(uri, "w")) {
+            if (out == null || !resultBitmap.compress(Bitmap.CompressFormat.JPEG, 96, out)) throw new IllegalStateException("write");
+            ok = true;
+        } finally {
+            if (!ok) resolver.delete(uri, null, null);
         }
+        ContentValues done = new ContentValues();
+        done.put(MediaStore.Images.Media.IS_PENDING, 0);
+        resolver.update(uri, done, null, null);
+        return uri;
     }
 
     private void showIdle() {
@@ -256,6 +336,7 @@ public final class MainActivity extends Activity {
         primary.setText("Subir foto");
         primary.setEnabled(true);
         save.setVisibility(View.GONE);
+        share.setVisibility(View.GONE);
         again.setVisibility(View.GONE);
     }
 
@@ -266,6 +347,7 @@ public final class MainActivity extends Activity {
         primary.setText("Crear foto");
         primary.setEnabled(true);
         save.setVisibility(View.GONE);
+        share.setVisibility(View.GONE);
         again.setVisibility(View.VISIBLE);
     }
 
@@ -278,6 +360,7 @@ public final class MainActivity extends Activity {
         primary.setEnabled(true);
         primary.setText("Crear foto otra vez");
         save.setVisibility(View.VISIBLE);
+        share.setVisibility(View.VISIBLE);
         again.setVisibility(View.VISIBLE);
     }
 
@@ -288,6 +371,7 @@ public final class MainActivity extends Activity {
         primary.setEnabled(true);
         primary.setText(sourceBitmap == null ? "Subir foto" : "Crear foto");
         save.setVisibility(resultBitmap == null ? View.GONE : View.VISIBLE);
+        share.setVisibility(resultBitmap == null ? View.GONE : View.VISIBLE);
         again.setVisibility(sourceBitmap == null ? View.GONE : View.VISIBLE);
     }
 
@@ -300,7 +384,17 @@ public final class MainActivity extends Activity {
 
     private void reset() {
         recycleSource(); recycleResult();
+        savedResultUri = null;
+        cleanupCameraFile();
         showIdle();
+    }
+
+    private void cleanupCameraFile() {
+        cameraUri = null;
+        if (cameraFile != null) {
+            if (cameraFile.exists()) cameraFile.delete();
+            cameraFile = null;
+        }
     }
 
     private void recycleSource() { if (sourceBitmap != null) { sourceBitmap.recycle(); sourceBitmap = null; } }
@@ -325,6 +419,7 @@ public final class MainActivity extends Activity {
 
     @Override protected void onDestroy() {
         worker.shutdownNow();
+        cleanupCameraFile();
         recycleSource(); recycleResult();
         super.onDestroy();
     }
