@@ -22,22 +22,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Rebuild ProductShot source archive
+      - name: Rebuild and verify ProductShot source archive
+        shell: bash
         run: |
+          set -euo pipefail
           cd projects/ProductShot/block8
-          cat > chunks.sha256 <<'EOF'
-          a0f2f011a490c3cf4430598251af2eb193de023d3b64270a2e706f057490b847  source.b64.00
-          5399602c0cf37b157165d9baddcb74e47459b57c5728ebb96d0e05e4fcf13962  source.b64.01
-          696c20de28c089cfbf54fc5a8ccbe91e4a75389d094c2ef5b2c549f63efd7f02  source.b64.02
-          11fa47841eb07233a9243ea7ab5d95c3ed0ddd0f5591b4011b3dc9fec12be494  source.b64.03
-          34a4ea4d43f25afb87896b6dbc649246c7630b44d4fe8e84039c02196a536857  source.b64.04
-          98a42d1a2e5ae29a1c1adda6ea5ed1288b06cdc6761c12a28cb29508ecc13bc8  source.b64.05
-          b152aa88424ec29b71572645d454b1ed262d0c0874b2b20ee3e9d7844aebd28f  source.b64.06
-          EOF
-          sha256sum -c chunks.sha256
+
+          # The transport chunks are only a repository-safe representation of one
+          # canonical source ZIP. Validate the exact expected chunk set, reconstruct
+          # the archive, then authenticate the assembled ZIP with its pinned SHA-256.
+          expected=(
+            source.b64.00 source.b64.01 source.b64.02 source.b64.03
+            source.b64.04 source.b64.05 source.b64.06
+          )
+          for part in "${expected[@]}"; do
+            test -s "$part" || { echo "Missing/empty transport chunk: $part" >&2; exit 1; }
+          done
+          mapfile -t actual < <(find . -maxdepth 1 -type f -name 'source.b64.*' -printf '%f\n' | sort)
+          if [[ "${actual[*]}" != "${expected[*]}" ]]; then
+            printf 'Unexpected transport chunk set.\nExpected: %s\nActual: %s\n' "${expected[*]}" "${actual[*]}" >&2
+            exit 1
+          fi
+
           mkdir -p "$RUNNER_TEMP/productshot-src"
-          cat source.b64.00 source.b64.01 source.b64.02 source.b64.03 source.b64.04 source.b64.05 source.b64.06 | base64 -d > "$RUNNER_TEMP/ProductShot-v0.9.8-source.zip"
+          cat "${expected[@]}" | base64 -d > "$RUNNER_TEMP/ProductShot-v0.9.8-source.zip"
           echo "10601a51d25279711fefe276c6bc685424096677f8b78d072e11836f97047c0b  $RUNNER_TEMP/ProductShot-v0.9.8-source.zip" | sha256sum -c -
+          unzip -t "$RUNNER_TEMP/ProductShot-v0.9.8-source.zip"
           unzip -q "$RUNNER_TEMP/ProductShot-v0.9.8-source.zip" -d "$RUNNER_TEMP/productshot-src"
 
       - uses: actions/setup-java@v4
