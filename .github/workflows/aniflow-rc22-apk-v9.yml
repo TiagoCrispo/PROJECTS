@@ -150,12 +150,16 @@ jobs:
 
           "$TOOLS/aapt" dump badging "$DEBUG" | tee "$OUT/badging-debug.txt"
           "$TOOLS/aapt" dump badging "$RELEASE" | tee "$OUT/badging-release.txt"
-          for BADGING in "$OUT/badging-debug.txt" "$OUT/badging-release.txt"; do
-            grep -q "package: name='com.aniflow.app'" "$BADGING"
-            grep -q "versionCode='1000022'" "$BADGING"
-            grep -q "versionName='1.0.21-rc22'" "$BADGING"
-            grep -q "targetSdkVersion:'36'" "$BADGING"
-          done
+
+          grep -q "package: name='com.aniflow.app.debug'" "$OUT/badging-debug.txt"
+          grep -q "versionCode='1000022'" "$OUT/badging-debug.txt"
+          grep -q "versionName='1.0.21-rc22-debug'" "$OUT/badging-debug.txt"
+          grep -q "targetSdkVersion:'36'" "$OUT/badging-debug.txt"
+
+          grep -q "package: name='com.aniflow.app'" "$OUT/badging-release.txt"
+          grep -q "versionCode='1000022'" "$OUT/badging-release.txt"
+          grep -q "versionName='1.0.21-rc22'" "$OUT/badging-release.txt"
+          grep -q "targetSdkVersion:'36'" "$OUT/badging-release.txt"
 
           cp "$DEBUG" "$OUT/AniFlow-v${VERSION}-debug.apk"
           cp "$RELEASE" "$OUT/AniFlow-v${VERSION}-release-signed.apk"
