@@ -74,17 +74,34 @@ jobs:
 
       - name: Build debug APK
         working-directory: ${{ runner.temp }}/productshot-src
-        run: gradle --no-daemon --stacktrace :app:assembleDebug
+        shell: bash
+        run: |
+          set +e
+          gradle --no-daemon --stacktrace :app:assembleDebug 2>&1 | tee build.log
+          status=${PIPESTATUS[0]}
+          exit "$status"
 
       - name: APK checksum
+        if: success()
         working-directory: ${{ runner.temp }}/productshot-src
         run: sha256sum app/build/outputs/apk/debug/app-debug.apk | tee apk-debug.sha256
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProductShot-v0.9.8-build-diagnostics
+          path: |
+            ${{ runner.temp }}/productshot-src/build.log
+            ${{ runner.temp }}/productshot-src/dependency-report.txt
+          if-no-files-found: warn
+
+      - name: Upload debug APK
+        if: success()
+        uses: actions/upload-artifact@v4
         with:
           name: ProductShot-v0.9.8-debug
           path: |
             ${{ runner.temp }}/productshot-src/app/build/outputs/apk/debug/app-debug.apk
             ${{ runner.temp }}/productshot-src/apk-debug.sha256
-            ${{ runner.temp }}/productshot-src/dependency-report.txt
           if-no-files-found: error
