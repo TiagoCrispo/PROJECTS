@@ -22,36 +22,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Rebuild and verify ProductShot source archive
+      - name: Rebuild and verify clean ProductShot source archive
         shell: bash
         run: |
           set -euo pipefail
           cd projects/ProductShot/block8
 
           expected=(
-            source.b64.00 source.b64.01 source.b64.02 source.b64.03
-            source.b64.04 source.b64.05 source.b64.06
+            clean.b64.00 clean.b64.01 clean.b64.02 clean.b64.03
+            clean.b64.04 clean.b64.05 clean.b64.06
           )
           for part in "${expected[@]}"; do
-            test -s "$part" || { echo "Missing/empty transport chunk: $part" >&2; exit 1; }
+            test -s "$part" || { echo "Missing/empty clean transport chunk: $part" >&2; exit 1; }
           done
-          mapfile -t actual < <(find . -maxdepth 1 -type f -name 'source.b64.*' -printf '%f\n' | sort)
+          mapfile -t actual < <(find . -maxdepth 1 -type f -name 'clean.b64.*' -printf '%f\n' | sort)
           if [[ "${actual[*]}" != "${expected[*]}" ]]; then
-            printf 'Unexpected transport chunk set.\nExpected: %s\nActual: %s\n' "${expected[*]}" "${actual[*]}" >&2
+            printf 'Unexpected clean transport chunk set.\nExpected: %s\nActual: %s\n' "${expected[*]}" "${actual[*]}" >&2
             exit 1
           fi
 
           mkdir -p "$RUNNER_TEMP/productshot-src"
           ARCHIVE="$RUNNER_TEMP/ProductShot-v0.9.8-source.zip"
           cat "${expected[@]}" | base64 -d > "$ARCHIVE"
-          ACTUAL_SHA256="$(sha256sum "$ARCHIVE" | awk '{print $1}')"
-          echo "actual_source_zip_sha256=$ACTUAL_SHA256"
+          echo "385f4e5f21cbca4194d891452969cfe44f40a667394caf799b688942745cf3ec  $ARCHIVE" | sha256sum -c -
           unzip -t "$ARCHIVE"
-          EXPECTED_SHA256="10601a51d25279711fefe276c6bc685424096677f8b78d072e11836f97047c0b"
-          if [[ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]]; then
-            echo "Source ZIP checksum mismatch: expected=$EXPECTED_SHA256 actual=$ACTUAL_SHA256" >&2
-            exit 1
-          fi
           unzip -q "$ARCHIVE" -d "$RUNNER_TEMP/productshot-src"
 
       - uses: actions/setup-java@v4
