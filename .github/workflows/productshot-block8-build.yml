@@ -1,0 +1,65 @@
+name: ProductShot Block 8 Android Build
+
+on:
+  push:
+    branches:
+      - productshot-block8-build
+    paths:
+      - "projects/ProductShot/block8/**"
+      - ".github/workflows/productshot-block8-build.yml"
+  workflow_dispatch:
+
+jobs:
+  build-debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rebuild ProductShot source archive
+        run: |
+          mkdir -p "$RUNNER_TEMP/productshot-src"
+          cat projects/ProductShot/block8/source.b64.* | base64 -d > "$RUNNER_TEMP/ProductShot-v0.9.8-source.zip"
+          echo "10601a51d25279711fefe276c6bc685424096677f8b78d072e11836f97047c0b  $RUNNER_TEMP/ProductShot-v0.9.8-source.zip" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/ProductShot-v0.9.8-source.zip" -d "$RUNNER_TEMP/productshot-src"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+
+      - name: Static validation
+        working-directory: ${{ runner.temp }}/productshot-src
+        run: python3 scripts/static_validate.py .
+
+      - name: Runtime dependency report
+        working-directory: ${{ runner.temp }}/productshot-src
+        run: gradle --no-daemon :app:dependencies --configuration debugRuntimeClasspath > dependency-report.txt
+
+      - name: Build debug APK
+        working-directory: ${{ runner.temp }}/productshot-src
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
+
+      - name: APK checksum
+        working-directory: ${{ runner.temp }}/productshot-src
+        run: sha256sum app/build/outputs/apk/debug/app-debug.apk | tee apk-debug.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ProductShot-v0.9.8-debug
+          path: |
+            ${{ runner.temp }}/productshot-src/app/build/outputs/apk/debug/app-debug.apk
+            ${{ runner.temp }}/productshot-src/apk-debug.sha256
+            ${{ runner.temp }}/productshot-src/dependency-report.txt
+          if-no-files-found: error
