@@ -9,10 +9,19 @@ Implemented so far:
 - on-device foreground segmentation
 - exact-pixel product cutout
 - local catalog composition
-- MediaStore save
-- CI build/lint/APK verification
+- gallery + delegated camera capture
+- MediaStore save + Android share sheet
+- HTTPS-only one-time model download
+- debug-only SmokeActivity for real model-download + ONNX-inference + JPEG CI validation
+- CI build/lint/APK verification and API 29/33/35/36 lifecycle matrix
+
+Quality policy:
+- the original product pixels stay locked in the final catalog composition
+- a future generative engine may create studio/background content, but it must not redraw the product unless fidelity benchmarks prove that safe
+- no internal photo/day/month quota is planned
 
 Next quality stages:
-- improved local relighting and edge cleanup
+- validate real ISNet inference on Android CI
+- improve local matte edge cleanup and relighting
 - local high-resolution enhancement
-- optional native diffusion/image-edit engine if it materially improves quality without degrading product fidelity
+- evaluate native stable-diffusion.cpp for generative backgrounds only if it materially improves catalog quality without degrading product fidelity
