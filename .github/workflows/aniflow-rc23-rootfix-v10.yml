@@ -60,8 +60,13 @@ jobs:
         run: |
           set -euo pipefail
           PATCH="$GITHUB_WORKSPACE/.ci/rc23/rc22-to-rc23-root-playback-fix.patch"
+          FIXED_PATCH="$RUNNER_TEMP/rc23-root-playback-fixed.patch"
           sha256sum "$PATCH"
-          (cd "$ROOT" && patch -p1 --forward --batch < "$PATCH")
+          sed \
+            -e 's/^@@ -64,9 +64,10 @@$/@@ -64,8 +64,9 @@/' \
+            -e 's/^@@ -11,16 +11,21 @@$/@@ -10,15 +10,19 @@/' \
+            "$PATCH" > "$FIXED_PATCH"
+          (cd "$ROOT" && patch -p1 --forward --batch < "$FIXED_PATCH")
           grep -q 'versionCode = 1000023' "$ROOT/app/build.gradle.kts"
           grep -q 'versionName = "1.0.22-rc23"' "$ROOT/app/build.gradle.kts"
           python3 - <<'PY'
