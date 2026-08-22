@@ -7,6 +7,12 @@ on:
     paths:
       - "projects/ProductShot/block8/**"
       - ".github/workflows/productshot-block8-build.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "projects/ProductShot/block8/**"
+      - ".github/workflows/productshot-block8-build.yml"
   workflow_dispatch:
 
 jobs:
