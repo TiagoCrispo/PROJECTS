@@ -1,0 +1,30 @@
+name: ProductShot v1 Source Snapshot
+
+on:
+  push:
+    branches:
+      - productshot-block8-build
+    paths:
+      - "projects/ProductShot/block8/**"
+      - ".github/workflows/productshot-v1-source-snapshot.yml"
+  workflow_dispatch:
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct exact v1 source
+        shell: bash
+        env:
+          PRODUCTSHOT_SNAPSHOT_ONLY: "1"
+        run: bash projects/ProductShot/block8/run_v1_final_ci.sh
+
+      - name: Upload exact source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProductShot-v1.0.0-SNAPSHOT-SOURCE
+          path: ${{ runner.temp }}/productshot-v1-final/source
+          if-no-files-found: error
