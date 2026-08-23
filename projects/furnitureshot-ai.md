@@ -1,28 +1,45 @@
 # FurnitureShot AI
 
-FurnitureShot AI is an Android-only product-photo workflow for turning ordinary furniture photos into cleaner catalog/marketplace images while protecting the physical identity of the photographed object.
+> Android product-photo processing focused on cleaner catalog images without sacrificing the physical identity of the photographed furniture.
 
-## Current GitHub build
+| | |
+|---|---|
+| **Status** | Active beta · **v0.7.1-beta22** |
+| **Platform** | Android |
+| **Stack** | Kotlin · Jetpack Compose · ML Kit-assisted segmentation |
+| **Focus** | Product fidelity · segmentation · compositing · conservative image enhancement |
 
-**v0.7.1-beta22 — consolidated fidelity pipeline**
+## Overview
 
-The current build focuses on a single high-fidelity furniture-photo pipeline instead of stacking multiple destructive post-processing passes.
+FurnitureShot AI turns ordinary furniture photos into cleaner catalog/marketplace images while treating the **original object as the visual source of truth**. The project is intentionally conservative: a more dramatic edit is not considered better if it changes product geometry, texture or believable contact with the scene.
 
-### Current direction
+## Current pipeline
 
-- Kotlin + Jetpack Compose Android application.
-- Source image remains the visual source of truth; the app avoids reconstructing or warping product geometry.
-- ML Kit subject segmentation is used as a coarse guide, followed by higher-resolution edge refinement.
-- Object geometry is constrained to uniform scale + translation for catalog composition.
-- Texture/detail enhancement is bounded and can fall back when fidelity checks detect excessive divergence from the source.
-- Synthetic oval/drop shadows are not generated. A real contact shadow is reused only when confidence and attachment checks pass; otherwise the background stays clean.
-- The finishing stage no longer performs a second JPEG re-detection/recomposition pass that could create halos, texture loss or false shadows.
-- The beta22 workflow assembles the consolidated processing overlay, builds a debug APK and verifies the produced archive before publishing the CI artifact.
+- coarse subject segmentation assisted by ML Kit;
+- higher-resolution edge refinement around the detected object;
+- catalog composition constrained to uniform scale and translation rather than free-form geometry changes;
+- bounded texture/detail enhancement with fallback when fidelity checks detect excessive divergence;
+- real contact-shadow reuse only when confidence and attachment checks pass;
+- clean-background fallback when a trustworthy shadow cannot be recovered;
+- a single consolidated finishing pipeline instead of repeated destructive re-detection/recomposition passes.
 
-## Quality principles
+## Quality contract
 
-The original product identity is more important than making the edit look dramatic. When segmentation, fidelity or composite checks are not reliable enough, the pipeline should degrade conservatively rather than invent structure, texture or shadow.
+The project follows a simple rule: **product identity is more important than visual drama**.
 
-Current work is still subject to physical-device and broader real-photo validation; CI/build success is not treated as proof of photographic quality.
+When segmentation, fidelity or composite checks are weak, the application should degrade conservatively rather than inventing structure, texture or shadow. Synthetic oval/drop shadows are not generated as a substitute for evidence from the source image.
 
-The Android source lives at [`projects/furnitureshot-ai/`](./furnitureshot-ai/) and the beta22 consolidation overlay at [`projects/furnitureshot-ai-overlays/v0.7.1-beta22/`](./furnitureshot-ai-overlays/v0.7.1-beta22/).
+## Engineering focus
+
+The interesting problem is not merely background removal. It is preserving geometry, edges, texture and contact cues across segmentation and recomposition while preventing later processing stages from undoing earlier fidelity work.
+
+The beta22 build workflow assembles the consolidated processing overlay, creates a debug APK and verifies the generated archive before publishing the CI artifact.
+
+## Validation status
+
+CI/build success confirms that the software can be assembled and packaged; it is **not treated as proof of photographic quality**. Broader real-photo and physical-device validation remains part of the current beta work.
+
+## Source
+
+Android source: **[`projects/furnitureshot-ai/`](./furnitureshot-ai/)**  
+Current beta22 overlay: **[`projects/furnitureshot-ai-overlays/v0.7.1-beta22/`](./furnitureshot-ai-overlays/v0.7.1-beta22/)**
