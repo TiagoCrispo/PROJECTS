@@ -1,4 +1,4 @@
-name: ProductShot Block 14 Android Build
+name: ProductShot Block 15 Final Robustness Build
 
 on:
   push:
@@ -18,7 +18,7 @@ on:
 jobs:
   build-debug:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -115,6 +115,24 @@ jobs:
           grep -F 'separationPaint' app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalEnhancementEngine.kt
           ! grep -F 'referencePath' app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt
 
+      - name: Apply Block 15 final robustness
+        shell: bash
+        run: |
+          set -euo pipefail
+          TRANSPORT="$GITHUB_WORKSPACE/projects/ProductShot/block8/block15-final-robustness.patch.gz.b64"
+          echo "613c041e83edae33aab505592e1e54e396724e450ef8b00aee6d850bae9c211e  $TRANSPORT" | sha256sum -c -
+          base64 -d "$TRANSPORT" | gzip -d > "$RUNNER_TEMP/block15-final-robustness.patch"
+          echo "289065e019ae3ae177df5c97527eae75f236ffaf20c67f0652a59a62d9ca1cb9  $RUNNER_TEMP/block15-final-robustness.patch" | sha256sum -c -
+          cd "$RUNNER_TEMP/productshot-src"
+          patch -p1 < "$RUNNER_TEMP/block15-final-robustness.patch"
+          grep -F 'versionCode = 61' app/build.gradle.kts
+          grep -F 'versionName = "0.9.15-final-robustness"' app/build.gradle.kts
+          grep -F 'saveFinalJpeg' app/src/main/java/com/tiagocrispo/furnitureshot/data/ImageStore.kt
+          grep -F 'FINAL RESCUE' app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalEnhancementEngine.kt
+          grep -F 'CONSTRAINED_ITERATIONS = 8' app/src/main/java/com/tiagocrispo/furnitureshot/processing/DirectMediaPipeBackgroundGenerator.kt
+          grep -F 'NonCancellable + Dispatchers.IO' app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt
+          ! grep -F 'referencePath' app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -139,6 +157,15 @@ jobs:
         working-directory: ${{ runner.temp }}/productshot-src
         run: gradle --no-daemon :app:dependencies --configuration debugRuntimeClasspath > dependency-report.txt
 
+      - name: Android lint
+        working-directory: ${{ runner.temp }}/productshot-src
+        shell: bash
+        run: |
+          set +e
+          gradle --no-daemon --stacktrace :app:lintDebug 2>&1 | tee lint.log
+          status=${PIPESTATUS[0]}
+          exit "$status"
+
       - name: Build debug APK
         working-directory: ${{ runner.temp }}/productshot-src
         shell: bash
@@ -158,16 +185,17 @@ jobs:
         working-directory: ${{ runner.temp }}/productshot-src
         shell: bash
         run: |
-          zip -qr "$RUNNER_TEMP/ProductShot-v0.9.14-block3-premium-compositor-source.zip" .
-          sha256sum "$RUNNER_TEMP/ProductShot-v0.9.14-block3-premium-compositor-source.zip" > "$RUNNER_TEMP/ProductShot-v0.9.14-block3-premium-compositor-source.sha256"
+          zip -qr "$RUNNER_TEMP/ProductShot-v0.9.15-final-robustness-source.zip" .
+          sha256sum "$RUNNER_TEMP/ProductShot-v0.9.15-final-robustness-source.zip" > "$RUNNER_TEMP/ProductShot-v0.9.15-final-robustness-source.sha256"
 
       - name: Upload build diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ProductShot-v0.9.14-block3-build-diagnostics
+          name: ProductShot-v0.9.15-final-robustness-build-diagnostics
           path: |
             ${{ runner.temp }}/productshot-src/build.log
+            ${{ runner.temp }}/productshot-src/lint.log
             ${{ runner.temp }}/productshot-src/dependency-report.txt
           if-no-files-found: warn
 
@@ -175,7 +203,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: ProductShot-v0.9.14-block3-debug
+          name: ProductShot-v0.9.15-final-robustness-debug
           path: |
             ${{ runner.temp }}/productshot-src/app/build/outputs/apk/debug/app-debug.apk
             ${{ runner.temp }}/productshot-src/apk-debug.sha256
@@ -185,8 +213,8 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: ProductShot-v0.9.14-block3-fixed-source
+          name: ProductShot-v0.9.15-final-robustness-fixed-source
           path: |
-            ${{ runner.temp }}/ProductShot-v0.9.14-block3-premium-compositor-source.zip
-            ${{ runner.temp }}/ProductShot-v0.9.14-block3-premium-compositor-source.sha256
+            ${{ runner.temp }}/ProductShot-v0.9.15-final-robustness-source.zip
+            ${{ runner.temp }}/ProductShot-v0.9.15-final-robustness-source.sha256
           if-no-files-found: error
