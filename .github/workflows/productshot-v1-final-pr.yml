@@ -42,8 +42,8 @@ jobs:
       - name: Run final deterministic release gates
         shell: bash
         run: |
-          test "$(git hash-object projects/ProductShot/block8/run_v1_final_ci_block19.sh)" = "5c5ea5a792ee1c1e56c48b429dc7adc757a9a57b"
-          bash projects/ProductShot/block8/run_v1_final_ci_block19.sh
+          test "$(git hash-object projects/ProductShot/block8/run_v1_final_ci_block20.sh)" = "c77b2e861d6bbe1ffc12096625bc0ef7ff8f5317"
+          bash projects/ProductShot/block8/run_v1_final_ci_block20.sh
 
       - name: Upload final diagnostics
         if: always()
