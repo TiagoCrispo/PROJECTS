@@ -28,7 +28,7 @@ replace_once(
     'echo "d308be2e8f658f83934f589c8bf9ff4fc0daa04a067c3649ff4b0088be84ca38  $APPLIER17B" | sha256sum -c -\n'
     'python3 "$APPLIER17B" "$SRC"\n\n'
     'APPLIER18="$ROOT/projects/ProductShot/block8/block18_apply.py"\n'
-    'echo "091e15aa445c5185a55963ff1a88e6a527650629a75bfe7c1b91be5eacc3d6e2  $APPLIER18" | sha256sum -c -\n'
+    'test "$(git -C "$ROOT" hash-object "$APPLIER18")" = "e2991884fe34d709e30342fdbd7ca1f56d612390"\n'
     'python3 "$APPLIER18" "$SRC"\n\n'
     'MAGIC_DIR=',
 )
