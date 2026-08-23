@@ -18,22 +18,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Download pinned official MagicTouch v1 model
+      - name: Download MediaPipe 0.10.x compatible MagicTouch model
         shell: bash
         run: |
           set -euo pipefail
-          URL='https://storage.googleapis.com/mediapipe-models/interactive_segmenter_v2/magic_touch/int8/1/interactive_segmentation.task'
-          curl --fail --location --retry 3 --retry-delay 2 "$URL" -o interactive_segmentation.task
-          test -s interactive_segmentation.task
-          stat -c 'MAGICTOUCH_SIZE_BYTES=%s' interactive_segmentation.task
-          sha256sum interactive_segmentation.task | tee model.sha256
-          file interactive_segmentation.task
+          URL='https://storage.googleapis.com/mediapipe-models/interactive_segmenter/magic_touch/float32/1/magic_touch.tflite'
+          curl --fail --location --retry 3 --retry-delay 2 "$URL" -o magic_touch.tflite
+          test -s magic_touch.tflite
+          stat -c 'MAGICTOUCH_SIZE_BYTES=%s' magic_touch.tflite
+          sha256sum magic_touch.tflite | tee model.sha256
+          file magic_touch.tflite
 
       - name: Upload probe model
         uses: actions/upload-artifact@v4
         with:
-          name: MagicTouch-interactive_segmentation-v1
+          name: MagicTouch-legacy-float32-v1
           path: |
-            interactive_segmentation.task
+            magic_touch.tflite
             model.sha256
           if-no-files-found: error
