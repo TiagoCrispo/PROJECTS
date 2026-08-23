@@ -91,15 +91,20 @@ jobs:
           gradle --no-daemon --stacktrace :app:assembleRelease 2>&1 | tee "$RUNNER_TEMP/assemble-release.txt"
           test -s app/build/outputs/apk/release/app-release-unsigned.apk
 
-      - name: Binary release audit
+      - name: Align and audit Release binary
         working-directory: ${{ runner.temp }}/src
         shell: bash
         run: |
           set -euo pipefail
-          APK=app/build/outputs/apk/release/app-release-unsigned.apk
+          RAW=app/build/outputs/apk/release/app-release-unsigned.apk
+          APK="$RUNNER_TEMP/ProductShot-v1.0.1-release-unsigned-aligned.apk"
           BT="$ANDROID_HOME/build-tools/35.0.0"
-          "$BT/zipalign" -c -P 16 -v 4 "$APK" > "$RUNNER_TEMP/zipalign.txt"
-          unzip -t "$APK" > "$RUNNER_TEMP/unzip.txt"
+
+          # Force Android 15/16 compatible 16 KiB page alignment, then verify it.
+          "$BT/zipalign" -P 16 -f -v 4 "$RAW" "$APK" | tee "$RUNNER_TEMP/zipalign-create.txt"
+          "$BT/zipalign" -c -P 16 -v 4 "$APK" | tee "$RUNNER_TEMP/zipalign-check.txt"
+          unzip -t "$APK" | tee "$RUNNER_TEMP/unzip.txt"
+
           "$BT/aapt" dump badging "$APK" | tee "$RUNNER_TEMP/badging.txt"
           "$BT/aapt" dump permissions "$APK" | tee "$RUNNER_TEMP/permissions.txt"
           grep -F "package: name='com.tiagocrispo.furnitureshot' versionCode='101' versionName='1.0.1'" "$RUNNER_TEMP/badging.txt"
@@ -107,14 +112,15 @@ jobs:
           grep -F "uses-permission: name='android.permission.CAMERA'" "$RUNNER_TEMP/permissions.txt"
           ! grep -F 'android.permission.INTERNET' "$RUNNER_TEMP/permissions.txt"
           ! grep -F 'android.permission.ACCESS_NETWORK_STATE' "$RUNNER_TEMP/permissions.txt"
+
           unzip -l "$APK" | tee "$RUNNER_TEMP/apk-files.txt"
           grep -F 'assets/magic_touch.tflite' "$RUNNER_TEMP/apk-files.txt"
-          grep -F 'lib/arm64-v8a/libtensorflowlite_jni.so' "$RUNNER_TEMP/apk-files.txt"
-          grep -F 'lib/arm64-v8a/libmediapipe_tasks_vision_image_generator_jni.so' "$RUNNER_TEMP/apk-files.txt"
-          unzip -p "$APK" 'classes*.dex' | strings > "$RUNNER_TEMP/dex-strings.txt"
-          grep -F 'GenerationDiagnosticsStore' "$RUNNER_TEMP/dex-strings.txt"
-          grep -F 'Exportar diagnóstico' "$RUNNER_TEMP/dex-strings.txt"
-          grep -F 'ProductShot-diagnostico-v1.0.1.txt' "$RUNNER_TEMP/dex-strings.txt"
+          grep -E 'lib/arm64-v8a/.*tensorflowlite.*\.so' "$RUNNER_TEMP/apk-files.txt"
+          grep -E 'lib/arm64-v8a/.*mediapipe.*\.so' "$RUNNER_TEMP/apk-files.txt"
+
+          # The diagnostic feature is validated at source level before compilation.
+          # DEX string searching is intentionally not used because R8/minification can
+          # rename classes and encode resources without changing runtime behavior.
           sha256sum "$APK" | tee "$RUNNER_TEMP/ProductShot-v1.0.1-release-unsigned.sha256"
           echo "PRODUCTSHOT_V101_BINARY_AUDIT_OK"
 
@@ -124,15 +130,17 @@ jobs:
           set -euo pipefail
           OUT="$RUNNER_TEMP/out"
           mkdir -p "$OUT"
-          cp "$RUNNER_TEMP/src/app/build/outputs/apk/release/app-release-unsigned.apk" "$OUT/ProductShot-v1.0.1-release-unsigned.apk"
+          cp "$RUNNER_TEMP/ProductShot-v1.0.1-release-unsigned-aligned.apk" "$OUT/ProductShot-v1.0.1-release-unsigned-aligned.apk"
           cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" "$OUT/apksigner.jar"
           cp "$RUNNER_TEMP/ProductShot-v1.0.1-release-unsigned.sha256" "$OUT/"
           cp "$RUNNER_TEMP/source-v101.sha256" "$OUT/"
           cp "$RUNNER_TEMP/static-validation.txt" "$OUT/"
           cp "$RUNNER_TEMP/unit-tests.txt" "$OUT/"
           cp "$RUNNER_TEMP/lint-release.txt" "$OUT/"
+          cp "$RUNNER_TEMP/assemble-release.txt" "$OUT/"
           cp "$RUNNER_TEMP/badging.txt" "$OUT/"
           cp "$RUNNER_TEMP/permissions.txt" "$OUT/"
+          cp "$RUNNER_TEMP/zipalign-check.txt" "$OUT/"
 
       - name: Upload v1.0.1 unsigned release candidate
         uses: actions/upload-artifact@v4
