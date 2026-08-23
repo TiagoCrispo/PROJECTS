@@ -1,4 +1,4 @@
-name: ProductShot Block 11 Android Build
+name: ProductShot Block 12 Android Build
 
 on:
   push:
@@ -71,6 +71,20 @@ jobs:
           grep -F 'MAX_ATTEMPTS = 3' app/src/main/java/com/tiagocrispo/furnitureshot/processing/DirectMediaPipeBackgroundGenerator.kt
           grep -F 'generator.generate(' app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalAiSelfTest.kt
 
+      - name: Apply Block 12 one-photo UX
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 projects/ProductShot/block8/block12_apply.py "$RUNNER_TEMP/productshot-src"
+          cd "$RUNNER_TEMP/productshot-src"
+          grep -F 'versionCode = 58' app/build.gradle.kts
+          grep -F 'versionName = "0.9.12-block1-one-photo-ux"' app/build.gradle.kts
+          grep -F 'Text(if (originalPath == null) "Subir foto" else "Cambiar foto")' app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt
+          grep -F 'Text("Generar")' app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt
+          grep -F 'Text("Descargar foto modelada")' app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt
+          ! grep -F 'referencePath' app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt
+          ! grep -F 'android.permission.CAMERA' app/src/main/AndroidManifest.xml
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -114,14 +128,14 @@ jobs:
         working-directory: ${{ runner.temp }}/productshot-src
         shell: bash
         run: |
-          zip -qr "$RUNNER_TEMP/ProductShot-v0.9.11-local-ai-quality-source.zip" .
-          sha256sum "$RUNNER_TEMP/ProductShot-v0.9.11-local-ai-quality-source.zip" > "$RUNNER_TEMP/ProductShot-v0.9.11-local-ai-quality-source.sha256"
+          zip -qr "$RUNNER_TEMP/ProductShot-v0.9.12-block1-one-photo-ux-source.zip" .
+          sha256sum "$RUNNER_TEMP/ProductShot-v0.9.12-block1-one-photo-ux-source.zip" > "$RUNNER_TEMP/ProductShot-v0.9.12-block1-one-photo-ux-source.sha256"
 
       - name: Upload build diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ProductShot-v0.9.11-build-diagnostics
+          name: ProductShot-v0.9.12-block1-build-diagnostics
           path: |
             ${{ runner.temp }}/productshot-src/build.log
             ${{ runner.temp }}/productshot-src/dependency-report.txt
@@ -131,7 +145,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: ProductShot-v0.9.11-debug
+          name: ProductShot-v0.9.12-block1-debug
           path: |
             ${{ runner.temp }}/productshot-src/app/build/outputs/apk/debug/app-debug.apk
             ${{ runner.temp }}/productshot-src/apk-debug.sha256
@@ -141,8 +155,8 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: ProductShot-v0.9.11-fixed-source
+          name: ProductShot-v0.9.12-block1-fixed-source
           path: |
-            ${{ runner.temp }}/ProductShot-v0.9.11-local-ai-quality-source.zip
-            ${{ runner.temp }}/ProductShot-v0.9.11-local-ai-quality-source.sha256
+            ${{ runner.temp }}/ProductShot-v0.9.12-block1-one-photo-ux-source.zip
+            ${{ runner.temp }}/ProductShot-v0.9.12-block1-one-photo-ux-source.sha256
           if-no-files-found: error
