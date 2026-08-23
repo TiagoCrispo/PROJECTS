@@ -51,14 +51,13 @@ WARNPATCH="$ROOT/projects/ProductShot/block8/block15-warning-cleanup.patch"
 echo "467c226083311355b7a90c56839fdba84c6aeb049479d963620a4e20c18dd8ec  $WARNPATCH" | sha256sum -c -
 patch -p1 < "$WARNPATCH"
 
-# 3) Freeze final v1.0.0 exactly against the CI-clean v0.9.15 baseline.
-TRANSPORT16="$ROOT/projects/ProductShot/block8/block16-v1-final.patch.gz.b64"
-echo "316fba4d5afd10d465e0766c50738d074a6fd15409aee43f02e95a4d1e673c48  $TRANSPORT16" | sha256sum -c -
-base64 -d "$TRANSPORT16" | gzip -d > "$RUNNER_TEMP/block16.patch"
-echo "794aa0a5d40b7759b0a8e9799aca9ec147ed12d6c5c61ad29ec400170064b712  $RUNNER_TEMP/block16.patch" | sha256sum -c -
-patch -p1 < "$RUNNER_TEMP/block16.patch"
+# 3) Freeze final v1.0.0 against the CI-clean v0.9.15 baseline.
+APPLIER16="$ROOT/projects/ProductShot/block8/block16_apply.py"
+echo "3db360d769787d34690ef4461206a4431a482c2cd5e556aa5c04fdb3d083cee3  $APPLIER16" | sha256sum -c -
+python3 "$APPLIER16" "$SRC"
 
 # 4) Source-level release freeze checks.
+cd "$SRC"
 grep -F 'versionCode = 100' app/build.gradle.kts
 grep -F 'versionName = "1.0.0"' app/build.gradle.kts
 grep -F 'android:allowBackup="false"' app/src/main/AndroidManifest.xml
@@ -74,6 +73,15 @@ if grep -RniE 'qualityReferencePath|referenceImagePath|ReferenceStyleAnalyzer|PR
   exit 1
 fi
 python3 scripts/static_validate.py . | tee "$OUT/diagnostics/static-validation.txt"
+
+# Optional exact-source snapshot for engineering inspection. This does not alter release behavior.
+if [[ "${PRODUCTSHOT_SNAPSHOT_ONLY:-0}" == "1" ]]; then
+  zip -qr "$OUT/source/ProductShot-v1.0.0-SNAPSHOT-SOURCE.zip" . -x '.gradle/*' '.kotlin/*' 'app/build/*' 'build/*'
+  unzip -t "$OUT/source/ProductShot-v1.0.0-SNAPSHOT-SOURCE.zip" > "$OUT/source/source-integrity.txt"
+  sha256sum "$OUT/source/ProductShot-v1.0.0-SNAPSHOT-SOURCE.zip" > "$OUT/source/ProductShot-v1.0.0-SNAPSHOT-SOURCE.sha256"
+  echo 'PRODUCTSHOT_V1_SOURCE_SNAPSHOT_OK'
+  exit 0
+fi
 
 # 5) Gradle gates.
 gradle --no-daemon :app:dependencies --configuration debugRuntimeClasspath > "$OUT/diagnostics/dependency-report.txt"
@@ -130,7 +138,7 @@ package: com.tiagocrispo.furnitureshot
 Passed gates:
 - verified base-source checksum and archive integrity
 - replayed every accepted implementation block
-- verified v1 freeze patch hashes
+- verified deterministic v1 freeze applier hash
 - removed legacy model-photo/reference architecture
 - removed legacy collage composer
 - source static validation passed
