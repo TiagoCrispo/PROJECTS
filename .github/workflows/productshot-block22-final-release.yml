@@ -1,0 +1,200 @@
+name: ProductShot Block 22 Final Frozen Release
+
+on:
+  push:
+    branches:
+      - productshot-block8-build
+    paths:
+      - ".github/workflows/productshot-block22-final-release.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/productshot-block22-final-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  frozen-release-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download exact Block 21 frozen source
+        uses: actions/download-artifact@v4
+        with:
+          name: ProductShot-v1.0.0-BLOCK21-FROZEN-SOURCE
+          path: ${{ runner.temp }}/block21-frozen
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: TiagoCrispo/PROJECTS
+          run-id: 32653401398
+
+      - name: Verify and extract frozen source
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/block21-frozen"
+          FROZEN="$ROOT/ProductShot-v1.0.0-BLOCK21-FROZEN-SOURCE.zip"
+          test -s "$FROZEN"
+          echo "251b55615d5b95e32734988cbdab6bf9561380747a1351344d62e0b70db1d8cf  $FROZEN" | sha256sum -c -
+          unzip -t "$FROZEN"
+          mkdir -p "$RUNNER_TEMP/productshot-v1-final"
+          unzip -q "$FROZEN" -d "$RUNNER_TEMP/productshot-v1-final"
+          cd "$RUNNER_TEMP/productshot-v1-final"
+          grep -F 'versionCode = 100' app/build.gradle.kts
+          grep -F 'versionName = "1.0.0"' app/build.gradle.kts
+          python3 scripts/static_validate.py .
+          echo "PRODUCTSHOT_BLOCK22_FROZEN_SOURCE_OK"
+
+      - name: Capture immutable source manifest
+        shell: bash
+        working-directory: ${{ runner.temp }}/productshot-v1-final
+        run: |
+          set -euo pipefail
+          find . -type f \
+            ! -path './app/build/*' \
+            ! -path './build/*' \
+            ! -path './.gradle/*' \
+            -print0 | sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/source-before.sha256"
+          cp "$RUNNER_TEMP/source-before.sha256" "$RUNNER_TEMP/source-final.sha256"
+          sha256sum app/src/main/assets/magic_touch.tflite | tee "$RUNNER_TEMP/magic-touch.sha256"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+
+      - name: Clean frozen source build
+        working-directory: ${{ runner.temp }}/productshot-v1-final
+        run: gradle --no-daemon :app:clean
+
+      - name: Runtime dependency audit
+        working-directory: ${{ runner.temp }}/productshot-v1-final
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon :app:dependencies --configuration releaseRuntimeClasspath | tee "$RUNNER_TEMP/release-dependencies.txt"
+          grep -F 'com.google.ai.edge.litert:litert:1.4.1' "$RUNNER_TEMP/release-dependencies.txt"
+          grep -F 'com.google.mediapipe:tasks-vision-image-generator:0.10.26.1' "$RUNNER_TEMP/release-dependencies.txt"
+          ! grep -F 'com.google.mlkit:' "$RUNNER_TEMP/release-dependencies.txt"
+
+      - name: Run final unit tests
+        working-directory: ${{ runner.temp }}/productshot-v1-final
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon :app:testDebugUnitTest | tee "$RUNNER_TEMP/unit-tests.log"
+          count=$(grep -Rho '<testcase ' app/build/test-results/testDebugUnitTest/*.xml | wc -l | tr -d ' ')
+          test "$count" -ge 12
+          echo "PRODUCTSHOT_BLOCK22_UNIT_TESTS_OK tests=$count"
+
+      - name: Android Lint Release
+        working-directory: ${{ runner.temp }}/productshot-v1-final
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon --stacktrace :app:lintRelease 2>&1 | tee "$RUNNER_TEMP/lint-release.log"
+
+      - name: Assemble clean Release APK
+        working-directory: ${{ runner.temp }}/productshot-v1-final
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon --stacktrace :app:assembleRelease 2>&1 | tee "$RUNNER_TEMP/assemble-release.log"
+          test -s app/build/outputs/apk/release/app-release-unsigned.apk
+
+      - name: Verify source remained byte-identical
+        shell: bash
+        working-directory: ${{ runner.temp }}/productshot-v1-final
+        run: |
+          set -euo pipefail
+          find . -type f \
+            ! -path './app/build/*' \
+            ! -path './build/*' \
+            ! -path './.gradle/*' \
+            -print0 | sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/source-after.sha256"
+          diff -u "$RUNNER_TEMP/source-before.sha256" "$RUNNER_TEMP/source-after.sha256"
+          echo "PRODUCTSHOT_BLOCK22_SOURCE_UNCHANGED_OK"
+
+      - name: Final unsigned binary audit
+        shell: bash
+        working-directory: ${{ runner.temp }}/productshot-v1-final
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/release/app-release-unsigned.apk
+          BT="$ANDROID_HOME/build-tools/35.0.0"
+          "$BT/zipalign" -c -P 16 -v 4 "$APK" > "$RUNNER_TEMP/zipalign-release.txt"
+          unzip -t "$APK" | tee "$RUNNER_TEMP/unzip-release.txt"
+          "$BT/aapt" dump badging "$APK" | tee "$RUNNER_TEMP/aapt-badging.txt"
+          "$BT/aapt" dump permissions "$APK" | tee "$RUNNER_TEMP/aapt-permissions.txt"
+          grep -F "package: name='com.tiagocrispo.furnitureshot' versionCode='100' versionName='1.0.0'" "$RUNNER_TEMP/aapt-badging.txt"
+          ! grep -F 'application-debuggable' "$RUNNER_TEMP/aapt-badging.txt"
+          grep -F "uses-permission: name='android.permission.CAMERA'" "$RUNNER_TEMP/aapt-permissions.txt"
+          ! grep -F 'android.permission.INTERNET' "$RUNNER_TEMP/aapt-permissions.txt"
+          ! grep -F 'android.permission.ACCESS_NETWORK_STATE' "$RUNNER_TEMP/aapt-permissions.txt"
+          unzip -l "$APK" | tee "$RUNNER_TEMP/apk-files.txt"
+          grep -F 'assets/magic_touch.tflite' "$RUNNER_TEMP/apk-files.txt"
+          grep -F 'lib/arm64-v8a/libtensorflowlite_jni.so' "$RUNNER_TEMP/apk-files.txt"
+          grep -F 'lib/arm64-v8a/libmediapipe_tasks_vision_image_generator_jni.so' "$RUNNER_TEMP/apk-files.txt"
+          unzip -p "$APK" 'classes*.dex' | strings > "$RUNNER_TEMP/dex-strings.txt"
+          ! grep -E 'CatalogSheetComposer|BackgroundGenerationBroker|PhotoPackAnalyzer|PackConsistencyEngine|referencePath|referenceLauncher' "$RUNNER_TEMP/dex-strings.txt"
+          sha256sum "$APK" | tee "$RUNNER_TEMP/ProductShot-v1.0.0-release-unsigned.sha256"
+          echo "PRODUCTSHOT_BLOCK22_UNSIGNED_RELEASE_AUDIT_OK"
+
+      - name: Pack final unsigned candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/block22-output"
+          cp "$RUNNER_TEMP/productshot-v1-final/app/build/outputs/apk/release/app-release-unsigned.apk" "$RUNNER_TEMP/block22-output/ProductShot-v1.0.0-release-unsigned.apk"
+          cp "$RUNNER_TEMP/ProductShot-v1.0.0-release-unsigned.sha256" "$RUNNER_TEMP/block22-output/"
+          cp "$RUNNER_TEMP/source-final.sha256" "$RUNNER_TEMP/block22-output/source-final.sha256"
+          cp "$RUNNER_TEMP/magic-touch.sha256" "$RUNNER_TEMP/block22-output/magic-touch.sha256"
+          echo "251b55615d5b95e32734988cbdab6bf9561380747a1351344d62e0b70db1d8cf  ProductShot-v1.0.0-BLOCK21-FROZEN-SOURCE.zip" > "$RUNNER_TEMP/block22-output/frozen-source.sha256"
+          echo "PRODUCTSHOT_BLOCK22_FINAL_CI_OK"
+
+      - name: Upload Block 22 unsigned Release candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProductShot-v1.0.0-BLOCK22-UNSIGNED-RELEASE
+          path: ${{ runner.temp }}/block22-output
+          if-no-files-found: error
+          compression-level: 6
+
+      - name: Upload Block 22 diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProductShot-v1.0.0-BLOCK22-diagnostics
+          path: |
+            ${{ runner.temp }}/release-dependencies.txt
+            ${{ runner.temp }}/unit-tests.log
+            ${{ runner.temp }}/lint-release.log
+            ${{ runner.temp }}/assemble-release.log
+            ${{ runner.temp }}/zipalign-release.txt
+            ${{ runner.temp }}/unzip-release.txt
+            ${{ runner.temp }}/aapt-badging.txt
+            ${{ runner.temp }}/aapt-permissions.txt
+            ${{ runner.temp }}/apk-files.txt
+            ${{ runner.temp }}/source-before.sha256
+            ${{ runner.temp }}/source-after.sha256
+            ${{ runner.temp }}/dex-strings.txt
+          if-no-files-found: warn
+          compression-level: 6
