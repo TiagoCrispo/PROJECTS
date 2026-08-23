@@ -1,41 +1,46 @@
 # Galaxy A53 Performance
 
-Android maintenance and performance utility built around the Samsung Galaxy A53 5G, with a strong emphasis on reversible changes, truthful read-back and physical-device acceptance.
+> Reversible Android maintenance and diagnostics tooling built around real device state on the Samsung Galaxy A53 5G.
 
-## Current candidate
+| | |
+|---|---|
+| **Status** | Release candidate · **v1.20.0 — Galaxy Doctor 2.0 BETA** |
+| **Accepted base** | v1.19.0 Gaming 2.0 |
+| **Platform** | Android · Samsung Galaxy A53 5G |
+| **Focus** | Device diagnostics · storage · reversible system controls · Shizuku · physical-device acceptance |
 
-**v1.20.0 — Galaxy Doctor 2.0 BETA** (`versionCode 43`)
+## Overview
 
-The accepted runtime base is **v1.19.0 Gaming 2.0**. v1.20 adds a read-only diagnostics layer; it does not introduce new performance writes.
+Galaxy A53 Performance is a device-specific Android utility built around a conservative rule: system changes should be **observable, reversible and verified after application**. The project combines storage cleanup, background-app controls, gaming-oriented sessions and read-only diagnostics without presenting unsupported state as success.
 
 ## Current feature stack
 
-- **SAFE baseline** — known-working v1.15.2 executable core, hardened manifest (`debuggable=false`, `allowBackup=false`).
-- **v1.17 Gallery 2.0** — visual media cleanup, filters, multi-select, preview and Android system trash.
-- **v1.18 Background Center** — per-app UsageStats diagnostics and reversible `RUN_ANY_IN_BACKGROUND` / Data Saver policy handling with pre-change snapshots.
-- **v1.19 Gaming 2.0** — per-game reversible sessions for refresh-rate policy, power saver, Data Saver and optional user-selected background restrictions.
-- **v1.20 Galaxy Doctor 2.0** — read-only device dashboard for thermal state, battery, RAM, storage, refresh-rate read-back, permissions/capabilities and pending rollback state.
-
-The versioned overlay directories are retained because they are executable source layers used by the current build chain. Obsolete release-note folders are intentionally removed so `release/` contains only the current candidate.
+- **SAFE baseline** — known-working executable core with hardened manifest settings;
+- **Gallery 2.0** — visual media cleanup, filters, multi-select, preview and Android system trash;
+- **Background Center** — per-app UsageStats diagnostics plus reversible background/Data Saver policy handling with pre-change snapshots;
+- **Gaming 2.0** — per-game reversible sessions for refresh-rate policy, power saver, Data Saver and optional user-selected background restrictions;
+- **Galaxy Doctor 2.0** — read-only dashboard for thermal state, battery, RAM, storage, refresh-rate read-back, permissions/capabilities and pending rollback state.
 
 ## Engineering rules
 
-- one major feature per version;
-- clean-install physical acceptance on the Galaxy A53 before promotion to `main`;
-- no task-killer loop, `force-stop`, blind `am kill`, fake CPU temperature or fabricated performance percentage;
-- state-changing features snapshot first, persist synchronously, apply, read back and preserve rollback if verification fails;
-- unsupported or unreadable state is reported as **NC**, never as a fake success;
-- new overlays are compiled with Android SDK 35 + `javac` + D8 through GitHub Actions;
-- APK signing/integrity checks are necessary but do not replace on-device ART/One UI testing.
+The project deliberately avoids fake or irreversible optimization behavior:
 
-## Galaxy Doctor 2.0 data sources
+- no task-killer loop, blind `force-stop`/`am kill`, fabricated CPU temperature or invented performance percentages;
+- state-changing features snapshot first, persist synchronously, apply, read back and preserve rollback when verification fails;
+- unsupported or unreadable state is reported as **NC**, never converted into a fake success;
+- Doctor remains read-only; access actions open Android settings or request Shizuku authorization rather than silently changing unrelated state;
+- signing/integrity checks are treated as packaging evidence, not as a replacement for ART/One UI device testing.
 
-Doctor uses Android framework signals rather than estimates: `ActivityManager.MemoryInfo` for available/total memory and `lowMemory`, `StatFs` for filesystem capacity, `PowerManager` for thermal status and power saver, the sticky battery broadcast for battery level/charging/battery temperature, Usage Access AppOps, All Files Access, WRITE_SETTINGS, notification status, display refresh rate and Shizuku read-back for min/peak refresh and Data Saver.
+## Galaxy Doctor data sources
 
-Doctor itself is **read-only**. Its access buttons only open Android Settings or request Shizuku authorization.
+Doctor uses Android framework signals rather than estimates, including `ActivityManager.MemoryInfo`, `StatFs`, `PowerManager`, the battery broadcast, Usage Access/AppOps state, All Files Access, `WRITE_SETTINGS`, notification status, display refresh rate and Shizuku read-back where available.
 
-## Release status
+## Validation status
 
-v1.20.0 has passed source compilation and static APK integration/signing validation. Physical A53 acceptance is still required before the pull request is merged and before the build is considered accepted.
+v1.20.0 has passed source compilation and static APK integration/signing validation. **Physical Galaxy A53 acceptance is still required** before the candidate is considered fully accepted.
 
-See [`release/v1.20.0/`](./release/v1.20.0/) for the current release notes, hashes and validation record.
+The versioned overlay directories are retained because they are executable source layers used by the current build chain. Obsolete release-note folders are intentionally excluded from the active release directory.
+
+## Current release documentation
+
+See **[`release/v1.20.0/`](./release/v1.20.0/)** for the candidate release notes, hashes and validation record.
