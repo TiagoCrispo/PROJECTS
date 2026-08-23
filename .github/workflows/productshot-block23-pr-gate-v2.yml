@@ -1,4 +1,4 @@
-name: ProductShot Block23 RC1 PR Gate v2
+name: ProductShot Block23 RC1 PR Gate v3
 
 on:
   pull_request:
@@ -8,10 +8,11 @@ on:
       - "projects/ProductShot/block8/block23gz.b64.01a"
       - "projects/ProductShot/block8/block23gz.b64.01b"
       - "projects/ProductShot/block8/block23gz.b64.02"
+      - "projects/ProductShot/block8/block23b-lint-newapi.patch"
       - ".github/workflows/productshot-block23-pr-gate-v2.yml"
 
 jobs:
-  rc1-pr-gate-v2:
+  rc1-pr-gate-v3:
     runs-on: ubuntu-latest
     timeout-minutes: 55
     permissions:
@@ -28,6 +29,7 @@ jobs:
           echo "32b664c0eca19eaef7d4aee57fc8b7167e5c15d0bcf270ebf8ada0e5958e2ed0  block23gz.b64.01a" | sha256sum -c -
           echo "e12a195d7bf951ce1d5225c81e423319fd6da1b5f77deab888a8f8e14be11f05  block23gz.b64.01b" | sha256sum -c -
           echo "a83253eff8d606c381879d82b7081fefce11f020e0467ff792c553b020bbf671  block23gz.b64.02" | sha256sum -c -
+          echo "1232f0679dfe77eedda23cd84bdf0e86496257be19b5e6420b44ed1956e244b2  block23b-lint-newapi.patch" | sha256sum -c -
           cat block23gz.b64.00 block23gz.b64.01a block23gz.b64.01b block23gz.b64.02 | base64 -d | gzip -d > "$RUNNER_TEMP/block23.patch"
           echo "990e358fc48d2bb72110f066fa5c1d49cce6e27c23c63561149b48749c92ee36  $RUNNER_TEMP/block23.patch" | sha256sum -c -
       - name: Restore frozen baseline and apply RC1
@@ -45,10 +47,13 @@ jobs:
           python3 scripts/static_validate.py .
           git apply --check "$RUNNER_TEMP/block23.patch"
           git apply "$RUNNER_TEMP/block23.patch"
+          git apply --check "$GITHUB_WORKSPACE/projects/ProductShot/block8/block23b-lint-newapi.patch"
+          git apply "$GITHUB_WORKSPACE/projects/ProductShot/block8/block23b-lint-newapi.patch"
           grep -F 'versionCode = 101' app/build.gradle.kts
           grep -F 'versionName = "1.0.1-runtime-rc1"' app/build.gradle.kts
           grep -F 'getHistoricalProcessExitReasons' app/src/main/java/com/tiagocrispo/furnitureshot/processing/RuntimeDiagnostics.kt
           grep -F 'setProcessStateSummary' app/src/main/java/com/tiagocrispo/furnitureshot/processing/RuntimeDiagnostics.kt
+          grep -F '@androidx.annotation.RequiresApi(Build.VERSION_CODES.R)' app/src/main/java/com/tiagocrispo/furnitureshot/processing/RuntimeDiagnostics.kt
           grep -F 'Exportar diagnóstico' app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt
           grep -F 'mayInvokeGenerativeMotor' app/src/main/java/com/tiagocrispo/furnitureshot/processing/DirectMediaPipeBackgroundGenerator.kt
           grep -F 'MEDIAPIPE_RELEASE_NATIVE' app/src/main/java/com/tiagocrispo/furnitureshot/processing/DirectMediaPipeBackgroundGenerator.kt
@@ -90,12 +95,17 @@ jobs:
           assert n>=18 and f==0 and e==0,(n,f,e)
           print('PRODUCTSHOT_BLOCK23_TESTS_OK',n)
           PY
-      - name: Lint and Release build
+      - name: Lint Release
         working-directory: ${{ runner.temp }}/src
         shell: bash
         run: |
           set -o pipefail
           gradle --no-daemon --stacktrace :app:lintRelease 2>&1 | tee lint-release.log
+      - name: Assemble Release
+        working-directory: ${{ runner.temp }}/src
+        shell: bash
+        run: |
+          set -o pipefail
           gradle --no-daemon --stacktrace :app:assembleRelease 2>&1 | tee build-release.log
       - name: APK audit
         working-directory: ${{ runner.temp }}/src
@@ -111,13 +121,14 @@ jobs:
           grep -F "package: name='com.tiagocrispo.furnitureshot' versionCode='101' versionName='1.0.1-runtime-rc1'" badging.txt
           ! grep -F 'android.permission.INTERNET' permissions.txt
           ! grep -F 'android.permission.ACCESS_NETWORK_STATE' permissions.txt
+          ! grep -F 'application-debuggable' badging.txt
           sha256sum "$APK" | tee apk-unsigned.sha256
-          echo PRODUCTSHOT_BLOCK23_RC1_PR_GATE_V2_OK
+          echo PRODUCTSHOT_BLOCK23_RC1_PR_GATE_V3_OK
       - name: Upload RC1
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: ProductShot-v1.0.1-runtime-rc1-PR-V2-UNSIGNED
+          name: ProductShot-v1.0.1-runtime-rc1-PR-V3-UNSIGNED
           path: |
             ${{ runner.temp }}/src/app/build/outputs/apk/release/app-release-unsigned.apk
             ${{ runner.temp }}/src/apk-unsigned.sha256
@@ -126,7 +137,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ProductShot-v1.0.1-runtime-rc1-PR-V2-diagnostics
+          name: ProductShot-v1.0.1-runtime-rc1-PR-V3-diagnostics
           path: |
             ${{ runner.temp }}/src/tests.log
             ${{ runner.temp }}/src/lint-release.log
