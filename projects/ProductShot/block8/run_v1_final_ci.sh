@@ -51,10 +51,22 @@ WARNPATCH="$ROOT/projects/ProductShot/block8/block15-warning-cleanup.patch"
 echo "467c226083311355b7a90c56839fdba84c6aeb049479d963620a4e20c18dd8ec  $WARNPATCH" | sha256sum -c -
 patch -p1 < "$WARNPATCH"
 
-# 3) Freeze final v1.0.0 against the CI-clean v0.9.15 baseline.
+# 3) Freeze v1.0.0, then replace dynamic ML Kit segmentation with bundled MediaPipe MagicTouch.
 APPLIER16="$ROOT/projects/ProductShot/block8/block16_apply.py"
 echo "3db360d769787d34690ef4461206a4431a482c2cd5e556aa5c04fdb3d083cee3  $APPLIER16" | sha256sum -c -
 python3 "$APPLIER16" "$SRC"
+
+APPLIER17="$ROOT/projects/ProductShot/block8/block17_apply.py"
+echo "dfc87a077ce7f6ed65663fdefb3e9b036fb17161a924c3bf9ceec62dff09580c  $APPLIER17" | sha256sum -c -
+python3 "$APPLIER17" "$SRC"
+
+MAGIC_DIR="$SRC/app/src/main/assets"
+MAGIC_MODEL="$MAGIC_DIR/magic_touch.tflite"
+MAGIC_URL='https://storage.googleapis.com/mediapipe-models/interactive_segmenter/magic_touch/float32/1/magic_touch.tflite'
+mkdir -p "$MAGIC_DIR"
+curl --fail --location --retry 3 --retry-delay 2 "$MAGIC_URL" -o "$MAGIC_MODEL"
+echo "e24338a717c1b7ad8d159666677ef400babb7f33b8ad60c4d96db4ecf694cd25  $MAGIC_MODEL" | sha256sum -c -
+test "$(stat -c %s "$MAGIC_MODEL")" = "6227884"
 
 # 4) Source-level release freeze checks.
 cd "$SRC"
@@ -62,14 +74,17 @@ grep -F 'versionCode = 100' app/build.gradle.kts
 grep -F 'versionName = "1.0.0"' app/build.gradle.kts
 grep -F 'android:allowBackup="false"' app/src/main/AndroidManifest.xml
 grep -F 'android:usesCleartextTraffic="false"' app/src/main/AndroidManifest.xml
+grep -F 'tools:node="remove"' app/src/main/AndroidManifest.xml
+grep -F 'com.google.mediapipe:tasks-vision:0.10.26.1' app/build.gradle.kts
+grep -F 'InteractiveSegmenter.createFromOptions' app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalEnhancementEngine.kt
 grep -F 'ActivityResultContracts.TakePicture()' app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt
 grep -F 'ActivityResultContracts.GetContent()' app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt
 grep -F 'Text("Generar")' app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt
 grep -F 'Text("Descargar foto modelada")' app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt
 test ! -e app/src/main/java/com/tiagocrispo/furnitureshot/processing/ReferenceStyleAnalyzer.kt
 test ! -e app/src/main/java/com/tiagocrispo/furnitureshot/processing/CatalogSheetComposer.kt
-if grep -RniE 'qualityReferencePath|referenceImagePath|ReferenceStyleAnalyzer|PROCEDURAL_REFERENCE_GUIDED|CatalogReferenceStyle|CatalogSheetComposer' app/src/main/java; then
-  echo 'Legacy model-photo/reference/collage architecture still ships' >&2
+if grep -RniE 'qualityReferencePath|referenceImagePath|ReferenceStyleAnalyzer|PROCEDURAL_REFERENCE_GUIDED|CatalogReferenceStyle|CatalogSheetComposer|com.google.mlkit|SubjectSegmentation|SubjectSegmenterOptions|kotlinx.coroutines.tasks.await' app/src/main/java; then
+  echo 'Legacy reference/collage/ML Kit architecture still ships' >&2
   exit 1
 fi
 python3 scripts/static_validate.py . | tee "$OUT/diagnostics/static-validation.txt"
@@ -85,6 +100,11 @@ fi
 
 # 5) Gradle gates.
 gradle --no-daemon :app:dependencies --configuration debugRuntimeClasspath > "$OUT/diagnostics/dependency-report.txt"
+grep -F 'com.google.mediapipe:tasks-vision:0.10.26.1' "$OUT/diagnostics/dependency-report.txt"
+if grep -E 'play-services-mlkit-subject-segmentation|kotlinx-coroutines-play-services' "$OUT/diagnostics/dependency-report.txt"; then
+  echo 'Dynamic ML Kit segmentation dependency unexpectedly remains' >&2
+  exit 1
+fi
 set +e
 gradle --no-daemon --stacktrace :app:testDebugUnitTest 2>&1 | tee "$OUT/diagnostics/unit-test.log"
 status=${PIPESTATUS[0]}
@@ -138,7 +158,9 @@ package: com.tiagocrispo.furnitureshot
 Passed gates:
 - verified base-source checksum and archive integrity
 - replayed every accepted implementation block
-- verified deterministic v1 freeze applier hash
+- verified deterministic v1 freeze and offline-segmentation applier hashes
+- bundled pinned MagicTouch model: SHA-256 e24338a717c1b7ad8d159666677ef400babb7f33b8ad60c4d96db4ecf694cd25
+- removed dynamic ML Kit subject segmentation and Play Services coroutine bridge
 - removed legacy model-photo/reference architecture
 - removed legacy collage composer
 - source static validation passed
