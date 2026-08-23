@@ -1,0 +1,39 @@
+name: ProductShot MagicTouch Model Probe
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/productshot-magictouch-model-probe.yml"
+  push:
+    branches:
+      - productshot-block8-build
+    paths:
+      - ".github/workflows/productshot-magictouch-model-probe.yml"
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Download pinned official MagicTouch v1 model
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://storage.googleapis.com/mediapipe-models/interactive_segmenter_v2/magic_touch/int8/1/interactive_segmentation.task'
+          curl --fail --location --retry 3 --retry-delay 2 "$URL" -o interactive_segmentation.task
+          test -s interactive_segmentation.task
+          stat -c 'MAGICTOUCH_SIZE_BYTES=%s' interactive_segmentation.task
+          sha256sum interactive_segmentation.task | tee model.sha256
+          file interactive_segmentation.task
+
+      - name: Upload probe model
+        uses: actions/upload-artifact@v4
+        with:
+          name: MagicTouch-interactive_segmentation-v1
+          path: |
+            interactive_segmentation.task
+            model.sha256
+          if-no-files-found: error
