@@ -42,7 +42,7 @@ jobs:
       - name: Run Block 21 deterministic freeze audit
         shell: bash
         run: |
-          test "$(git hash-object projects/ProductShot/block8/run_v1_final_ci_block21.sh)" = "f781b4fdb9bc972c7055c847ffc04ec1451cea4a"
+          test "$(git hash-object projects/ProductShot/block8/run_v1_final_ci_block21.sh)" = "d7993f27a1774145fc466aa752a970ac0d5f4f12"
           bash projects/ProductShot/block8/run_v1_final_ci_block21.sh
 
       - name: Upload Block 21 diagnostics
