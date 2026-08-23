@@ -6,7 +6,6 @@ This folder contains the public-facing documentation for the projects shown on m
 
 | Project | Area |
 |---|---|
-| [AniFlow](./aniflow.md) | Android · anime · Media3 · AniList · Room |
 | [ProAim](./proaim.md) | Windows · latency · diagnostics |
 | [UTN Scholar](./utn-scholar.md) | Education · documents · AI-assisted learning |
 | [BandLab](./bandlab.md) | Android · fitness · Bluetooth LE |

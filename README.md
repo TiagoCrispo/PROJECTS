@@ -8,7 +8,6 @@ I prefer tools that explain what they are doing, preserve user control and avoid
 
 | Project | What it is |
 |---|---|
-| [AniFlow](./projects/aniflow.md) | Personal Android anime library and Media3 player with AniList metadata, franchise chronology, persistent progress and a visual black/orange streaming UI. |
 | [ProAim](./projects/proaim.md) | Windows performance, latency, mouse, hardware-health and display diagnostics with reversible tuning. |
 | [UTN Scholar](./projects/utn-scholar.md) | Cross-device study workspace for university documents, AI-assisted learning and local tools. |
 | [FurnitureShot AI](./projects/furnitureshot-ai.md) | Android furniture-photo editor focused on product fidelity, clean catalog composition and conservative quality gates. |
