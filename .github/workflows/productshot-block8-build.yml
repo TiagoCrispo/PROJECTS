@@ -133,6 +133,16 @@ jobs:
           grep -F 'NonCancellable + Dispatchers.IO' app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt
           ! grep -F 'referencePath' app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt
 
+      - name: Apply final warning cleanup
+        working-directory: ${{ runner.temp }}/productshot-src
+        shell: bash
+        run: |
+          set -euo pipefail
+          PATCH="$GITHUB_WORKSPACE/projects/ProductShot/block8/block15-warning-cleanup.patch"
+          echo "467c226083311355b7a90c56839fdba84c6aeb049479d963620a4e20c18dd8ec  $PATCH" | sha256sum -c -
+          patch -p1 < "$PATCH"
+          ! grep -F 'it != null && it.width' app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalEnhancementEngine.kt
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
