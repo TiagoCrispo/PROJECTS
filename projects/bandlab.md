@@ -1,42 +1,56 @@
 # BandLab
 
-BandLab is a local-first Android training and health companion built around phone sensors and a Xiaomi Smart Band.
+> Local-first Android training companion that combines phone sensors, GPS/GNSS and direct Xiaomi Smart Band integration.
 
-## Current verified release
+| | |
+|---|---|
+| **Status** | Verified release · **BandLab9Active 2.6.0** |
+| **Platform** | Android · minSdk 28 · targetSdk 36 |
+| **Package** | `com.fer.bandlab` · versionCode 260 |
+| **Focus** | Bluetooth LE · live heart rate · GPS/GNSS · workout analytics · local data |
 
-**BandLab9Active 2.6.0** (`com.fer.bandlab`, versionCode 260, minSdk 28, targetSdk 36).
+## Overview
 
-The final 2.6 release passed the recorded unit, debug/release build, package/manifest, emulator upgrade and startup/crash gates. Its final APK was also checked for signature continuity with v2.5, ZIP integrity and zipalign.
+BandLab is a training and health companion built around real sensor data from the phone and a compatible Xiaomi Smart Band. It supports workout tracking, pacing, routes, history and exports while keeping the core experience local-first.
 
-### Key 2.6 changes
+## Product capabilities
 
-- live Xiaomi heart-rate integration during workouts, without fabricating HR when the Band does not provide it;
-- SQLite-backed workout-history migration;
-- configurable intervals and ghost pacing;
-- return-to-start guidance and local/offline route view;
-- GPS battery protection and personal-record tracking;
+- direct Bluetooth LE connection to a compatible Xiaomi Smart Band;
+- secure Xiaomi session/authentication flows without exposing raw secrets in the UI;
+- available Band activity, sleep and battery synchronization;
+- live heart-rate samples during workouts when the Band actually provides them;
+- walking, running, cycling and jump-rope workout flows;
+- phone GPS/GNSS route tracking with rejection of obviously bad location points;
+- auto-pause, intervals, splits, manual laps and pacing comparisons;
+- configurable intervals, ghost pacing and return-to-start guidance;
+- local/offline route views;
+- SQLite-backed workout history and personal-record tracking;
 - TCX/CSV workout export;
-- workout-finalization and heart-rate accumulation stability fixes;
-- updated local-first privacy wording.
-
-## What it does
-
-- connects directly to a compatible Xiaomi Smart Band over Bluetooth LE;
-- handles secure Xiaomi session/authentication flows without exposing raw secrets to the user interface;
-- synchronizes available Band information such as activity, sleep and battery data;
-- uses live heart-rate samples during workouts when the Band provides them;
-- supports walking, running, cycling and jump-rope workout flows;
-- tracks routes with phone GPS/GNSS and rejects obviously bad location points;
-- supports auto-pause, intervals, splits, manual laps and pacing comparisons;
-- provides route guidance and local/offline route views;
-- stores workout history locally;
-- supports personal-record tracking and workout export formats;
-- can combine direct Band data with Health Connect where appropriate.
+- optional Health Connect integration where appropriate.
 
 ## Engineering focus
 
-Missing heart-rate, GPS or Band data stays missing rather than being replaced with believable-looking values. Emulator/build validation is useful, but Bluetooth authentication, reconnection and live sensor behavior still require real-device testing.
+The project treats sensor uncertainty explicitly. Missing heart-rate, GPS or Band data remains missing rather than being replaced with plausible-looking values.
 
-## Privacy
+Release 2.6 also focused on lifecycle and data reliability, including workout-finalization fixes, heart-rate accumulation stability, persistent workout-history migration and GPS battery protection.
 
-Authentication material, signing keys, Android Keystore data and other secrets are not intended for public source, logs or documentation. Private signing material is excluded from the verified source/release bundles.
+## Validation status
+
+The recorded 2.6 release passed:
+
+- unit tests;
+- debug and release builds;
+- package/manifest checks;
+- emulator upgrade and startup/crash gates;
+- APK signature-continuity checks against v2.5;
+- ZIP integrity and zipalign verification.
+
+Bluetooth authentication, reconnection and live sensor behavior remain hardware-dependent and therefore still require real-device testing when those paths change.
+
+## Privacy and security
+
+Authentication material, signing keys, Android Keystore data and other secrets are intentionally excluded from public source, logs and documentation.
+
+## Why this project matters
+
+BandLab combines mobile UI, BLE protocol work, sensor uncertainty, location processing, local persistence and release engineering in one product-oriented Android project.
