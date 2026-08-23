@@ -1,0 +1,147 @@
+name: ProductShot v1.0.2 Real Device Recovery Build
+
+on:
+  push:
+    branches: [productshot-v1.0.1-hotfix]
+    paths:
+      - "projects/ProductShot/v102/productshot-v1.0.2.patch.gz.b64"
+      - ".github/workflows/productshot-v102-recovery.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "projects/ProductShot/v102/productshot-v1.0.2.patch.gz.b64"
+      - ".github/workflows/productshot-v102-recovery.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build-v102:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download exact v1.0.0 frozen source
+        uses: actions/download-artifact@v4
+        with:
+          name: ProductShot-v1.0.0-BLOCK21-FROZEN-SOURCE
+          path: ${{ runner.temp }}/frozen
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: TiagoCrispo/PROJECTS
+          run-id: 32653401398
+
+      - name: Verify, extract, and apply v1.0.2 recovery patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          FROZEN="$RUNNER_TEMP/frozen/ProductShot-v1.0.0-BLOCK21-FROZEN-SOURCE.zip"
+          echo "251b55615d5b95e32734988cbdab6bf9561380747a1351344d62e0b70db1d8cf  $FROZEN" | sha256sum -c -
+          unzip -t "$FROZEN"
+          mkdir -p "$RUNNER_TEMP/src"
+          unzip -q "$FROZEN" -d "$RUNNER_TEMP/src"
+          cd "$RUNNER_TEMP/src"
+          base64 -d "$GITHUB_WORKSPACE/projects/ProductShot/v102/productshot-v1.0.2.patch.gz.b64" | gzip -d > "$RUNNER_TEMP/v102.patch"
+          patch -p1 < "$RUNNER_TEMP/v102.patch"
+          grep -F 'versionCode = 102' app/build.gradle.kts
+          grep -F 'versionName = "1.0.2"' app/build.gradle.kts
+          python3 scripts/static_validate.py . | tee "$RUNNER_TEMP/static-validation.txt"
+          grep -F 'PRODUCTSHOT_V1_0_2_REAL_DEVICE_RECOVERY_OK' "$RUNNER_TEMP/static-validation.txt"
+          find . -type f ! -path './app/build/*' ! -path './build/*' ! -path './.gradle/*' -print0 | sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/source-v102.sha256"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+
+      - name: Resolve dependencies and unit tests
+        working-directory: ${{ runner.temp }}/src
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:dependencies --configuration releaseRuntimeClasspath | tee "$RUNNER_TEMP/dependencies.txt"
+          grep -F 'com.google.ai.edge.litert:litert:1.4.1' "$RUNNER_TEMP/dependencies.txt"
+          grep -F 'com.google.mediapipe:tasks-vision-image-generator:0.10.26.1' "$RUNNER_TEMP/dependencies.txt"
+          gradle --no-daemon :app:testDebugUnitTest | tee "$RUNNER_TEMP/unit-tests.txt"
+          count=$(grep -Rho '<testcase ' app/build/test-results/testDebugUnitTest/*.xml | wc -l | tr -d ' ')
+          test "$count" -ge 12
+          echo "PRODUCTSHOT_V102_UNIT_TESTS_OK tests=$count"
+
+      - name: Lint and assemble Release
+        working-directory: ${{ runner.temp }}/src
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon --stacktrace :app:lintRelease 2>&1 | tee "$RUNNER_TEMP/lint-release.txt"
+          gradle --no-daemon --stacktrace :app:assembleRelease 2>&1 | tee "$RUNNER_TEMP/assemble-release.txt"
+          test -s app/build/outputs/apk/release/app-release-unsigned.apk
+
+      - name: Align and audit Release binary
+        working-directory: ${{ runner.temp }}/src
+        shell: bash
+        run: |
+          set -euo pipefail
+          RAW=app/build/outputs/apk/release/app-release-unsigned.apk
+          APK="$RUNNER_TEMP/ProductShot-v1.0.2-release-unsigned-aligned.apk"
+          BT="$ANDROID_HOME/build-tools/35.0.0"
+
+          "$BT/zipalign" -P 16 -f -v 4 "$RAW" "$APK" | tee "$RUNNER_TEMP/zipalign-create.txt"
+          "$BT/zipalign" -c -P 16 -v 4 "$APK" | tee "$RUNNER_TEMP/zipalign-check.txt"
+          unzip -t "$APK" | tee "$RUNNER_TEMP/unzip.txt"
+
+          "$BT/aapt" dump badging "$APK" | tee "$RUNNER_TEMP/badging.txt"
+          "$BT/aapt" dump permissions "$APK" | tee "$RUNNER_TEMP/permissions.txt"
+          grep -F "package: name='com.tiagocrispo.furnitureshot' versionCode='102' versionName='1.0.2'" "$RUNNER_TEMP/badging.txt"
+          ! grep -F 'application-debuggable' "$RUNNER_TEMP/badging.txt"
+          grep -F "uses-permission: name='android.permission.CAMERA'" "$RUNNER_TEMP/permissions.txt"
+          ! grep -F 'android.permission.INTERNET' "$RUNNER_TEMP/permissions.txt"
+          ! grep -F 'android.permission.ACCESS_NETWORK_STATE' "$RUNNER_TEMP/permissions.txt"
+
+          unzip -l "$APK" | tee "$RUNNER_TEMP/apk-files.txt"
+          grep -F 'assets/magic_touch.tflite' "$RUNNER_TEMP/apk-files.txt"
+          grep -E 'lib/arm64-v8a/.*tensorflowlite.*\.so' "$RUNNER_TEMP/apk-files.txt"
+          grep -E 'lib/arm64-v8a/.*mediapipe.*\.so' "$RUNNER_TEMP/apk-files.txt"
+
+          sha256sum "$APK" | tee "$RUNNER_TEMP/ProductShot-v1.0.2-release-unsigned.sha256"
+          echo "PRODUCTSHOT_V102_BINARY_AUDIT_OK"
+
+      - name: Pack v1.0.2 candidate and local signing tool
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/out"
+          mkdir -p "$OUT"
+          cp "$RUNNER_TEMP/ProductShot-v1.0.2-release-unsigned-aligned.apk" "$OUT/ProductShot-v1.0.2-release-unsigned-aligned.apk"
+          cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" "$OUT/apksigner.jar"
+          cp "$RUNNER_TEMP/ProductShot-v1.0.2-release-unsigned.sha256" "$OUT/"
+          cp "$RUNNER_TEMP/source-v102.sha256" "$OUT/"
+          cp "$RUNNER_TEMP/static-validation.txt" "$OUT/"
+          cp "$RUNNER_TEMP/unit-tests.txt" "$OUT/"
+          cp "$RUNNER_TEMP/lint-release.txt" "$OUT/"
+          cp "$RUNNER_TEMP/assemble-release.txt" "$OUT/"
+          cp "$RUNNER_TEMP/badging.txt" "$OUT/"
+          cp "$RUNNER_TEMP/permissions.txt" "$OUT/"
+          cp "$RUNNER_TEMP/zipalign-check.txt" "$OUT/"
+
+      - name: Upload v1.0.2 unsigned release candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProductShot-v1.0.2-RECOVERY-UNSIGNED
+          path: ${{ runner.temp }}/out
+          if-no-files-found: error
+          compression-level: 6
