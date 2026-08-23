@@ -82,16 +82,16 @@ jobs:
         run: |
           set -euo pipefail
           cd projects/ProductShot/block8
-          expected=(block13.b64.00 block13.b64.01 block13.b64.02 block13.b64.03)
+          expected=(block13gz.b64.00 block13gz.b64.01)
           for part in "${expected[@]}"; do
             test -s "$part" || { echo "Missing/empty Block 13 chunk: $part" >&2; exit 1; }
           done
-          mapfile -t actual < <(find . -maxdepth 1 -type f -name 'block13.b64.*' -printf '%f\n' | sort)
+          mapfile -t actual < <(find . -maxdepth 1 -type f -name 'block13gz.b64.*' -printf '%f\n' | sort)
           if [[ "${actual[*]}" != "${expected[*]}" ]]; then
             printf 'Unexpected Block 13 chunk set.\nExpected: %s\nActual: %s\n' "${expected[*]}" "${actual[*]}" >&2
             exit 1
           fi
-          cat "${expected[@]}" | base64 -d > "$RUNNER_TEMP/block13_apply.py"
+          cat "${expected[@]}" | base64 -d | gzip -d > "$RUNNER_TEMP/block13_apply.py"
           echo "cca3951f50f0d5ad3c857585d04a2407b2a6bb4bece128ef9c7b52fa68924ebb  $RUNNER_TEMP/block13_apply.py" | sha256sum -c -
           python3 "$RUNNER_TEMP/block13_apply.py" "$RUNNER_TEMP/productshot-src"
           cd "$RUNNER_TEMP/productshot-src"
