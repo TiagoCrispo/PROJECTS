@@ -60,13 +60,11 @@ jobs:
           grep -F 'versionName = "0.9.9-guided-local-install"' app/build.gradle.kts
 
       - name: Apply Block 11 local AI quality and hero output
-        working-directory: ${{ runner.temp }}/productshot-src
         shell: bash
         run: |
           set -euo pipefail
-          PATCH="$RUNNER_TEMP/block11-local-ai-quality.patch"
-          cat "$GITHUB_WORKSPACE"/projects/ProductShot/block8/block11.b64.0* | base64 -d > "$PATCH"
-          patch -p2 < "$PATCH"
+          python3 projects/ProductShot/block8/block11_apply.py "$RUNNER_TEMP/productshot-src"
+          cd "$RUNNER_TEMP/productshot-src"
           grep -F 'versionCode = 57' app/build.gradle.kts
           grep -F 'versionName = "0.9.11-local-ai-quality"' app/build.gradle.kts
           grep -F 'saveJpeg(originalPath, output)' app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalEnhancementEngine.kt
