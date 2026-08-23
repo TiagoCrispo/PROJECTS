@@ -1,0 +1,293 @@
+name: ProductShot v1.0 Final Release
+
+on:
+  push:
+    branches:
+      - productshot-block8-build
+    paths:
+      - "projects/ProductShot/block8/**"
+      - ".github/workflows/productshot-v1-final.yml"
+  workflow_dispatch:
+
+jobs:
+  final-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rebuild verified ProductShot base
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd projects/ProductShot/block8
+          expected=(
+            clean.b64.00 clean.b64.01 clean.b64.02 clean.b64.03
+            clean.b64.04 clean.b64.05 clean.b64.06
+          )
+          for part in "${expected[@]}"; do
+            test -s "$part" || { echo "Missing/empty base chunk: $part" >&2; exit 1; }
+          done
+          mapfile -t actual < <(find . -maxdepth 1 -type f -name 'clean.b64.*' -printf '%f\n' | sort)
+          [[ "${actual[*]}" == "${expected[*]}" ]] || { echo "Unexpected base transport chunk set" >&2; exit 1; }
+          mkdir -p "$RUNNER_TEMP/productshot-src"
+          ARCHIVE="$RUNNER_TEMP/ProductShot-v0.9.8-source.zip"
+          cat "${expected[@]}" | base64 -d > "$ARCHIVE"
+          echo "385f4e5f21cbca4194d891452969cfe44f40a667394caf799b688942745cf3ec  $ARCHIVE" | sha256sum -c -
+          unzip -t "$ARCHIVE"
+          unzip -q "$ARCHIVE" -d "$RUNNER_TEMP/productshot-src"
+
+      - name: Apply audited Block 8 hotfix
+        shell: bash
+        run: python3 projects/ProductShot/block8/compile_hotfix.py "$RUNNER_TEMP/productshot-src"
+
+      - name: Apply Block 9 local model install
+        working-directory: ${{ runner.temp }}/productshot-src
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch -p1 < "$GITHUB_WORKSPACE/projects/ProductShot/block8/block9-guided-local-install.patch"
+          grep -F 'versionCode = 55' app/build.gradle.kts
+
+      - name: Apply Block 11 local AI quality
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 projects/ProductShot/block8/block11_apply.py "$RUNNER_TEMP/productshot-src"
+          cd "$RUNNER_TEMP/productshot-src"
+          grep -F 'versionCode = 57' app/build.gradle.kts
+          grep -F 'MAX_ATTEMPTS = 3' app/src/main/java/com/tiagocrispo/furnitureshot/processing/DirectMediaPipeBackgroundGenerator.kt
+
+      - name: Apply Block 12 one-photo UX
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 projects/ProductShot/block8/block12_apply.py "$RUNNER_TEMP/productshot-src"
+          cd "$RUNNER_TEMP/productshot-src"
+          grep -F 'versionCode = 58' app/build.gradle.kts
+
+      - name: Apply Block 13 camera and visual foundation
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd projects/ProductShot/block8
+          expected=(block13gz.b64.00 block13tail.b64.00 block13tail.b64.01 block13tail.b64.02 block13tail.b64.03)
+          for part in "${expected[@]}"; do test -s "$part"; done
+          echo "b8c1c2ef975acb585c6f0c3f5544c21bfa3d61e0b14dd636c23b2579f026f519  block13gz.b64.00" | sha256sum -c -
+          echo "84a81fe9b085cbf70893fedd72cafb4f05f0ceb6ec3755bab820813eae1c7b6d  block13tail.b64.00" | sha256sum -c -
+          echo "2ae9844e057e75842c9eff95b775f6fad584e7f76f47ece5ee1ec4610f6bf324  block13tail.b64.01" | sha256sum -c -
+          echo "7634758fe1e03710d83447bfba8717a08d7d1891ac996241de6a71326d3cff3c  block13tail.b64.02" | sha256sum -c -
+          echo "ca8df1c3f113d6145bcd4d5ee41fa3ccfea303ffc19be2a44e80c4e099f8142c  block13tail.b64.03" | sha256sum -c -
+          python3 -c 'import sys,base64,gzip; b=b"".join(open(p,"rb").read() for p in sys.argv[1:-1]); open(sys.argv[-1],"wb").write(gzip.decompress(base64.b64decode(b, validate=False)))' "${expected[@]}" "$RUNNER_TEMP/block13_apply.py"
+          echo "cca3951f50f0d5ad3c857585d04a2407b2a6bb4bece128ef9c7b52fa68924ebb  $RUNNER_TEMP/block13_apply.py" | sha256sum -c -
+          python3 "$RUNNER_TEMP/block13_apply.py" "$RUNNER_TEMP/productshot-src"
+          grep -F 'versionCode = 59' "$RUNNER_TEMP/productshot-src/app/build.gradle.kts"
+
+      - name: Apply Block 14 premium compositor
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 projects/ProductShot/block8/block14_apply.py "$RUNNER_TEMP/productshot-src"
+          cd "$RUNNER_TEMP/productshot-src"
+          grep -F 'versionCode = 60' app/build.gradle.kts
+          grep -F 'scoreCommercialPlate' app/src/main/java/com/tiagocrispo/furnitureshot/processing/DirectMediaPipeBackgroundGenerator.kt
+          grep -F 'PREMIUM RELIGHT' app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalEnhancementEngine.kt
+
+      - name: Apply Block 15 robustness
+        shell: bash
+        run: |
+          set -euo pipefail
+          TRANSPORT="$GITHUB_WORKSPACE/projects/ProductShot/block8/block15-final-robustness.patch.gz.b64"
+          echo "613c041e83edae33aab505592e1e54e396724e450ef8b00aee6d850bae9c211e  $TRANSPORT" | sha256sum -c -
+          base64 -d "$TRANSPORT" | gzip -d > "$RUNNER_TEMP/block15.patch"
+          echo "289065e019ae3ae177df5c97527eae75f236ffaf20c67f0652a59a62d9ca1cb9  $RUNNER_TEMP/block15.patch" | sha256sum -c -
+          cd "$RUNNER_TEMP/productshot-src"
+          patch -p1 < "$RUNNER_TEMP/block15.patch"
+          grep -F 'versionCode = 61' app/build.gradle.kts
+          grep -F 'FINAL RESCUE' app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalEnhancementEngine.kt
+
+      - name: Apply final warning cleanup
+        working-directory: ${{ runner.temp }}/productshot-src
+        shell: bash
+        run: |
+          set -euo pipefail
+          PATCH="$GITHUB_WORKSPACE/projects/ProductShot/block8/block15-warning-cleanup.patch"
+          echo "467c226083311355b7a90c56839fdba84c6aeb049479d963620a4e20c18dd8ec  $PATCH" | sha256sum -c -
+          patch -p1 < "$PATCH"
+          ! grep -F 'it != null && it.width' app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalEnhancementEngine.kt
+
+      - name: Freeze ProductShot v1.0.0
+        working-directory: ${{ runner.temp }}/productshot-src
+        shell: bash
+        run: |
+          set -euo pipefail
+          TRANSPORT="$GITHUB_WORKSPACE/projects/ProductShot/block8/block16-v1-final.patch.gz.b64"
+          echo "316fba4d5afd10d465e0766c50738d074a6fd15409aee43f02e95a4d1e673c48  $TRANSPORT" | sha256sum -c -
+          base64 -d "$TRANSPORT" | gzip -d > "$RUNNER_TEMP/block16-v1-final.patch"
+          echo "794aa0a5d40b7759b0a8e9799aca9ec147ed12d6c5c61ad29ec400170064b712  $RUNNER_TEMP/block16-v1-final.patch" | sha256sum -c -
+          patch -p1 < "$RUNNER_TEMP/block16-v1-final.patch"
+          grep -F 'versionCode = 100' app/build.gradle.kts
+          grep -F 'versionName = "1.0.0"' app/build.gradle.kts
+          grep -F 'android:allowBackup="false"' app/src/main/AndroidManifest.xml
+          test ! -e app/src/main/java/com/tiagocrispo/furnitureshot/processing/ReferenceStyleAnalyzer.kt
+          test ! -e app/src/main/java/com/tiagocrispo/furnitureshot/processing/CatalogSheetComposer.kt
+          if grep -RniE 'qualityReferencePath|referenceImagePath|ReferenceStyleAnalyzer|PROCEDURAL_REFERENCE_GUIDED|CatalogReferenceStyle|CatalogSheetComposer' app/src/main/java; then
+            echo 'Legacy reference/collage architecture remains in shipping source' >&2
+            exit 1
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+
+      - name: Final static validation
+        working-directory: ${{ runner.temp }}/productshot-src
+        run: python3 scripts/static_validate.py .
+
+      - name: Dependency snapshot
+        working-directory: ${{ runner.temp }}/productshot-src
+        run: gradle --no-daemon :app:dependencies --configuration debugRuntimeClasspath > dependency-report.txt
+
+      - name: Compile and run unit-test task
+        working-directory: ${{ runner.temp }}/productshot-src
+        shell: bash
+        run: |
+          set +e
+          gradle --no-daemon --stacktrace :app:testDebugUnitTest 2>&1 | tee unit-test.log
+          status=${PIPESTATUS[0]}
+          exit "$status"
+
+      - name: Android lint
+        working-directory: ${{ runner.temp }}/productshot-src
+        shell: bash
+        run: |
+          set +e
+          gradle --no-daemon --stacktrace :app:lintDebug 2>&1 | tee lint.log
+          status=${PIPESTATUS[0]}
+          exit "$status"
+
+      - name: Build final installable APK
+        working-directory: ${{ runner.temp }}/productshot-src
+        shell: bash
+        run: |
+          set +e
+          gradle --no-daemon --stacktrace :app:assembleDebug 2>&1 | tee build.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then exit "$status"; fi
+          if grep -nE '(^|[[:space:]])w: ' build.log; then
+            echo 'Kotlin compiler warning detected in final build' >&2
+            exit 1
+          fi
+
+      - name: Verify APK package signature alignment permissions and integrity
+        working-directory: ${{ runner.temp }}/productshot-src
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          AAPT="$ANDROID_HOME/build-tools/35.0.0/aapt"
+          APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          ZIPALIGN="$ANDROID_HOME/build-tools/35.0.0/zipalign"
+          "$ZIPALIGN" -c -v 4 "$APK" | tee zipalign.log
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee apksigner.log
+          "$AAPT" dump badging "$APK" | tee badging.txt
+          "$AAPT" dump permissions "$APK" | tee permissions.txt
+          grep -F "package: name='com.tiagocrispo.furnitureshot' versionCode='100' versionName='1.0.0'" badging.txt
+          grep -F "android.permission.CAMERA" permissions.txt
+          if grep -E 'android.permission.(INTERNET|ACCESS_NETWORK_STATE)' permissions.txt; then
+            echo 'Network permission unexpectedly present in final APK' >&2
+            exit 1
+          fi
+          unzip -t "$APK" | tee apk-integrity.txt
+          cp "$APK" "$RUNNER_TEMP/ProductShot-v1.0.0-FINAL.apk"
+          sha256sum "$RUNNER_TEMP/ProductShot-v1.0.0-FINAL.apk" | tee "$RUNNER_TEMP/ProductShot-v1.0.0-FINAL.sha256"
+
+      - name: Pack clean recovery source
+        working-directory: ${{ runner.temp }}/productshot-src
+        shell: bash
+        run: |
+          set -euo pipefail
+          zip -qr "$RUNNER_TEMP/ProductShot-v1.0.0-FINAL-SOURCE.zip" . \
+            -x '.gradle/*' '.kotlin/*' 'app/build/*' 'build/*'
+          unzip -t "$RUNNER_TEMP/ProductShot-v1.0.0-FINAL-SOURCE.zip" > "$RUNNER_TEMP/source-integrity.txt"
+          sha256sum "$RUNNER_TEMP/ProductShot-v1.0.0-FINAL-SOURCE.zip" > "$RUNNER_TEMP/ProductShot-v1.0.0-FINAL-SOURCE.sha256"
+
+      - name: Write final validation report
+        if: success()
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/ProductShot-v1.0.0-FINAL-VALIDATION.txt" <<'EOF'
+          ProductShot v1.0.0 FINAL
+          versionCode: 100
+          package: com.tiagocrispo.furnitureshot
+          Final gates passed:
+          - verified source reconstruction and patch hashes
+          - legacy reference/model-photo architecture absent
+          - legacy collage composer absent
+          - final static validation
+          - dependency snapshot
+          - testDebugUnitTest task
+          - Android lintDebug
+          - assembleDebug
+          - no Kotlin compiler warnings in final build
+          - APK zipalign verification
+          - APK signature verification
+          - package/version verification
+          - CAMERA permission present
+          - INTERNET/ACCESS_NETWORK_STATE absent
+          - APK ZIP integrity verification
+          - clean source ZIP integrity verification
+          EOF
+
+      - name: Upload final diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProductShot-v1.0.0-FINAL-diagnostics
+          path: |
+            ${{ runner.temp }}/productshot-src/build.log
+            ${{ runner.temp }}/productshot-src/lint.log
+            ${{ runner.temp }}/productshot-src/unit-test.log
+            ${{ runner.temp }}/productshot-src/dependency-report.txt
+            ${{ runner.temp }}/productshot-src/zipalign.log
+            ${{ runner.temp }}/productshot-src/apksigner.log
+            ${{ runner.temp }}/productshot-src/badging.txt
+            ${{ runner.temp }}/productshot-src/permissions.txt
+            ${{ runner.temp }}/productshot-src/apk-integrity.txt
+          if-no-files-found: warn
+
+      - name: Upload final APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProductShot-v1.0.0-FINAL-APK
+          path: |
+            ${{ runner.temp }}/ProductShot-v1.0.0-FINAL.apk
+            ${{ runner.temp }}/ProductShot-v1.0.0-FINAL.sha256
+            ${{ runner.temp }}/ProductShot-v1.0.0-FINAL-VALIDATION.txt
+          if-no-files-found: error
+
+      - name: Upload final source
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProductShot-v1.0.0-FINAL-SOURCE
+          path: |
+            ${{ runner.temp }}/ProductShot-v1.0.0-FINAL-SOURCE.zip
+            ${{ runner.temp }}/ProductShot-v1.0.0-FINAL-SOURCE.sha256
+            ${{ runner.temp }}/source-integrity.txt
+          if-no-files-found: error
