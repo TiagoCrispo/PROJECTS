@@ -12,7 +12,7 @@ I build software around real problems and try to make the engineering visible: c
 | **[UTN Scholar](./projects/utn-scholar.md)** | Cross-device study workspace for university documents and AI-assisted learning | Active development · 0.59.0+59 |
 | **[FurnitureShot AI](./projects/furnitureshot-ai.md)** | Android product-photo processing with conservative fidelity controls | Active beta · v0.7.1-beta22 |
 | **[BandLab](./projects/bandlab.md)** | Local-first Android training companion with Xiaomi Smart Band, GPS and workout analytics | Verified release · 2.6.0 |
-| **[Galaxy A53 Performance](./projects/galaxy-a53-performance/README.md)** | Reversible Android performance, storage and device diagnostics | Release candidate · v1.20.0 beta |
+| **[Galaxy A53 Performance](./projects/galaxy-a53-performance/README.md)** | Reversible Android performance, storage and device diagnostics | Accepted release · v1.20.0 · v1.21 in validation |
 | **[WA Vault](./projects/wa-vault.md)** | Privacy-focused Android event/media preservation with durable local state | Active release · v0.5.31 |
 | **[Meteora Weather](./projects/meteora-weather.md)** | Weather client with caching, validation and explicit degraded states | Active development |
 
