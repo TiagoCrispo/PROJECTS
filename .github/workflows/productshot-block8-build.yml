@@ -1,0 +1,230 @@
+name: ProductShot Block 15 Final Robustness Build
+
+on:
+  push:
+    branches:
+      - productshot-block8-build
+    paths:
+      - "projects/ProductShot/block8/**"
+      - ".github/workflows/productshot-block8-build.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "projects/ProductShot/block8/**"
+      - ".github/workflows/productshot-block8-build.yml"
+  workflow_dispatch:
+
+jobs:
+  build-debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rebuild and verify clean ProductShot source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd projects/ProductShot/block8
+          expected=(
+            clean.b64.00 clean.b64.01 clean.b64.02 clean.b64.03
+            clean.b64.04 clean.b64.05 clean.b64.06
+          )
+          for part in "${expected[@]}"; do
+            test -s "$part" || { echo "Missing/empty clean transport chunk: $part" >&2; exit 1; }
+          done
+          mapfile -t actual < <(find . -maxdepth 1 -type f -name 'clean.b64.*' -printf '%f\n' | sort)
+          if [[ "${actual[*]}" != "${expected[*]}" ]]; then
+            printf 'Unexpected clean transport chunk set.\nExpected: %s\nActual: %s\n' "${expected[*]}" "${actual[*]}" >&2
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/productshot-src"
+          ARCHIVE="$RUNNER_TEMP/ProductShot-v0.9.8-source.zip"
+          cat "${expected[@]}" | base64 -d > "$ARCHIVE"
+          echo "385f4e5f21cbca4194d891452969cfe44f40a667394caf799b688942745cf3ec  $ARCHIVE" | sha256sum -c -
+          unzip -t "$ARCHIVE"
+          unzip -q "$ARCHIVE" -d "$RUNNER_TEMP/productshot-src"
+
+      - name: Apply audited Block 8 Kotlin compile hotfix
+        shell: bash
+        run: python3 projects/ProductShot/block8/compile_hotfix.py "$RUNNER_TEMP/productshot-src"
+
+      - name: Apply Block 9 guided local install
+        working-directory: ${{ runner.temp }}/productshot-src
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch -p1 < "$GITHUB_WORKSPACE/projects/ProductShot/block8/block9-guided-local-install.patch"
+          grep -F 'versionCode = 55' app/build.gradle.kts
+
+      - name: Apply Block 11 local AI quality and hero output
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 projects/ProductShot/block8/block11_apply.py "$RUNNER_TEMP/productshot-src"
+          cd "$RUNNER_TEMP/productshot-src"
+          grep -F 'versionCode = 57' app/build.gradle.kts
+          grep -F 'saveJpeg(originalPath, output)' app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalEnhancementEngine.kt
+          grep -F 'MAX_ATTEMPTS = 3' app/src/main/java/com/tiagocrispo/furnitureshot/processing/DirectMediaPipeBackgroundGenerator.kt
+
+      - name: Apply Block 12 one-photo UX
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 projects/ProductShot/block8/block12_apply.py "$RUNNER_TEMP/productshot-src"
+          cd "$RUNNER_TEMP/productshot-src"
+          grep -F 'versionCode = 58' app/build.gradle.kts
+          ! grep -F 'referencePath' app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt
+
+      - name: Rebuild and apply Block 13 camera visual foundation
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd projects/ProductShot/block8
+          expected=(block13gz.b64.00 block13tail.b64.00 block13tail.b64.01 block13tail.b64.02 block13tail.b64.03)
+          for part in "${expected[@]}"; do
+            test -s "$part" || { echo "Missing/empty Block 13 chunk: $part" >&2; exit 1; }
+          done
+          echo "b8c1c2ef975acb585c6f0c3f5544c21bfa3d61e0b14dd636c23b2579f026f519  block13gz.b64.00" | sha256sum -c -
+          echo "84a81fe9b085cbf70893fedd72cafb4f05f0ceb6ec3755bab820813eae1c7b6d  block13tail.b64.00" | sha256sum -c -
+          echo "2ae9844e057e75842c9eff95b775f6fad584e7f76f47ece5ee1ec4610f6bf324  block13tail.b64.01" | sha256sum -c -
+          echo "7634758fe1e03710d83447bfba8717a08d7d1891ac996241de6a71326d3cff3c  block13tail.b64.02" | sha256sum -c -
+          echo "ca8df1c3f113d6145bcd4d5ee41fa3ccfea303ffc19be2a44e80c4e099f8142c  block13tail.b64.03" | sha256sum -c -
+          python3 -c 'import sys,base64,gzip; b=b"".join(open(p,"rb").read() for p in sys.argv[1:-1]); open(sys.argv[-1],"wb").write(gzip.decompress(base64.b64decode(b, validate=False)))' "${expected[@]}" "$RUNNER_TEMP/block13_apply.py"
+          echo "cca3951f50f0d5ad3c857585d04a2407b2a6bb4bece128ef9c7b52fa68924ebb  $RUNNER_TEMP/block13_apply.py" | sha256sum -c -
+          python3 "$RUNNER_TEMP/block13_apply.py" "$RUNNER_TEMP/productshot-src"
+          cd "$RUNNER_TEMP/productshot-src"
+          grep -F 'versionCode = 59' app/build.gradle.kts
+          grep -F 'ActivityResultContracts.TakePicture()' app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt
+          grep -F 'android.permission.CAMERA' app/src/main/AndroidManifest.xml
+          ! grep -F 'referencePath' app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt
+
+      - name: Apply Block 14 premium compositor
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 projects/ProductShot/block8/block14_apply.py "$RUNNER_TEMP/productshot-src"
+          cd "$RUNNER_TEMP/productshot-src"
+          grep -F 'versionCode = 60' app/build.gradle.kts
+          grep -F 'versionName = "0.9.14-block3-premium-compositor"' app/build.gradle.kts
+          grep -F 'scoreCommercialPlate' app/src/main/java/com/tiagocrispo/furnitureshot/processing/DirectMediaPipeBackgroundGenerator.kt
+          grep -F 'PREMIUM RELIGHT' app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalEnhancementEngine.kt
+          grep -F 'EDGE COLOR ANCHOR' app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalEnhancementEngine.kt
+          grep -F 'castDepth' app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalEnhancementEngine.kt
+          grep -F 'separationPaint' app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalEnhancementEngine.kt
+          ! grep -F 'referencePath' app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt
+
+      - name: Apply Block 15 final robustness
+        shell: bash
+        run: |
+          set -euo pipefail
+          TRANSPORT="$GITHUB_WORKSPACE/projects/ProductShot/block8/block15-final-robustness.patch.gz.b64"
+          echo "613c041e83edae33aab505592e1e54e396724e450ef8b00aee6d850bae9c211e  $TRANSPORT" | sha256sum -c -
+          base64 -d "$TRANSPORT" | gzip -d > "$RUNNER_TEMP/block15-final-robustness.patch"
+          echo "289065e019ae3ae177df5c97527eae75f236ffaf20c67f0652a59a62d9ca1cb9  $RUNNER_TEMP/block15-final-robustness.patch" | sha256sum -c -
+          cd "$RUNNER_TEMP/productshot-src"
+          patch -p1 < "$RUNNER_TEMP/block15-final-robustness.patch"
+          grep -F 'versionCode = 61' app/build.gradle.kts
+          grep -F 'versionName = "0.9.15-final-robustness"' app/build.gradle.kts
+          grep -F 'saveFinalJpeg' app/src/main/java/com/tiagocrispo/furnitureshot/data/ImageStore.kt
+          grep -F 'FINAL RESCUE' app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalEnhancementEngine.kt
+          grep -F 'CONSTRAINED_ITERATIONS = 8' app/src/main/java/com/tiagocrispo/furnitureshot/processing/DirectMediaPipeBackgroundGenerator.kt
+          grep -F 'NonCancellable + Dispatchers.IO' app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt
+          ! grep -F 'referencePath' app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt
+
+      - name: Apply final warning cleanup
+        working-directory: ${{ runner.temp }}/productshot-src
+        shell: bash
+        run: |
+          set -euo pipefail
+          PATCH="$GITHUB_WORKSPACE/projects/ProductShot/block8/block15-warning-cleanup.patch"
+          echo "467c226083311355b7a90c56839fdba84c6aeb049479d963620a4e20c18dd8ec  $PATCH" | sha256sum -c -
+          patch -p1 < "$PATCH"
+          ! grep -F 'it != null && it.width' app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalEnhancementEngine.kt
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+
+      - name: Static validation
+        working-directory: ${{ runner.temp }}/productshot-src
+        run: python3 scripts/static_validate.py .
+
+      - name: Runtime dependency report
+        working-directory: ${{ runner.temp }}/productshot-src
+        run: gradle --no-daemon :app:dependencies --configuration debugRuntimeClasspath > dependency-report.txt
+
+      - name: Android lint
+        working-directory: ${{ runner.temp }}/productshot-src
+        shell: bash
+        run: |
+          set +e
+          gradle --no-daemon --stacktrace :app:lintDebug 2>&1 | tee lint.log
+          status=${PIPESTATUS[0]}
+          exit "$status"
+
+      - name: Build debug APK
+        working-directory: ${{ runner.temp }}/productshot-src
+        shell: bash
+        run: |
+          set +e
+          gradle --no-daemon --stacktrace :app:assembleDebug 2>&1 | tee build.log
+          status=${PIPESTATUS[0]}
+          exit "$status"
+
+      - name: APK checksum
+        if: success()
+        working-directory: ${{ runner.temp }}/productshot-src
+        run: sha256sum app/build/outputs/apk/debug/app-debug.apk | tee apk-debug.sha256
+
+      - name: Pack fixed source
+        if: success()
+        working-directory: ${{ runner.temp }}/productshot-src
+        shell: bash
+        run: |
+          zip -qr "$RUNNER_TEMP/ProductShot-v0.9.15-final-robustness-source.zip" .
+          sha256sum "$RUNNER_TEMP/ProductShot-v0.9.15-final-robustness-source.zip" > "$RUNNER_TEMP/ProductShot-v0.9.15-final-robustness-source.sha256"
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProductShot-v0.9.15-final-robustness-build-diagnostics
+          path: |
+            ${{ runner.temp }}/productshot-src/build.log
+            ${{ runner.temp }}/productshot-src/lint.log
+            ${{ runner.temp }}/productshot-src/dependency-report.txt
+          if-no-files-found: warn
+
+      - name: Upload debug APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProductShot-v0.9.15-final-robustness-debug
+          path: |
+            ${{ runner.temp }}/productshot-src/app/build/outputs/apk/debug/app-debug.apk
+            ${{ runner.temp }}/productshot-src/apk-debug.sha256
+          if-no-files-found: error
+
+      - name: Upload fixed source
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProductShot-v0.9.15-final-robustness-fixed-source
+          path: |
+            ${{ runner.temp }}/ProductShot-v0.9.15-final-robustness-source.zip
+            ${{ runner.temp }}/ProductShot-v0.9.15-final-robustness-source.sha256
+          if-no-files-found: error

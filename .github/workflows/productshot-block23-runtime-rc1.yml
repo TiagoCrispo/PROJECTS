@@ -1,0 +1,203 @@
+name: ProductShot v1.0.1 Block23 Runtime RC1
+
+on:
+  push:
+    branches:
+      - productshot-block8-build
+    paths:
+      - "projects/ProductShot/block8/block23gz.b64.*"
+      - ".github/workflows/productshot-block23-runtime-rc1.yml"
+  workflow_dispatch:
+
+jobs:
+  runtime-rc1-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify Block23 transport and reconstruct patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd projects/ProductShot/block8
+          test "$(wc -c < block23gz.b64.00)" -eq 6000
+          test "$(wc -c < block23gz.b64.01)" -eq 6000
+          test "$(wc -c < block23gz.b64.02)" -eq 2452
+          echo "95cd16a629f6e31300e8edb7454ed29dc553c455d9e2d1b6b16ae399edfbf912  block23gz.b64.00" | sha256sum -c -
+          echo "894ac71efb569cdd936d6e656e8486f3f216ef707235bd422b689130317fac62  block23gz.b64.01" | sha256sum -c -
+          echo "a83253eff8d606c381879d82b7081fefce11f020e0467ff792c553b020bbf671  block23gz.b64.02" | sha256sum -c -
+          cat block23gz.b64.00 block23gz.b64.01 block23gz.b64.02 | base64 -d | gzip -d > "$RUNNER_TEMP/block23.patch"
+          echo "990e358fc48d2bb72110f066fa5c1d49cce6e27c23c63561149b48749c92ee36  $RUNNER_TEMP/block23.patch" | sha256sum -c -
+
+      - name: Download exact Block21 frozen source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/frozen-artifact"
+          gh run download 32653401398 \
+            --repo TiagoCrispo/PROJECTS \
+            --name ProductShot-v1.0.0-BLOCK21-FROZEN-SOURCE \
+            --dir "$RUNNER_TEMP/frozen-artifact"
+          SOURCE_ZIP="$RUNNER_TEMP/frozen-artifact/ProductShot-v1.0.0-BLOCK21-FROZEN-SOURCE.zip"
+          test -s "$SOURCE_ZIP"
+          echo "251b55615d5b95e32734988cbdab6bf9561380747a1351344d62e0b70db1d8cf  $SOURCE_ZIP" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/productshot-src"
+          unzip -q "$SOURCE_ZIP" -d "$RUNNER_TEMP/productshot-src"
+
+      - name: Validate untouched v1.0.0 frozen baseline
+        working-directory: ${{ runner.temp }}/productshot-src
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/static_validate.py .
+          grep -F 'versionCode = 100' app/build.gradle.kts
+          grep -F 'versionName = "1.0.0"' app/build.gradle.kts
+
+      - name: Apply Block23 runtime crash safety
+        working-directory: ${{ runner.temp }}/productshot-src
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply --check "$RUNNER_TEMP/block23.patch"
+          git apply "$RUNNER_TEMP/block23.patch"
+
+      - name: Block23 static runtime audit
+        working-directory: ${{ runner.temp }}/productshot-src
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'versionCode = 101' app/build.gradle.kts
+          grep -F 'versionName = "1.0.1-runtime-rc1"' app/build.gradle.kts
+          test -s app/src/main/java/com/tiagocrispo/furnitureshot/processing/RuntimeDiagnostics.kt
+          test -s app/src/main/java/com/tiagocrispo/furnitureshot/processing/RuntimeSafetyPolicy.kt
+          test -s app/src/test/java/com/tiagocrispo/furnitureshot/processing/RuntimeSafetyPolicyTest.kt
+          grep -F 'getHistoricalProcessExitReasons' app/src/main/java/com/tiagocrispo/furnitureshot/processing/RuntimeDiagnostics.kt
+          grep -F 'setProcessStateSummary' app/src/main/java/com/tiagocrispo/furnitureshot/processing/RuntimeDiagnostics.kt
+          grep -F 'Exportar diagnóstico' app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt
+          grep -F 'mayInvokeGenerativeMotor' app/src/main/java/com/tiagocrispo/furnitureshot/processing/DirectMediaPipeBackgroundGenerator.kt
+          grep -F 'MEDIAPIPE_RELEASE_NATIVE' app/src/main/java/com/tiagocrispo/furnitureshot/processing/DirectMediaPipeBackgroundGenerator.kt
+          grep -F 'generatorPlateLongEdge' app/src/main/java/com/tiagocrispo/furnitureshot/processing/DirectMediaPipeBackgroundGenerator.kt
+          grep -F 'processingLongEdge' app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalEnhancementEngine.kt
+          grep -F 'GENERATION_NO_CHANGE_FALLBACK' app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt
+          ! grep -F 'centerCropAndScale(extracted, input.sourceWidth, input.sourceHeight)' app/src/main/java/com/tiagocrispo/furnitureshot/processing/DirectMediaPipeBackgroundGenerator.kt
+          ! grep -F 'else -> 3840' app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalEnhancementEngine.kt
+          grep -F 'path="diagnostics/"' app/src/main/res/xml/file_paths.xml
+          echo PRODUCTSHOT_BLOCK23_STATIC_OK
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+
+      - name: Clean build tree
+        working-directory: ${{ runner.temp }}/productshot-src
+        run: gradle --no-daemon clean
+
+      - name: Runtime dependency audit
+        working-directory: ${{ runner.temp }}/productshot-src
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon :app:dependencies --configuration releaseRuntimeClasspath | tee dependency-report.txt
+          grep -F 'com.google.ai.edge.litert:litert:1.4.1' dependency-report.txt
+          grep -F 'com.google.mediapipe:tasks-vision-image-generator:0.10.26.1' dependency-report.txt
+          ! grep -F 'play-services-mlkit-subject-segmentation' dependency-report.txt
+          ! grep -E 'com\.google\.mediapipe:tasks-vision:0\.10\.26\.1' dependency-report.txt
+
+      - name: Final JVM tests
+        working-directory: ${{ runner.temp }}/productshot-src
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --stacktrace :app:testDebugUnitTest | tee tests.log
+          python3 - <<'PY'
+          import glob, xml.etree.ElementTree as ET
+          tests = failures = errors = 0
+          files = glob.glob('app/build/test-results/testDebugUnitTest/*.xml')
+          assert files, 'No unit-test XML produced'
+          for f in files:
+              root = ET.parse(f).getroot()
+              tests += int(root.attrib.get('tests', 0))
+              failures += int(root.attrib.get('failures', 0))
+              errors += int(root.attrib.get('errors', 0))
+          assert tests >= 18, (tests, 'expected at least 18 tests')
+          assert failures == 0 and errors == 0, (failures, errors)
+          print(f'PRODUCTSHOT_BLOCK23_UNIT_TESTS_OK tests={tests}')
+          PY
+
+      - name: Android Lint Release
+        working-directory: ${{ runner.temp }}/productshot-src
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon --stacktrace :app:lintRelease 2>&1 | tee lint-release.log
+
+      - name: Assemble Release RC1
+        working-directory: ${{ runner.temp }}/productshot-src
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon --stacktrace :app:assembleRelease 2>&1 | tee build-release.log
+
+      - name: Binary and permission audit
+        working-directory: ${{ runner.temp }}/productshot-src
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/release/app-release-unsigned.apk
+          test -s "$APK"
+          unzip -t "$APK" | tee apk-integrity.txt
+          unzip -l "$APK" | tee apk-contents.txt
+          grep -F 'assets/magic_touch.tflite' apk-contents.txt
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee badging.txt
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$APK" | tee permissions.txt
+          grep -F "package: name='com.tiagocrispo.furnitureshot' versionCode='101' versionName='1.0.1-runtime-rc1'" badging.txt
+          ! grep -F 'android.permission.INTERNET' permissions.txt
+          ! grep -F 'android.permission.ACCESS_NETWORK_STATE' permissions.txt
+          ! grep -F 'application-debuggable' badging.txt
+          sha256sum "$APK" | tee apk-unsigned.sha256
+          echo PRODUCTSHOT_BLOCK23_RUNTIME_RC1_CI_OK
+
+      - name: Upload RC1 unsigned Release
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProductShot-v1.0.1-runtime-rc1-UNSIGNED
+          path: |
+            ${{ runner.temp }}/productshot-src/app/build/outputs/apk/release/app-release-unsigned.apk
+            ${{ runner.temp }}/productshot-src/apk-unsigned.sha256
+          if-no-files-found: error
+
+      - name: Upload Block23 diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProductShot-v1.0.1-runtime-rc1-CI-diagnostics
+          path: |
+            ${{ runner.temp }}/productshot-src/tests.log
+            ${{ runner.temp }}/productshot-src/lint-release.log
+            ${{ runner.temp }}/productshot-src/build-release.log
+            ${{ runner.temp }}/productshot-src/dependency-report.txt
+            ${{ runner.temp }}/productshot-src/badging.txt
+            ${{ runner.temp }}/productshot-src/permissions.txt
+            ${{ runner.temp }}/productshot-src/apk-integrity.txt
+            ${{ runner.temp }}/productshot-src/apk-contents.txt
+          if-no-files-found: warn

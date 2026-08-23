@@ -1,0 +1,19 @@
+--- a/app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalEnhancementEngine.kt
++++ b/app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalEnhancementEngine.kt
+@@ -1448,7 +1448,7 @@
+         val fromProvider = generatedPlatePath
+             ?.takeIf { it.isNotBlank() }
+             ?.let { path -> runCatching { BitmapFactory.decodeFile(path) }.getOrNull() }
+-            ?.takeIf { it != null && it.width > 16 && it.height > 16 }
++            ?.takeIf { it.width > 16 && it.height > 16 }
+         if (fromProvider != null) {
+             if (fromProvider.width == width && fromProvider.height == height) return fromProvider
+             val scaled = Bitmap.createScaledBitmap(fromProvider, width, height, true)
+--- a/scripts/static_validate.py
++++ b/scripts/static_validate.py
+@@ -65,4 +65,5 @@
+ req('acceptedPlate?.takeIf' in generator, 'accepted MediaPipe plate cleanup missing')
+ req('totalRamBytes >= 5_500_000_000L' in diagnostics, 'adaptive local AI hardware threshold missing')
+ req('referencePath' not in ui and 'referenceLauncher' not in ui, 'reference flow returned during final hardening')
++req('it != null && it.width' not in engine, 'redundant nullable background condition returned')
+ print('PRODUCTSHOT_BLOCK15_FINAL_ROBUSTNESS_STATIC_VALIDATION_OK')
