@@ -1,4 +1,4 @@
-name: ProductShot v1.0 Final Release PR Gate
+name: ProductShot v1.0 Block 21 Freeze Audit
 
 on:
   pull_request:
@@ -18,7 +18,7 @@ on:
 jobs:
   final-release-gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 65
     steps:
       - uses: actions/checkout@v4
 
@@ -39,17 +39,17 @@ jobs:
         with:
           gradle-version: "8.13"
 
-      - name: Run final deterministic release gates
+      - name: Run Block 21 deterministic freeze audit
         shell: bash
         run: |
-          test "$(git hash-object projects/ProductShot/block8/run_v1_final_ci_block20.sh)" = "c77b2e861d6bbe1ffc12096625bc0ef7ff8f5317"
-          bash projects/ProductShot/block8/run_v1_final_ci_block20.sh
+          test "$(git hash-object projects/ProductShot/block8/run_v1_final_ci_block21.sh)" = "d7993f27a1774145fc466aa752a970ac0d5f4f12"
+          bash projects/ProductShot/block8/run_v1_final_ci_block21.sh
 
-      - name: Upload final diagnostics
+      - name: Upload Block 21 diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ProductShot-v1.0.0-FINAL-diagnostics
+          name: ProductShot-v1.0.0-BLOCK21-AUDIT-diagnostics
           path: ${{ runner.temp }}/productshot-v1-final/diagnostics
           if-no-files-found: warn
 
@@ -57,22 +57,14 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: ProductShot-v1.0.0-FAILED-GATE-SOURCE
+          name: ProductShot-v1.0.0-BLOCK21-FAILED-SOURCE
           path: ${{ runner.temp }}/productshot-v1-src
           if-no-files-found: error
 
-      - name: Upload final APK
+      - name: Upload Block 21 frozen source
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: ProductShot-v1.0.0-FINAL-APK
-          path: ${{ runner.temp }}/productshot-v1-final/apk
-          if-no-files-found: error
-
-      - name: Upload final recovery source
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ProductShot-v1.0.0-FINAL-SOURCE
+          name: ProductShot-v1.0.0-BLOCK21-FROZEN-SOURCE
           path: ${{ runner.temp }}/productshot-v1-final/source
           if-no-files-found: error
