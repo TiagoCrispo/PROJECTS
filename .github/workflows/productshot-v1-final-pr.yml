@@ -42,7 +42,7 @@ jobs:
       - name: Run final deterministic release gates
         shell: bash
         run: |
-          echo "747e95781dd3abd9bc3823612fba0910a5a67da40ff04aa053bc236435c5dc5a  projects/ProductShot/block8/run_v1_final_ci_block18.sh" | sha256sum -c -
+          test "$(git hash-object projects/ProductShot/block8/run_v1_final_ci_block18.sh)" = "550a963d1177034d8f72f0f4be7e135362cac708"
           bash projects/ProductShot/block8/run_v1_final_ci_block18.sh
 
       - name: Upload final diagnostics
