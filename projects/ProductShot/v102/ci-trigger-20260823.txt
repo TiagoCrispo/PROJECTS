@@ -1,0 +1,1 @@
+Trigger ProductShot v1.0.2 recovery CI after the base-branch workflow became available.
