@@ -1,4 +1,4 @@
-name: ProductShot Block 9 Android Build
+name: ProductShot Block 11 Android Build
 
 on:
   push:
@@ -27,7 +27,6 @@ jobs:
         run: |
           set -euo pipefail
           cd projects/ProductShot/block8
-
           expected=(
             clean.b64.00 clean.b64.01 clean.b64.02 clean.b64.03
             clean.b64.04 clean.b64.05 clean.b64.06
@@ -40,7 +39,6 @@ jobs:
             printf 'Unexpected clean transport chunk set.\nExpected: %s\nActual: %s\n' "${expected[*]}" "${actual[*]}" >&2
             exit 1
           fi
-
           mkdir -p "$RUNNER_TEMP/productshot-src"
           ARCHIVE="$RUNNER_TEMP/ProductShot-v0.9.8-source.zip"
           cat "${expected[@]}" | base64 -d > "$ARCHIVE"
@@ -60,8 +58,20 @@ jobs:
           patch -p1 < "$GITHUB_WORKSPACE/projects/ProductShot/block8/block9-guided-local-install.patch"
           grep -F 'versionCode = 55' app/build.gradle.kts
           grep -F 'versionName = "0.9.9-guided-local-install"' app/build.gradle.kts
-          grep -F 'Ya tengo el ZIP del motor' app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt
-          grep -F '¿Qué archivo necesito?' app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt
+
+      - name: Apply Block 11 local AI quality and hero output
+        working-directory: ${{ runner.temp }}/productshot-src
+        shell: bash
+        run: |
+          set -euo pipefail
+          PATCH="$RUNNER_TEMP/block11-local-ai-quality.patch"
+          cat "$GITHUB_WORKSPACE"/projects/ProductShot/block8/block11.b64.0* | base64 -d > "$PATCH"
+          patch -p2 < "$PATCH"
+          grep -F 'versionCode = 57' app/build.gradle.kts
+          grep -F 'versionName = "0.9.11-local-ai-quality"' app/build.gradle.kts
+          grep -F 'saveJpeg(originalPath, output)' app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalEnhancementEngine.kt
+          grep -F 'MAX_ATTEMPTS = 3' app/src/main/java/com/tiagocrispo/furnitureshot/processing/DirectMediaPipeBackgroundGenerator.kt
+          grep -F 'generator.generate(' app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalAiSelfTest.kt
 
       - uses: actions/setup-java@v4
         with:
@@ -106,14 +116,14 @@ jobs:
         working-directory: ${{ runner.temp }}/productshot-src
         shell: bash
         run: |
-          zip -qr "$RUNNER_TEMP/ProductShot-v0.9.9-guided-local-install-source.zip" .
-          sha256sum "$RUNNER_TEMP/ProductShot-v0.9.9-guided-local-install-source.zip" > "$RUNNER_TEMP/ProductShot-v0.9.9-guided-local-install-source.sha256"
+          zip -qr "$RUNNER_TEMP/ProductShot-v0.9.11-local-ai-quality-source.zip" .
+          sha256sum "$RUNNER_TEMP/ProductShot-v0.9.11-local-ai-quality-source.zip" > "$RUNNER_TEMP/ProductShot-v0.9.11-local-ai-quality-source.sha256"
 
       - name: Upload build diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ProductShot-v0.9.9-build-diagnostics
+          name: ProductShot-v0.9.11-build-diagnostics
           path: |
             ${{ runner.temp }}/productshot-src/build.log
             ${{ runner.temp }}/productshot-src/dependency-report.txt
@@ -123,7 +133,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: ProductShot-v0.9.9-debug
+          name: ProductShot-v0.9.11-debug
           path: |
             ${{ runner.temp }}/productshot-src/app/build/outputs/apk/debug/app-debug.apk
             ${{ runner.temp }}/productshot-src/apk-debug.sha256
@@ -133,8 +143,8 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: ProductShot-v0.9.9-fixed-source
+          name: ProductShot-v0.9.11-fixed-source
           path: |
-            ${{ runner.temp }}/ProductShot-v0.9.9-guided-local-install-source.zip
-            ${{ runner.temp }}/ProductShot-v0.9.9-guided-local-install-source.sha256
+            ${{ runner.temp }}/ProductShot-v0.9.11-local-ai-quality-source.zip
+            ${{ runner.temp }}/ProductShot-v0.9.11-local-ai-quality-source.sha256
           if-no-files-found: error
