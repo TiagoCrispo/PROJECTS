@@ -1,0 +1,173 @@
+diff -ruN '--exclude=test' ps-min/app/src/main/AndroidManifest.xml ps-clean2/app/src/main/AndroidManifest.xml
+--- ps-min/app/src/main/AndroidManifest.xml	2026-08-19 00:00:00.000000000 +0000
++++ ps-clean2/app/src/main/AndroidManifest.xml	2026-08-19 00:00:00.000000000 +0000
+@@ -11,6 +11,8 @@
+ 
+     <application
+         android:allowBackup="false"
++        android:fullBackupContent="@xml/full_backup_rules"
++        android:dataExtractionRules="@xml/data_extraction_rules"
+         android:icon="@mipmap/ic_launcher"
+         android:roundIcon="@mipmap/ic_launcher_round"
+         android:label="@string/app_name"
+@@ -20,8 +22,7 @@
+         android:theme="@android:style/Theme.Material.Light.NoActionBar">
+         <activity
+             android:name=".MainActivity"
+-            android:exported="true"
+-            android:screenOrientation="unspecified">
++            android:exported="true">
+             <intent-filter>
+                 <action android:name="android.intent.action.MAIN" />
+                 <category android:name="android.intent.category.LAUNCHER" />
+diff -ruN '--exclude=test' ps-min/app/src/main/java/com/productshot/app/MainActivity.java ps-clean2/app/src/main/java/com/productshot/app/MainActivity.java
+--- ps-min/app/src/main/java/com/productshot/app/MainActivity.java	2026-08-19 00:00:00.000000000 +0000
++++ ps-clean2/app/src/main/java/com/productshot/app/MainActivity.java	2026-08-19 00:00:00.000000000 +0000
+@@ -328,7 +328,10 @@
+             // Keep the durable idempotency key. A paid create might have reached the server
+             // just before process death even if the selected URI can no longer be restored.
+             // Stop automatic retry until the user selects a readable image again.
+-            prefs.edit().remove(PREF_CREATE_IN_PROGRESS).commit();
++            if (!prefs.edit().remove(PREF_CREATE_IN_PROGRESS).commit()) {
++                // Deliberately fail closed: leave the durable pending key untouched if storage
++                // cannot confirm the state transition. No paid create is retried without it.
++            }
+         }
+         activeJobId = prefs.getString(PREF_ACTIVE_JOB, null);
+         shownProgress = prefs.getInt(PREF_LAST_PROGRESS, 0);
+@@ -816,16 +819,21 @@
+                 if (!dir.isDirectory() && !dir.mkdirs()) throw new IOException("Cannot create share directory");
+                 File out = new File(dir, "productshot-" + jobId.substring(0, Math.min(8, jobId.length())) + ".jpg");
+                 api.downloadResult(jobId, out);
+-                resultFile = out;
+-                activeJobId = null;
+-                shownProgress = 100;
+-                prefs.edit()
++                boolean durableResultState = prefs.edit()
+                     .remove(PREF_ACTIVE_JOB)
+                     .remove(PREF_LAST_PROGRESS)
+                     .remove(PREF_PENDING_CREATE_KEY)
+                     .remove(PREF_CREATE_IN_PROGRESS)
+                     .putString(PREF_RESULT_PATH, out.getAbsolutePath())
+                     .commit();
++                if (!durableResultState) {
++                    // Keep the active job in memory and retry the non-billable result download later.
++                    // This avoids presenting a success state that would be lost after process death.
++                    throw new IOException("Cannot persist completed result state");
++                }
++                resultFile = out;
++                activeJobId = null;
++                shownProgress = 100;
+                 main.post(() -> {
+                     if (destroyed) return;
+                     setProgressValue(100);
+diff -ruN '--exclude=test' ps-min/app/src/main/res/mipmap-anydpi/ic_launcher.xml ps-clean2/app/src/main/res/mipmap-anydpi/ic_launcher.xml
+--- ps-min/app/src/main/res/mipmap-anydpi/ic_launcher.xml	1970-01-01 00:00:00.000000000 +0000
++++ ps-clean2/app/src/main/res/mipmap-anydpi/ic_launcher.xml	2026-08-19 00:00:00.000000000 +0000
+@@ -0,0 +1,6 @@
++<?xml version="1.0" encoding="utf-8"?>
++<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
++    <background android:drawable="@color/productshot_icon_background" />
++    <foreground android:drawable="@drawable/ic_launcher_foreground" />
++    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
++</adaptive-icon>
+diff -ruN '--exclude=test' ps-min/app/src/main/res/mipmap-anydpi/ic_launcher_round.xml ps-clean2/app/src/main/res/mipmap-anydpi/ic_launcher_round.xml
+--- ps-min/app/src/main/res/mipmap-anydpi/ic_launcher_round.xml	1970-01-01 00:00:00.000000000 +0000
++++ ps-clean2/app/src/main/res/mipmap-anydpi/ic_launcher_round.xml	2026-08-19 00:00:00.000000000 +0000
+@@ -0,0 +1,6 @@
++<?xml version="1.0" encoding="utf-8"?>
++<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
++    <background android:drawable="@color/productshot_icon_background" />
++    <foreground android:drawable="@drawable/ic_launcher_foreground" />
++    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
++</adaptive-icon>
+diff -ruN '--exclude=test' ps-min/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml ps-clean2/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+--- ps-min/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml	2026-08-19 00:00:00.000000000 +0000
++++ ps-clean2/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml	1970-01-01 00:00:00.000000000 +0000
+@@ -1,5 +0,0 @@
+-<?xml version="1.0" encoding="utf-8"?>
+-<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+-    <background android:drawable="@color/productshot_icon_background" />
+-    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+-</adaptive-icon>
+diff -ruN '--exclude=test' ps-min/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml ps-clean2/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
+--- ps-min/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml	2026-08-19 00:00:00.000000000 +0000
++++ ps-clean2/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml	1970-01-01 00:00:00.000000000 +0000
+@@ -1,5 +0,0 @@
+-<?xml version="1.0" encoding="utf-8"?>
+-<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+-    <background android:drawable="@color/productshot_icon_background" />
+-    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+-</adaptive-icon>
+diff -ruN '--exclude=test' ps-min/app/src/main/res/values/strings.xml ps-clean2/app/src/main/res/values/strings.xml
+--- ps-min/app/src/main/res/values/strings.xml	2026-08-19 00:00:00.000000000 +0000
++++ ps-clean2/app/src/main/res/values/strings.xml	2026-08-19 00:00:00.000000000 +0000
+@@ -16,7 +16,7 @@
+     <string name="image_too_large">Esta foto es demasiado grande. Prueba con otra.</string>
+     <string name="source_insufficient">No se ve suficiente del producto. Prueba con otra foto.</string>
+     <string name="fidelity_failed">No pudimos conservar el producto con suficiente fidelidad. Prueba con otra foto.</string>
+-    <string name="rate_limited">Hay muchas solicitudes. Inténtalo en un momento.</string>
++    <string name="rate_limited">Hay muchas solicitudes. Prueba de nuevo en unos segundos.</string>
+     <string name="service_busy">Hay mucha demanda. Inténtalo de nuevo en unos minutos.</string>
+     <string name="connection_retrying">Conexión interrumpida. Reintentando…</string>
+     <string name="saved_in_photos">Guardada en Fotos</string>
+@@ -28,7 +28,7 @@
+     <string name="preview_result_tap">Resultado final. Toca dos veces para verlo a pantalla completa</string>
+     <string name="fullscreen_result">Resultado final a pantalla completa. Toca para cerrar</string>
+     <string name="processing_progress">Progreso de creación</string>
+-    <string name="progress_accessibility">Progreso: %1$d por ciento</string>
++    <string name="progress_accessibility">Progreso: %1$d%%</string>
+     <string name="percent_value">%1$d %%</string>
+     <string name="download_result">Descargar resultado a Fotos</string>
+     <string name="share_result">Compartir resultado</string>
+diff -ruN '--exclude=test' ps-min/app/src/main/res/xml/data_extraction_rules.xml ps-clean2/app/src/main/res/xml/data_extraction_rules.xml
+--- ps-min/app/src/main/res/xml/data_extraction_rules.xml	1970-01-01 00:00:00.000000000 +0000
++++ ps-clean2/app/src/main/res/xml/data_extraction_rules.xml	2026-08-19 00:00:00.000000000 +0000
+@@ -0,0 +1,25 @@
++<?xml version="1.0" encoding="utf-8"?>
++<data-extraction-rules>
++    <cloud-backup>
++        <exclude domain="root" path="." />
++        <exclude domain="file" path="." />
++        <exclude domain="database" path="." />
++        <exclude domain="sharedpref" path="." />
++        <exclude domain="external" path="." />
++        <exclude domain="device_root" path="." />
++        <exclude domain="device_file" path="." />
++        <exclude domain="device_database" path="." />
++        <exclude domain="device_sharedpref" path="." />
++    </cloud-backup>
++    <device-transfer>
++        <exclude domain="root" path="." />
++        <exclude domain="file" path="." />
++        <exclude domain="database" path="." />
++        <exclude domain="sharedpref" path="." />
++        <exclude domain="external" path="." />
++        <exclude domain="device_root" path="." />
++        <exclude domain="device_file" path="." />
++        <exclude domain="device_database" path="." />
++        <exclude domain="device_sharedpref" path="." />
++    </device-transfer>
++</data-extraction-rules>
+diff -ruN '--exclude=test' ps-min/app/src/main/res/xml/full_backup_rules.xml ps-clean2/app/src/main/res/xml/full_backup_rules.xml
+--- ps-min/app/src/main/res/xml/full_backup_rules.xml	1970-01-01 00:00:00.000000000 +0000
++++ ps-clean2/app/src/main/res/xml/full_backup_rules.xml	2026-08-19 00:00:00.000000000 +0000
+@@ -0,0 +1,8 @@
++<?xml version="1.0" encoding="utf-8"?>
++<full-backup-content>
++    <exclude domain="root" path="." />
++    <exclude domain="file" path="." />
++    <exclude domain="database" path="." />
++    <exclude domain="sharedpref" path="." />
++    <exclude domain="external" path="." />
++</full-backup-content>
+diff -ruN '--exclude=test' ps-min/gradle.properties ps-clean2/gradle.properties
+--- ps-min/gradle.properties	2026-08-19 00:00:00.000000000 +0000
++++ ps-clean2/gradle.properties	2026-08-19 00:00:00.000000000 +0000
+@@ -2,6 +2,5 @@
+ org.gradle.parallel=true
+ org.gradle.caching=true
+ org.gradle.configuration-cache=true
+-android.useAndroidX=false
+ android.nonTransitiveRClass=true
+ android.nonFinalResIds=true
