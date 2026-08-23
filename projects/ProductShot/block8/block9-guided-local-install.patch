@@ -1,0 +1,217 @@
+diff -ruN productshot_baseline/app/build.gradle.kts productshot_v098_src/app/build.gradle.kts
+--- productshot_baseline/app/build.gradle.kts	2026-08-22 10:00:00.000000000 +0000
++++ productshot_v098_src/app/build.gradle.kts	2026-08-22 14:55:32.615025078 +0000
+@@ -14,8 +14,8 @@
+         applicationId = "com.tiagocrispo.furnitureshot"
+         minSdk = 26
+         targetSdk = 36
+-        versionCode = 54
+-        versionName = "0.9.8-block8-build-selftest"
++        versionCode = 55
++        versionName = "0.9.9-guided-local-install"
+ 
+         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+     }
+diff -ruN productshot_baseline/app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt productshot_v098_src/app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt
+--- productshot_baseline/app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt	2026-08-22 10:00:00.000000000 +0000
++++ productshot_v098_src/app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt	2026-08-22 14:52:55.587130137 +0000
+@@ -101,6 +101,7 @@
+     var localAiRevision by remember { mutableStateOf(0) }
+     var installingModel by remember { mutableStateOf(false) }
+     var testingLocalAi by remember { mutableStateOf(false) }
++    var showModelHelp by rememberSaveable { mutableStateOf(false) }
+ 
+     fun granted(permission: String): Boolean =
+         ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+@@ -312,7 +313,7 @@
+                 )
+ 
+                 Card {
+-                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
++                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                         Text("Motor local", fontWeight = FontWeight.SemiBold)
+                         Text(
+                             text = localAiDiagnostics.publicSummary(),
+@@ -320,6 +321,15 @@
+                             color = Color(0xFF6C625C),
+                         )
+                         if (!localAiDiagnostics.modelStatus.usable) {
++                            Text(
++                                text = if (localAiDiagnostics.modelStatus.installed) {
++                                    "La instalación actual no quedó usable. Puedes volver a seleccionar el ZIP correcto del motor local."
++                                } else {
++                                    "Todavía no hay un motor local instalado. Necesitas seleccionar el ZIP del modelo compatible para desbloquear la autoprueba y la generación local."
++                                },
++                                style = MaterialTheme.typography.bodySmall,
++                                color = Color(0xFF6C625C),
++                            )
+                             Button(
+                                 enabled = !installingModel,
+                                 onClick = { modelZipLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) },
+@@ -330,7 +340,25 @@
+                                     Spacer(Modifier.width(8.dp))
+                                     Text("Instalando…")
+                                 } else {
+-                                    Text("Instalar motor local")
++                                    Text("Ya tengo el ZIP del motor")
++                                }
++                            }
++                            OutlinedButton(
++                                enabled = !installingModel,
++                                onClick = { showModelHelp = true },
++                                modifier = Modifier.fillMaxWidth(),
++                            ) {
++                                Text("¿Qué archivo necesito?")
++                            }
++                            if (localAiDiagnostics.modelStatus.installed) {
++                                TextButton(
++                                    onClick = {
++                                        val removed = LocalModelManager.uninstall(context)
++                                        localAiRevision++
++                                        message = if (removed) "Se eliminó la instalación anterior del motor local." else "No se pudo eliminar la instalación anterior."
++                                    },
++                                ) {
++                                    Text("Eliminar instalación anterior")
+                                 }
+                             }
+                         } else {
+@@ -356,6 +384,9 @@
+                                     Text("Probar motor local")
+                                 }
+                             }
++                            TextButton(onClick = { showModelHelp = true }) {
++                                Text("Ver guía del motor local")
++                            }
+                         }
+                     }
+                 }
+@@ -465,6 +496,17 @@
+                     onShare = { share(path) },
+                 )
+             }
++
++            if (showModelHelp) {
++                ModelInstallHelpDialog(
++                    installed = localAiDiagnostics.modelStatus.installed,
++                    onClose = { showModelHelp = false },
++                    onSelectZip = {
++                        showModelHelp = false
++                        modelZipLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
++                    },
++                )
++            }
+         }
+     }
+ }
+@@ -682,3 +724,66 @@
+     }
+ }
+ 
++
++
++@Composable
++private fun ModelInstallHelpDialog(
++    installed: Boolean,
++    onClose: () -> Unit,
++    onSelectZip: () -> Unit,
++) {
++    Dialog(onDismissRequest = onClose) {
++        Surface(shape = RoundedCornerShape(24.dp), color = Color.White) {
++            Column(
++                modifier = Modifier.padding(20.dp),
++                verticalArrangement = Arrangement.spacedBy(12.dp),
++            ) {
++                Text(
++                    text = "Motor local: guía rápida",
++                    style = MaterialTheme.typography.titleMedium,
++                    fontWeight = FontWeight.Bold,
++                    color = Color(0xFF3B2A20),
++                )
++                Text(
++                    text = "Qué necesitas seleccionar:",
++                    fontWeight = FontWeight.SemiBold,
++                    color = Color(0xFF3B2A20),
++                )
++                Text(
++                    text = "• Un archivo ZIP del modelo convertido para MediaPipe Image Generator.\n" +
++                        "• El ZIP puede traer una carpeta 'bins/' o una carpeta raíz que la contenga.\n" +
++                        "• No sirve cualquier ZIP de fotos, descargas o documentos.",
++                    style = MaterialTheme.typography.bodySmall,
++                    color = Color(0xFF6C625C),
++                )
++                Text(
++                    text = "Qué hará ProductShot después:",
++                    fontWeight = FontWeight.SemiBold,
++                    color = Color(0xFF3B2A20),
++                )
++                Text(
++                    text = "1. Instala el ZIP en almacenamiento privado.\n" +
++                        "2. Valida que el modelo sea plausible y completo.\n" +
++                        "3. Habilita el botón 'Probar motor local'.",
++                    style = MaterialTheme.typography.bodySmall,
++                    color = Color(0xFF6C625C),
++                )
++                if (installed) {
++                    Text(
++                        text = "Ya había una instalación previa en el teléfono. Si era incorrecta o quedó dañada, puedes eliminarla desde la tarjeta 'Motor local' y volver a instalar el ZIP correcto.",
++                        style = MaterialTheme.typography.bodySmall,
++                        color = Color(0xFF6C625C),
++                    )
++                }
++                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
++                    OutlinedButton(onClick = onClose, modifier = Modifier.weight(1f)) {
++                        Text("Cerrar")
++                    }
++                    Button(onClick = onSelectZip, modifier = Modifier.weight(1f)) {
++                        Text("Elegir ZIP")
++                    }
++                }
++            }
++        }
++    }
++}
+diff -ruN productshot_baseline/docs/BLOCK9_GUIDED_LOCAL_INSTALL.md productshot_v098_src/docs/BLOCK9_GUIDED_LOCAL_INSTALL.md
+--- productshot_baseline/docs/BLOCK9_GUIDED_LOCAL_INSTALL.md	1970-01-01 00:00:00.000000000 +0000
++++ productshot_v098_src/docs/BLOCK9_GUIDED_LOCAL_INSTALL.md	2026-08-22 14:55:32.615252026 +0000
+@@ -0,0 +1,12 @@
++# ProductShot Block 9 — guided local model install
++
++Version: 0.9.9-guided-local-install (versionCode 55).
++
++Changes:
++- explicit local engine state;
++- primary action only when the user already has the compatible model ZIP;
++- in-app help explaining accepted package structure;
++- recovery action to remove incomplete/invalid previous installs;
++- the self-test remains gated until the installed model passes validation.
++
++The generative model is still external to the APK. ProductShot does not pretend that arbitrary ZIPs are valid model packages.
+diff -ruN productshot_baseline/scripts/static_validate.py productshot_v098_src/scripts/static_validate.py
+--- productshot_baseline/scripts/static_validate.py	2026-08-22 10:00:00.000000000 +0000
++++ productshot_v098_src/scripts/static_validate.py	2026-08-22 14:55:32.615164355 +0000
+@@ -15,8 +15,8 @@
+ selftest=text('app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalAiSelfTest.kt')
+ ui=text('app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt')
+ 
+-req('versionCode = 54' in build, 'versionCode 54 missing')
+-req('versionName = "0.9.8-block8-build-selftest"' in build, 'versionName mismatch')
++req('versionCode = 55' in build, 'versionCode 55 missing')
++req('versionName = "0.9.9-guided-local-install"' in build, 'versionName mismatch')
+ req('compileSdk = 36' in build and 'targetSdk = 36' in build, 'SDK 36 contract missing')
+ req('android.permission.INTERNET' not in manifest, 'INTERNET permission must remain absent')
+ req('android.permission.ACCESS_NETWORK_STATE' not in manifest, 'ACCESS_NETWORK_STATE must remain absent')
+@@ -25,10 +25,13 @@
+ req('archiveSha256' in manager, 'archive SHA metadata missing')
+ req('LocalAiSelfTest' in selftest and 'ImageGenerator.createFromOptions' in selftest, 'runtime/model initialization self-test missing')
+ req('Probar motor local' in ui, 'one-tap self-test UI missing')
++req('Ya tengo el ZIP del motor' in ui, 'guided model install primary action missing')
++req('¿Qué archivo necesito?' in ui, 'guided model install help missing')
++req('Eliminar instalación anterior' in ui, 'broken model recovery action missing')
+ req((root/'docs/MODEL_PACKAGE_SPEC.md').is_file(), 'model package specification missing')
+ for rel in [
+     'app/src/main/java/com/tiagocrispo/furnitureshot/processing/DirectMediaPipeBackgroundGenerator.kt',
+     'app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalAiDiagnostics.kt',
+     'app/src/main/java/com/tiagocrispo/furnitureshot/processing/LocalModelManager.kt',
+ ]: req((root/rel).is_file(), f'missing {rel}')
+-print('PRODUCTSHOT_BLOCK8_STATIC_VALIDATION_OK')
++print('PRODUCTSHOT_BLOCK9_STATIC_VALIDATION_OK')

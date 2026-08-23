@@ -1,0 +1,11 @@
+diff --git a/app/src/main/java/com/tiagocrispo/furnitureshot/processing/RuntimeDiagnostics.kt b/app/src/main/java/com/tiagocrispo/furnitureshot/processing/RuntimeDiagnostics.kt
+--- a/app/src/main/java/com/tiagocrispo/furnitureshot/processing/RuntimeDiagnostics.kt
++++ b/app/src/main/java/com/tiagocrispo/furnitureshot/processing/RuntimeDiagnostics.kt
+@@ -192,6 +192,7 @@
+         }
+     }
+ 
++    @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
+     private fun appendExitInfo(context: Context, info: ApplicationExitInfo) {
+         val detail = buildString {
+             append("reason=").append(reasonName(info.reason))

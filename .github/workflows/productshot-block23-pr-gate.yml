@@ -1,0 +1,143 @@
+name: ProductShot Block23 RC1 PR Gate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "projects/ProductShot/block8/block23gz.b64.*"
+      - ".github/workflows/productshot-block23-pr-gate.yml"
+
+jobs:
+  rc1-pr-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct exact Block23 patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd projects/ProductShot/block8
+          echo "95cd16a629f6e31300e8edb7454ed29dc553c455d9e2d1b6b16ae399edfbf912  block23gz.b64.00" | sha256sum -c -
+          echo "894ac71efb569cdd936d6e656e8486f3f216ef707235bd422b689130317fac62  block23gz.b64.01" | sha256sum -c -
+          echo "a83253eff8d606c381879d82b7081fefce11f020e0467ff792c553b020bbf671  block23gz.b64.02" | sha256sum -c -
+          cat block23gz.b64.00 block23gz.b64.01 block23gz.b64.02 | base64 -d | gzip -d > "$RUNNER_TEMP/block23.patch"
+          echo "990e358fc48d2bb72110f066fa5c1d49cce6e27c23c63561149b48749c92ee36  $RUNNER_TEMP/block23.patch" | sha256sum -c -
+
+      - name: Restore frozen v1.0.0 baseline and apply RC1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/frozen" "$RUNNER_TEMP/src"
+          gh run download 32653401398 --repo TiagoCrispo/PROJECTS --name ProductShot-v1.0.0-BLOCK21-FROZEN-SOURCE --dir "$RUNNER_TEMP/frozen"
+          ZIP="$RUNNER_TEMP/frozen/ProductShot-v1.0.0-BLOCK21-FROZEN-SOURCE.zip"
+          echo "251b55615d5b95e32734988cbdab6bf9561380747a1351344d62e0b70db1d8cf  $ZIP" | sha256sum -c -
+          unzip -q "$ZIP" -d "$RUNNER_TEMP/src"
+          cd "$RUNNER_TEMP/src"
+          python3 scripts/static_validate.py .
+          git apply --check "$RUNNER_TEMP/block23.patch"
+          git apply "$RUNNER_TEMP/block23.patch"
+          grep -F 'versionCode = 101' app/build.gradle.kts
+          grep -F 'versionName = "1.0.1-runtime-rc1"' app/build.gradle.kts
+          grep -F 'getHistoricalProcessExitReasons' app/src/main/java/com/tiagocrispo/furnitureshot/processing/RuntimeDiagnostics.kt
+          grep -F 'Exportar diagnóstico' app/src/main/java/com/tiagocrispo/furnitureshot/ui/FurnitureShotApp.kt
+          grep -F 'mayInvokeGenerativeMotor' app/src/main/java/com/tiagocrispo/furnitureshot/processing/DirectMediaPipeBackgroundGenerator.kt
+          grep -F 'MEDIAPIPE_RELEASE_NATIVE' app/src/main/java/com/tiagocrispo/furnitureshot/processing/DirectMediaPipeBackgroundGenerator.kt
+          ! grep -F 'centerCropAndScale(extracted, input.sourceWidth, input.sourceHeight)' app/src/main/java/com/tiagocrispo/furnitureshot/processing/DirectMediaPipeBackgroundGenerator.kt
+          echo PRODUCTSHOT_BLOCK23_STATIC_OK
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+
+      - name: Dependencies
+        working-directory: ${{ runner.temp }}/src
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon clean
+          gradle --no-daemon :app:dependencies --configuration releaseRuntimeClasspath | tee dependency-report.txt
+          grep -F 'com.google.ai.edge.litert:litert:1.4.1' dependency-report.txt
+          grep -F 'com.google.mediapipe:tasks-vision-image-generator:0.10.26.1' dependency-report.txt
+          ! grep -F 'play-services-mlkit-subject-segmentation' dependency-report.txt
+
+      - name: Tests 18+
+        working-directory: ${{ runner.temp }}/src
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --stacktrace :app:testDebugUnitTest | tee tests.log
+          python3 - <<'PY'
+          import glob, xml.etree.ElementTree as ET
+          n=f=e=0
+          fs=glob.glob('app/build/test-results/testDebugUnitTest/*.xml')
+          assert fs
+          for p in fs:
+            r=ET.parse(p).getroot(); n+=int(r.attrib.get('tests',0)); f+=int(r.attrib.get('failures',0)); e+=int(r.attrib.get('errors',0))
+          assert n>=18 and f==0 and e==0,(n,f,e)
+          print('PRODUCTSHOT_BLOCK23_TESTS_OK',n)
+          PY
+
+      - name: Lint and Release build
+        working-directory: ${{ runner.temp }}/src
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon --stacktrace :app:lintRelease 2>&1 | tee lint-release.log
+          gradle --no-daemon --stacktrace :app:assembleRelease 2>&1 | tee build-release.log
+
+      - name: APK audit
+        working-directory: ${{ runner.temp }}/src
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/release/app-release-unsigned.apk
+          unzip -t "$APK" | tee apk-integrity.txt
+          unzip -l "$APK" | tee apk-contents.txt
+          grep -F 'assets/magic_touch.tflite' apk-contents.txt
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee badging.txt
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$APK" | tee permissions.txt
+          grep -F "package: name='com.tiagocrispo.furnitureshot' versionCode='101' versionName='1.0.1-runtime-rc1'" badging.txt
+          ! grep -F 'android.permission.INTERNET' permissions.txt
+          ! grep -F 'android.permission.ACCESS_NETWORK_STATE' permissions.txt
+          sha256sum "$APK" | tee apk-unsigned.sha256
+          echo PRODUCTSHOT_BLOCK23_RC1_PR_GATE_OK
+
+      - name: Upload RC1
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProductShot-v1.0.1-runtime-rc1-PR-UNSIGNED
+          path: |
+            ${{ runner.temp }}/src/app/build/outputs/apk/release/app-release-unsigned.apk
+            ${{ runner.temp }}/src/apk-unsigned.sha256
+          if-no-files-found: error
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProductShot-v1.0.1-runtime-rc1-PR-diagnostics
+          path: |
+            ${{ runner.temp }}/src/tests.log
+            ${{ runner.temp }}/src/lint-release.log
+            ${{ runner.temp }}/src/build-release.log
+            ${{ runner.temp }}/src/dependency-report.txt
+            ${{ runner.temp }}/src/badging.txt
+            ${{ runner.temp }}/src/permissions.txt
+          if-no-files-found: warn
