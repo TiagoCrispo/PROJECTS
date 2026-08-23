@@ -39,23 +39,6 @@ jobs:
         with:
           gradle-version: "8.13"
 
-      - name: Prepare deterministic Block 16 applier
-        shell: bash
-        run: |
-          set -euo pipefail
-          APPLIER="projects/ProductShot/block8/block16_apply.py"
-          echo "3db360d769787d34690ef4461206a4431a482c2cd5e556aa5c04fdb3d083cee3  $APPLIER" | sha256sum -c -
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('projects/ProductShot/block8/run_v1_final_ci.sh')
-          s = p.read_text(encoding='utf-8')
-          old = '''TRANSPORT16="$ROOT/projects/ProductShot/block8/block16-v1-final.patch.gz.b64"\necho "316fba4d5afd10d465e0766c50738d074a6fd15409aee43f02e95a4d1e673c48  $TRANSPORT16" | sha256sum -c -\nbase64 -d "$TRANSPORT16" | gzip -d > "$RUNNER_TEMP/block16.patch"\necho "794aa0a5d40b7759b0a8e9799aca9ec147ed12d6c5c61ad29ec400170064b712  $RUNNER_TEMP/block16.patch" | sha256sum -c -\npatch -p1 < "$RUNNER_TEMP/block16.patch"'''
-          new = 'python3 "$ROOT/projects/ProductShot/block8/block16_apply.py" "$SRC"'
-          if s.count(old) != 1:
-              raise SystemExit('Final runner Block 16 transport section was not exactly as expected')
-          p.write_text(s.replace(old, new), encoding='utf-8')
-          PY
-
       - name: Run final deterministic release gates
         shell: bash
         run: bash projects/ProductShot/block8/run_v1_final_ci.sh
@@ -67,6 +50,14 @@ jobs:
           name: ProductShot-v1.0.0-FINAL-diagnostics
           path: ${{ runner.temp }}/productshot-v1-final/diagnostics
           if-no-files-found: warn
+
+      - name: Upload reconstructed source for failed-gate diagnosis
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProductShot-v1.0.0-FAILED-GATE-SOURCE
+          path: ${{ runner.temp }}/productshot-v1-src
+          if-no-files-found: error
 
       - name: Upload final APK
         if: success()
