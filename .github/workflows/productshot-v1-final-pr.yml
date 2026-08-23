@@ -41,7 +41,9 @@ jobs:
 
       - name: Run final deterministic release gates
         shell: bash
-        run: bash projects/ProductShot/block8/run_v1_final_ci.sh
+        run: |
+          echo "ad3cb553ff2c1de600663c5e4491512fd151b691577d6f3882be75220e1ca705  projects/ProductShot/block8/run_v1_final_ci_block17b.sh" | sha256sum -c -
+          bash projects/ProductShot/block8/run_v1_final_ci_block17b.sh
 
       - name: Upload final diagnostics
         if: always()
