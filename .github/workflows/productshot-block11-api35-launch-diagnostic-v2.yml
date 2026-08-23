@@ -1,0 +1,113 @@
+name: ProductShot Block 11 API 35 launch diagnostic v2
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/productshot-block11-api35-launch-diagnostic-v2.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  diagnose-api35-launch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download exact verified Block 11 RC artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/apk"
+          gh run download 32274128657 -R "$GITHUB_REPOSITORY" -n productshot-block11-runtime-apk -D "$RUNNER_TEMP/apk"
+          test -s "$RUNNER_TEMP/apk/ProductShot-Block11-runtime.apk"
+          cat "$RUNNER_TEMP/apk/ProductShot-Block11-runtime.sha256"
+
+      - name: Provision and boot API 35
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          ADB="$SDK_ROOT/platform-tools/adb"
+          AVD_HOME="$RUNNER_TEMP/android-avd"
+          mkdir -p "$AVD_HOME"
+          export ANDROID_AVD_HOME="$AVD_HOME"
+          echo "ANDROID_AVD_HOME=$AVD_HOME" >> "$GITHUB_ENV"
+          "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --install "platform-tools" "emulator" "system-images;android-35;google_apis;x86_64"
+          test -x "$ADB"
+          echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+          echo no | "$SDK_ROOT/cmdline-tools/latest/bin/avdmanager" create avd --force --name productshot-api35-diag2 --package "system-images;android-35;google_apis;x86_64" >/dev/null
+          "$SDK_ROOT/emulator/emulator" -list-avds
+          if [[ -e /dev/kvm ]]; then sudo chmod 666 /dev/kvm; ACCEL="-accel on"; else ACCEL="-accel off"; fi
+          mkdir -p "$RUNNER_TEMP/api35-launch-diag2"
+          "$SDK_ROOT/emulator/emulator" @productshot-api35-diag2 -no-window -noaudio -no-boot-anim -no-snapshot -no-metrics -gpu swiftshader_indirect -camera-back none -camera-front none $ACCEL > "$RUNNER_TEMP/api35-launch-diag2/emulator.log" 2>&1 &
+          PID=$!
+          sleep 8
+          kill -0 "$PID"
+          "$ADB" start-server
+          timeout 180 "$ADB" wait-for-device
+          export ADB
+          timeout 300 bash -c 'until [[ "$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" == "1" ]]; do sleep 2; done'
+          "$ADB" shell input keyevent 82 || true
+          "$ADB" shell cmd window dismiss-keyguard || true
+          "$ADB" shell input keyevent 3 || true
+          sleep 5
+
+      - name: Capture explicit-launch and launcher-launch evidence
+        shell: bash
+        run: |
+          set +e
+          OUT="$RUNNER_TEMP/api35-launch-diag2"
+          APK="$RUNNER_TEMP/apk/ProductShot-Block11-runtime.apk"
+          PKG="com.productshot.app.rc"
+          ACT="com.productshot.app.MainActivity"
+          CMP="$PKG/$ACT"
+          adb install --no-streaming -r "$APK" > "$OUT/install.txt" 2>&1
+          sleep 5
+          adb shell dumpsys package "$PKG" > "$OUT/package-before.txt" 2>&1
+          adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER "$PKG" > "$OUT/resolve-launcher.txt" 2>&1
+
+          adb logcat -c
+          adb logcat -b events -c
+          adb shell am start -W --user 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n "$CMP" > "$OUT/am-main.txt" 2>&1
+          sleep 5
+          adb shell pidof "$PKG" > "$OUT/pid-after-am.txt" 2>&1
+          adb shell dumpsys activity activities > "$OUT/activity-after-am.txt" 2>&1
+          adb shell dumpsys window windows > "$OUT/windows-after-am.txt" 2>&1
+          adb logcat -d -v threadtime > "$OUT/logcat-after-am.txt" 2>&1
+          adb logcat -b events -d -v threadtime > "$OUT/events-after-am.txt" 2>&1
+          adb shell dumpsys activity exit-info "$PKG" > "$OUT/exit-info-after-am.txt" 2>&1
+
+          adb shell am force-stop "$PKG"
+          adb logcat -c
+          adb logcat -b events -c
+          adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 > "$OUT/monkey.txt" 2>&1
+          sleep 5
+          adb shell pidof "$PKG" > "$OUT/pid-after-monkey.txt" 2>&1
+          adb shell dumpsys activity activities > "$OUT/activity-after-monkey.txt" 2>&1
+          adb shell dumpsys window windows > "$OUT/windows-after-monkey.txt" 2>&1
+          adb logcat -d -v threadtime > "$OUT/logcat-after-monkey.txt" 2>&1
+          adb logcat -b events -d -v threadtime > "$OUT/events-after-monkey.txt" 2>&1
+          adb shell dumpsys activity exit-info "$PKG" > "$OUT/exit-info-after-monkey.txt" 2>&1
+          adb shell dumpsys package "$PKG" > "$OUT/package-after.txt" 2>&1
+          adb exec-out screencap -p > "$OUT/screen.png" 2>/dev/null
+          printf 'am_pid=%s\nmonkey_pid=%s\n' "$(cat "$OUT/pid-after-am.txt")" "$(cat "$OUT/pid-after-monkey.txt")" | tee "$OUT/summary.txt"
+          exit 0
+
+      - name: Upload API 35 launch diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: productshot-block11-api35-launch-diagnostics-v2
+          path: ${{ runner.temp }}/api35-launch-diag2/*
+          if-no-files-found: warn
+          retention-days: 7
