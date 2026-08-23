@@ -1,36 +1,50 @@
 # ProAim
 
-**Current stable release: ProAim v26.7 — PROAIM-ULTIMATE-X50**
+> Evidence-driven Windows 11 performance and latency diagnostics for competitive gaming.
 
-ProAim is a native Windows 11 performance, latency and diagnostics utility built in Go for competitive gaming workflows, especially CS2 and VALORANT.
+| | |
+|---|---|
+| **Status** | Stable · **v26.7 — PROAIM-ULTIMATE-X50** |
+| **Platform** | Windows 11 x64 |
+| **Implementation** | Go/amd64 · native Win32 GUI · CGO disabled |
+| **Focus** | Latency · frame pacing · input feel · network · hardware diagnostics |
 
-## Current direction
+## Overview
 
-V26.7 moves the project beyond tweak packs. The application imports a Runtime Validator report, builds a local USER-PC baseline, ranks the most likely bottleneck, recommends what to fix first, and records controlled experiments with confidence and rollback evidence.
+ProAim is a native Windows utility built for competitive gaming workflows, especially **CS2** and **VALORANT**. Instead of applying generic “gaming tweaks”, it builds a local baseline, ranks likely bottlenecks and turns changes into controlled experiments with measurable results and rollback evidence.
 
-The core loop is:
+The core workflow is:
 
-`Validator ZIP -> USER-PC BASELINE -> diagnosis -> controlled A/B test -> regression gate -> KEEP/ROLLBACK -> repeated game profile`
+`Validator report → local baseline → diagnosis → controlled A/B test → regression gate → keep / rollback`
 
-## Current capabilities
+## What it demonstrates
 
-- Input Feel analysis across Raw Input, USB/RF, polling, DPC/ISR, frame pacing, GPU state, display and network evidence.
-- PresentMon-based FPS, 1% low, 0.1% low, P95/P99 and repeated cap experiments.
-- Ethernet/Wi-Fi path, jitter, loss, loaded latency, bufferbloat and controlled NIC A/B.
-- NVIDIA latency guidance without undocumented/private NVAPI profile writes.
-- CPU/Power experiments with owned temporary plans, repeated samples and exact rollback.
-- Driver Lifecycle view: Validator BEFORE -> NOW -> official dated reference, followed by re-testing instead of assuming newer is faster.
-- WHY MOUSE FEELS BAD? root-cause ranking and WHAT SHOULD I FIX FIRST? prioritization.
-- Local experiment/evidence tree with no automatic telemetry upload.
+- root-cause ranking across input, USB/RF, DPC/ISR, frame pacing, GPU state, display and network evidence;
+- PresentMon-based FPS, 1% low, 0.1% low, P95/P99 and repeated frame-cap experiments;
+- Ethernet/Wi-Fi path analysis, jitter, loss, loaded latency and controlled NIC comparisons;
+- CPU/power experiments using owned temporary plans and exact rollback;
+- driver lifecycle comparison based on observed evidence rather than assuming newer is faster;
+- prioritized **“what should I fix first?”** diagnostics instead of a long list of undifferentiated tweaks;
+- local experiment history with no automatic telemetry upload.
 
-## Safety principles
+## Engineering approach
 
-ProAim does not use HPET/BCD forcing, global timer-resolution packs, REALTIME priority, generic TCP/Nagle registry packs, MouseDataQueueSize/MouseTransmitTimeout writes, blanket checksum-offload disabling, RAM cleaners, mass service disabling, Defender/Firewall disabling, process injection or automatic BIOS writes.
+The project deliberately avoids common high-risk optimization patterns such as forced HPET/BCD changes, blanket service disabling, RAM cleaners, REALTIME priority, generic TCP registry packs, Defender/Firewall disabling, process injection and automatic BIOS writes.
 
-Experimental changes require snapshot, repeated evidence, regression checks and rollback.
+Experimental changes are expected to have:
+
+1. a baseline;
+2. a snapshot or reversible state;
+3. repeated measurements;
+4. a regression check;
+5. an explicit keep/rollback decision.
+
+## Why this project matters
+
+ProAim is less about “tweaking Windows” and more about building a **diagnostic decision system**: collect evidence, isolate a likely cause, change one controlled variable and verify whether the result is actually better.
 
 ## Release target
 
-Windows 11 x64 · Go/amd64 · CGO disabled · native Win32 GUI · STABLE channel.
+**Windows 11 x64 · stable channel**
 
-Detailed release documentation is kept under [`projects/proaim/`](./proaim/README.md).
+Detailed release and engineering documentation lives under **[`projects/proaim/`](./proaim/README.md)**.
