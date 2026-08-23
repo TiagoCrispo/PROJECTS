@@ -13,7 +13,7 @@ bash "$ROOT/projects/ProductShot/block8/run_v1_final_ci_block20.sh"
 
 # Freeze/audit transformations only; no feature work is allowed here.
 APPLIER21="$ROOT/projects/ProductShot/block8/block21_apply.py"
-test "$(git -C "$ROOT" hash-object "$APPLIER21")" = "dbc50a52436ddfeefa2b00f1b474dca7fb96eb79"
+test "$(git -C "$ROOT" hash-object "$APPLIER21")" = "e1811d72e5c9d47c50432876fc692f1ad74095db"
 python3 "$APPLIER21" "$SRC"
 
 cd "$SRC"
