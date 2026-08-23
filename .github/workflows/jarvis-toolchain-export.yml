@@ -1,0 +1,47 @@
+name: JARVIS Android Toolchain Export
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export-toolchain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install exact SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-37" "build-tools;36.0.0"
+
+      - name: Assemble minimal toolchain artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/jarvis-android-toolchain"
+          mkdir -p "$ROOT/platform" "$ROOT/build-tools"
+          cp "$ANDROID_SDK_ROOT/platforms/android-37/android.jar" "$ROOT/platform/android.jar"
+          cp -a "$ANDROID_SDK_ROOT/build-tools/36.0.0/." "$ROOT/build-tools/"
+          sha256sum "$ROOT/platform/android.jar" > "$ROOT/SHA256SUMS.txt"
+          find "$ROOT/build-tools" -maxdepth 1 -type f -print0 | sort -z | xargs -0 sha256sum >> "$ROOT/SHA256SUMS.txt"
+          test -x "$ROOT/build-tools/aapt2"
+          test -x "$ROOT/build-tools/zipalign"
+          test -f "$ROOT/build-tools/d8"
+          test -f "$ROOT/build-tools/apksigner"
+
+      - name: Upload toolchain
+        uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-android-toolchain-api37-bt36
+          path: ${{ runner.temp }}/jarvis-android-toolchain
+          if-no-files-found: error
+          retention-days: 1
