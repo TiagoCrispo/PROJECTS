@@ -6,6 +6,11 @@ on:
     paths:
       - "projects/ProductShot/v101/productshot-v1.0.1.patch.gz.b64"
       - ".github/workflows/productshot-v101-hotfix.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "projects/ProductShot/v101/productshot-v1.0.1.patch.gz.b64"
+      - ".github/workflows/productshot-v101-hotfix.yml"
   workflow_dispatch:
 
 permissions:
