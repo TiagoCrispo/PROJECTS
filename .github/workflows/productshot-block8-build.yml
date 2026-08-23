@@ -91,7 +91,9 @@ jobs:
             printf 'Unexpected Block 13 chunk set.\nExpected: %s\nActual: %s\n' "${expected[*]}" "${actual[*]}" >&2
             exit 1
           fi
-          cat "${expected[@]}" | base64 -d | gzip -d > "$RUNNER_TEMP/block13_apply.py"
+          echo "b8c1c2ef975acb585c6f0c3f5544c21bfa3d61e0b14dd636c23b2579f026f519  block13gz.b64.00" | sha256sum -c -
+          echo "e093a72484d77b800ccda11b28e308a231205f278c30125af6f96c57489b37a5  block13gz.b64.01" | sha256sum -c -
+          python3 -c 'import sys,base64,gzip; b=b"".join(open(p,"rb").read() for p in sys.argv[1:-1]); open(sys.argv[-1],"wb").write(gzip.decompress(base64.b64decode(b, validate=False)))' "${expected[@]}" "$RUNNER_TEMP/block13_apply.py"
           echo "cca3951f50f0d5ad3c857585d04a2407b2a6bb4bece128ef9c7b52fa68924ebb  $RUNNER_TEMP/block13_apply.py" | sha256sum -c -
           python3 "$RUNNER_TEMP/block13_apply.py" "$RUNNER_TEMP/productshot-src"
           cd "$RUNNER_TEMP/productshot-src"
