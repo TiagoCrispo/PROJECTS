@@ -1,15 +1,26 @@
 # Global Food
 
-Global Food is an early static website project from 2021, kept as a snapshot of my first frontend work.
+> Early static frontend project from 2021, retained as a visible starting point in the portfolio.
 
-## What it is
+| | |
+|---|---|
+| **Status** | Earlier work / archive |
+| **Year** | 2021 |
+| **Stack** | HTML · CSS |
+| **Focus** | Multi-page frontend structure · navigation · layout |
 
-- a multi-page static website;
-- built with HTML and CSS;
-- organized around food and country-themed pages;
-- includes simple navigation, layouts and image assets;
-- published originally through GitHub Pages.
+## Overview
 
-## Why I keep it
+Global Food is a small multi-page static website organized around food and country-themed content. It represents an early stage of my development work and is intentionally kept separate from the current native Android, Windows and systems-oriented projects.
 
-It is not representative of the software I build now, but it is useful as a visible starting point. The project shows the transition from basic static frontend work toward the Android, Windows, study and 3D tooling projects that make up most of my current work.
+## What it contains
+
+- static multi-page site structure;
+- HTML/CSS layouts;
+- basic navigation between themed pages;
+- image assets and simple content presentation;
+- an early GitHub Pages publishing workflow.
+
+## Why it remains in the portfolio
+
+This project is **not presented as representative of my current engineering level**. It stays here because a portfolio can also show progression: from basic frontend structure in 2021 to current work involving Android lifecycle reliability, Bluetooth LE, local persistence, Windows diagnostics, release validation and cross-device applications.
