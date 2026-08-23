@@ -39,6 +39,16 @@ jobs:
         with:
           gradle-version: "8.13"
 
+      - name: Canonicalize Block 16 Base64 transport
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('projects/ProductShot/block8/block16-v1-final.patch.gz.b64')
+          p.write_text(''.join(p.read_text().split()), encoding='utf-8')
+          PY
+          echo "316fba4d5afd10d465e0766c50738d074a6fd15409aee43f02e95a4d1e673c48  projects/ProductShot/block8/block16-v1-final.patch.gz.b64" | sha256sum -c -
+
       - name: Run final deterministic release gates
         shell: bash
         run: bash projects/ProductShot/block8/run_v1_final_ci.sh
