@@ -1,0 +1,90 @@
+name: Mendoza Meteo Native X10
+
+on:
+  push:
+    branches: [mendoza-meteo-native-v6]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  provider-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Provider contract smoke
+        run: python3 mendoza-meteo-native/tools/provider_smoke.py
+
+  official-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Official alert source smoke
+        run: python3 mendoza-meteo-native/tools/official_alert_smoke.py
+
+  release-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Static release hardening contract
+        run: python3 mendoza-meteo-native/tools/release_contract.py
+
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+      - name: Install Android SDK 36
+        run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+      - name: Verify committed Gradle Wrapper
+        run: |
+          test -x mendoza-meteo-native/gradlew
+          grep -F 'gradle-9.5.0-bin.zip' mendoza-meteo-native/gradle/wrapper/gradle-wrapper.properties
+          grep -F 'distributionSha256Sum=553c78f50dafcd54d65b9a444649057857469edf836431389695608536d6b746' mendoza-meteo-native/gradle/wrapper/gradle-wrapper.properties
+          (cd mendoza-meteo-native && ./gradlew --version)
+      - name: Unit tests, lint and warning-clean builds
+        run: (cd mendoza-meteo-native && ./gradlew clean testDebugUnitTest lintRelease assembleDebug assembleRelease --stacktrace --warning-mode fail)
+      - name: Inspect APK outputs
+        run: |
+          RELEASE_APK=mendoza-meteo-native/app/build/outputs/apk/release/app-release-unsigned.apk
+          DEBUG_APK=mendoza-meteo-native/app/build/outputs/apk/debug/app-debug.apk
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          ZIPALIGN="$ANDROID_HOME/build-tools/36.0.0/zipalign"
+
+          "$ZIPALIGN" -c -p -v 4 "$RELEASE_APK"
+          RELEASE_BADGING="$($AAPT dump badging "$RELEASE_APK")"
+          echo "$RELEASE_BADGING" | grep -E "package:|sdkVersion:|targetSdkVersion:"
+          echo "$RELEASE_BADGING" | grep "versionCode='68'"
+          echo "$RELEASE_BADGING" | grep "versionName='6.8-native-dev'"
+          "$AAPT" dump permissions "$RELEASE_APK" | grep "android.permission.POST_NOTIFICATIONS"
+          ! "$AAPT" dump permissions "$RELEASE_APK" | grep -q "android.permission.ACCESS_BACKGROUND_LOCATION"
+          ! "$AAPT" dump permissions "$RELEASE_APK" | grep -q "android.permission.SCHEDULE_EXACT_ALARM"
+          "$AAPT" dump xmltree "$RELEASE_APK" AndroidManifest.xml | grep "com.mendozameteo.x10.LauncherActivity"
+          unzip -t "$RELEASE_APK"
+
+          "$ZIPALIGN" -c -p -v 4 "$DEBUG_APK"
+          DEBUG_BADGING="$($AAPT dump badging "$DEBUG_APK")"
+          echo "$DEBUG_BADGING" | grep "name='com.mendozameteo.x10.debug'"
+          echo "$DEBUG_BADGING" | grep "versionCode='68'"
+          echo "$DEBUG_BADGING" | grep "versionName='6.8-native-dev-debug'"
+          unzip -t "$DEBUG_APK"
+      - name: Upload installable test APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: MendozaMeteo-X10-v6.8-TEST
+          path: mendoza-meteo-native/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14

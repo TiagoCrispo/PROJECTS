@@ -1,0 +1,9 @@
+<resources>
+    <color name="app_bg">#0B0F16</color>
+    <color name="widget_bg">#121824</color>
+    <color name="widget_border">#273349</color>
+    <color name="text_primary">#F7F9FC</color>
+    <color name="text_secondary">#AEB9CB</color>
+    <color name="rain">#78B7FF</color>
+    <color name="today_bg">#1D2A40</color>
+</resources>
